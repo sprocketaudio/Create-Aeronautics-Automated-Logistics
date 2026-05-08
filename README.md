@@ -88,8 +88,10 @@ Bad routes are still bad routes. If the ship hits something, loses its route con
 
 ## Disclaimer
 
-This is an unofficial Create Aeronautics addon and is not affiliated with or endorsed by the Create or Create Aeronautics teams.
+This is an unofficial Create Aeronautics add-on and is not affiliated with, endorsed by, or officially supported by the Create or Create Aeronautics teams.
 
-Some UI elements are styled to match Create's schedule interface. Create and Create Aeronautics belong to their respective authors.
+Some UI elements are styled to match Create’s schedule interface. Create, Create Aeronautics, and related projects belong to their respective authors.
 
-Requires Create Aeronautics and Create.
+Requires Create and Create Aeronautics.
+
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for third-party notices, credits, and compatibility information.
