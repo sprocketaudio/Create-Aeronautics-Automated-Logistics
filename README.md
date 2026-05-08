@@ -1,8 +1,8 @@
-# Create Aeronautics: Automated Logistics
+# Create Aeronautics: Logistics
 
 This mod is in a very early development state.
 
-Automated Logistics is an experimental Create Aeronautics add-on that adds early autonomous route recording and playback for airships.
+Logistics is an experimental Create Aeronautics add-on that adds early autonomous route recording and playback for airships.
 
 At this stage, the mod **mimics ship flight along recorded routes** rather than fully piloting the ship through real player-style controls. The long-term goal is deeper logistics automation, but this first version is focused on proving the core idea: record a journey once, then let the ship repeat it.
 
