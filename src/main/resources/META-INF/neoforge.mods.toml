@@ -89,10 +89,18 @@ config="${mod_id}.mixins.json"
     side="BOTH"
 
 [[dependencies.${mod_id}]]
-    modId="aeronautics"
+    modId="create"
     type="required"
-    reason="Automated Logistics targets Create Aeronautics airships for the MVP."
-    versionRange="${aeronautics_version_range}"
+    reason="Automated Logistics uses Create schedule UI conventions and logistics types."
+    versionRange="${create_version_range}"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="aeronautics_bundled"
+    type="required"
+    reason="Automated Logistics targets Create Aeronautics airships from the bundled Create Aeronautics distribution."
+    versionRange="${aeronautics_bundled_version_range}"
     ordering="AFTER"
     side="BOTH"
 
@@ -101,6 +109,14 @@ config="${mod_id}.mixins.json"
     type="required"
     reason="Automated Logistics resolves and controls assembled Aeronautics ships through Sable sublevels."
     versionRange="${sable_version_range}"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="simulated"
+    type="required"
+    reason="Automated Logistics uses Create Simulated docking connectors for docking-aware waits and cargo inactivity checks."
+    versionRange="${simulated_version_range}"
     ordering="AFTER"
     side="BOTH"
 

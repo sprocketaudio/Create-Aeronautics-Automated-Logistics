@@ -13,7 +13,8 @@ public final class CreateAeronauticsCompat {
     }
 
     public static boolean isAeronauticsLoaded() {
-        return ModList.get().isLoaded(AERONAUTICS_MOD_ID);
+        return ModList.get().isLoaded(AERONAUTICS_MOD_ID)
+                || ModList.get().isLoaded(AERONAUTICS_BUNDLED_MOD_ID);
     }
 
     public static String describeLoadedState() {

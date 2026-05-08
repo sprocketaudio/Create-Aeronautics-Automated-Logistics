@@ -198,8 +198,10 @@ tasks.withType(ProcessResources).configureEach {
             mod_name               : mod_name,
             mod_license            : mod_license,
             mod_version            : mod_version,
-            aeronautics_version_range: aeronautics_version_range,
+            aeronautics_bundled_version_range: aeronautics_bundled_version_range,
+            create_version_range  : create_version_range,
             sable_version_range    : sable_version_range,
+            simulated_version_range: simulated_version_range,
     ]
     inputs.properties replaceProperties
 
