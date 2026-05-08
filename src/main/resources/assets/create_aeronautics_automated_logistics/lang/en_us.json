@@ -4,6 +4,7 @@
   "item.create_aeronautics_automated_logistics.airship_station": "Airship Station",
   "item.create_aeronautics_automated_logistics.ship_transponder": "Ship Transponder",
   "item.create_aeronautics_automated_logistics.airship_schedule": "Airship Schedule",
+  "itemGroup.create_aeronautics_automated_logistics": "Create Aeronautics: Logistics",
   "message.create_aeronautics_automated_logistics.recording.started": "Route recording started.",
   "message.create_aeronautics_automated_logistics.recording.saved": "Route recording saved with %s points.",
   "message.create_aeronautics_automated_logistics.recording.failed": "Route recording failed: %s.",
