@@ -51,6 +51,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.service.Recordin
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerRef;
 
 public class AirshipStationBlockEntity extends BlockEntity implements MenuProvider {
+    private static final int REFRESH_INTERVAL_TICKS = 40;
     private static final String DATA_VERSION = "dataVersion";
     private static final String STATUS = "status";
     private static final String STATION_ID = "stationId";
@@ -94,9 +95,22 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         super(ModBlockEntities.AIRSHIP_STATION.get(), pos, blockState);
     }
 
+    public static void serverTick(Level level, BlockPos pos, BlockState state, AirshipStationBlockEntity station) {
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (level.getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
+            station.refreshGroundDockLink(serverLevel);
+        }
+    }
+
     @Override
     public void onLoad() {
         super.onLoad();
+        if (level != null && !level.isClientSide && dockOutputActive) {
+            dockOutputActive = false;
+            setChanged();
+        }
         syncPoweredBlockState();
         registerLoadedSnapshot();
     }
@@ -193,24 +207,60 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     }
 
     public DockDiscoveryResult refreshGroundDockLink(ServerLevel level) {
-        DockDiscoveryResult result = groundDockPos
-                .filter(pos -> DockingConnectorDiscovery.isDock(level, pos))
-                .map(DockDiscoveryResult::linked)
-                .orElseGet(() -> DockingConnectorDiscovery.discoverAround(
-                        level,
-                        worldPosition,
-                        AutomatedLogisticsConfig.STATION_DOCK_SEARCH_RADIUS.get()
-                ));
+        DockDiscoveryResult result = validateGroundDockLink(level);
         groundDockStatus = result.status() == DockLinkStatus.LINKED && result.dockPos().isEmpty()
                 ? DockLinkStatus.UNKNOWN
                 : result.status();
         if (result.status() == DockLinkStatus.LINKED) {
             groundDockPos = result.dockPos();
-        } else if (result.status() == DockLinkStatus.MISSING || result.status() == DockLinkStatus.AMBIGUOUS) {
+        } else {
             groundDockPos = Optional.empty();
         }
         setChanged();
         return result;
+    }
+
+    public DockDiscoveryResult setGroundDockLink(ServerLevel level, BlockPos dockPos) {
+        if (!DockingConnectorDiscovery.isDock(level, dockPos)) {
+            groundDockPos = Optional.empty();
+            groundDockStatus = DockLinkStatus.INVALID;
+            setChanged();
+            return DockDiscoveryResult.invalid();
+        }
+        double maxDistance = AutomatedLogisticsConfig.STATION_DOCK_SEARCH_RADIUS.get();
+        double maxDistanceSqr = maxDistance * maxDistance;
+        if (worldPosition.distSqr(dockPos) > maxDistanceSqr) {
+            groundDockPos = Optional.empty();
+            groundDockStatus = DockLinkStatus.INVALID;
+            setChanged();
+            return DockDiscoveryResult.invalid();
+        }
+        groundDockPos = Optional.of(dockPos.immutable());
+        groundDockStatus = DockLinkStatus.LINKED;
+        setChanged();
+        return DockDiscoveryResult.linked(dockPos.immutable());
+    }
+
+    public void clearGroundDockLink() {
+        groundDockPos = Optional.empty();
+        groundDockStatus = DockLinkStatus.MISSING;
+        setChanged();
+    }
+
+    private DockDiscoveryResult validateGroundDockLink(ServerLevel level) {
+        if (groundDockPos.isEmpty()) {
+            return DockDiscoveryResult.missing();
+        }
+        BlockPos dockPos = groundDockPos.get();
+        if (!DockingConnectorDiscovery.isDock(level, dockPos)) {
+            return DockDiscoveryResult.missing();
+        }
+        double maxDistance = AutomatedLogisticsConfig.STATION_DOCK_SEARCH_RADIUS.get();
+        double maxDistanceSqr = maxDistance * maxDistance;
+        if (worldPosition.distSqr(dockPos) > maxDistanceSqr) {
+            return DockDiscoveryResult.invalid();
+        }
+        return DockDiscoveryResult.linked(dockPos);
     }
 
     public List<RouteSegment> routeSegments() {

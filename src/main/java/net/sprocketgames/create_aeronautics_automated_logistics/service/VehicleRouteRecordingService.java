@@ -31,11 +31,15 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitCondit
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleController;
 
-public class RiddenEntityRouteRecordingService implements RouteRecordingService {
+public class VehicleRouteRecordingService implements RouteRecordingService {
     private static final double ROTATION_SAMPLE_THRESHOLD_DEGREES = 2.0D;
     private static final int STATIONARY_SAMPLE_INTERVAL_TICKS = 40;
 
     private final Map<RouteId, ActiveRecording> activeRecordings = new HashMap<>();
+
+    public void resetRuntime() {
+        activeRecordings.clear();
+    }
 
     @Override
     public RouteOperationResult<RecordingSession> startRecording(ServerPlayer player, BlockPos stationPos, VehicleController controller) {

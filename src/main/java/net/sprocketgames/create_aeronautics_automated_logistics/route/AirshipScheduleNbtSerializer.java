@@ -16,6 +16,8 @@ public final class AirshipScheduleNbtSerializer {
     private static final String DATA_VERSION = "dataVersion";
     private static final String TITLE = "title";
     private static final String LOOP = "loop";
+    private static final String ASSIGNED_TRANSPONDER_ID = "assignedTransponderId";
+    private static final String ASSIGNED_SHIP_NAME = "assignedShipName";
     private static final String ENTRIES = "entries";
     private static final String TYPE = "type";
     private static final String TARGET_STATION_ID = "targetStationId";
@@ -32,7 +34,7 @@ public final class AirshipScheduleNbtSerializer {
     private static final String CONDITION_CARGO_OPERATOR = "conditionCargoOperator";
     private static final String CONDITION_CARGO_MEASURE = "conditionCargoMeasure";
     private static final String CONDITION_CARGO_FILTER = "conditionCargoFilter";
-    private static final int CURRENT_DATA_VERSION = 1;
+    private static final int CURRENT_DATA_VERSION = 2;
 
     private AirshipScheduleNbtSerializer() {
     }
@@ -42,6 +44,10 @@ public final class AirshipScheduleNbtSerializer {
         tag.putInt(DATA_VERSION, CURRENT_DATA_VERSION);
         tag.putString(TITLE, schedule.title());
         tag.putBoolean(LOOP, schedule.loop());
+        schedule.assignedTransponderId().ifPresent(id -> tag.putUUID(ASSIGNED_TRANSPONDER_ID, id));
+        if (!schedule.assignedShipName().isBlank()) {
+            tag.putString(ASSIGNED_SHIP_NAME, schedule.assignedShipName());
+        }
         ListTag entries = new ListTag();
         for (AirshipScheduleEntry entry : schedule.entries()) {
             entries.add(writeEntry(entry));
@@ -53,6 +59,10 @@ public final class AirshipScheduleNbtSerializer {
     public static AirshipSchedule read(CompoundTag tag) {
         String title = tag.contains(TITLE, Tag.TAG_STRING) ? tag.getString(TITLE) : "Airship Schedule";
         boolean loop = !tag.contains(LOOP, Tag.TAG_BYTE) || tag.getBoolean(LOOP);
+        Optional<UUID> assignedTransponderId = tag.hasUUID(ASSIGNED_TRANSPONDER_ID)
+                ? Optional.of(tag.getUUID(ASSIGNED_TRANSPONDER_ID))
+                : Optional.empty();
+        String assignedShipName = tag.contains(ASSIGNED_SHIP_NAME, Tag.TAG_STRING) ? tag.getString(ASSIGNED_SHIP_NAME) : "";
         List<AirshipScheduleEntry> entries = new ArrayList<>();
         if (tag.contains(ENTRIES, Tag.TAG_LIST)) {
             ListTag list = tag.getList(ENTRIES, Tag.TAG_COMPOUND);
@@ -60,7 +70,12 @@ public final class AirshipScheduleNbtSerializer {
                 readEntry(list.getCompound(i)).ifPresent(entries::add);
             }
         }
-        return new AirshipSchedule(title, loop, entries);
+        return new AirshipSchedule(title, loop, assignedTransponderId, assignedShipName, entries);
+    }
+
+    public static boolean isLegacyUnbound(CompoundTag tag) {
+        int dataVersion = tag.contains(DATA_VERSION, Tag.TAG_ANY_NUMERIC) ? tag.getInt(DATA_VERSION) : 0;
+        return dataVersion < 2 && !tag.hasUUID(ASSIGNED_TRANSPONDER_ID);
     }
 
     private static CompoundTag writeEntry(AirshipScheduleEntry entry) {

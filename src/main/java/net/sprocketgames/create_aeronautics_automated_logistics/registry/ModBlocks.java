@@ -20,6 +20,7 @@ public final class ModBlocks {
                             .mapColor(MapColor.METAL)
                             .strength(3.5F)
                             .sound(SoundType.METAL)
+                            .noOcclusion()
             )
     );
 
@@ -30,6 +31,7 @@ public final class ModBlocks {
                             .mapColor(MapColor.METAL)
                             .strength(2.0F)
                             .sound(SoundType.METAL)
+                            .noOcclusion()
             )
     );
 

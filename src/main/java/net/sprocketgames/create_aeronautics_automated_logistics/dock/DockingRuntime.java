@@ -25,7 +25,7 @@ public final class DockingRuntime {
         }
         context.station().setDockOutputActive(true);
         context.transponder().setDockOutputActive(true);
-        CreateAeronauticsAutomatedLogistics.LOGGER.info(
+        CreateAeronauticsAutomatedLogistics.debugLog(
                 "Docking wait enabled outputs: stationDock={} shipDock={} route={}",
                 context.stationDockPos().map(BlockPos::toShortString).orElse("-"),
                 context.shipDockPos().map(BlockPos::toShortString).orElse("-"),

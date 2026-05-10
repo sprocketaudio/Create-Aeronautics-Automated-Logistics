@@ -10,6 +10,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.NbtUtils;
+import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -24,6 +28,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockingRunt
 import net.sprocketgames.create_aeronautics_automated_logistics.route.FailureReason;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.Route;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteId;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteNbtSerializer;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RoutePoint;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteRotation;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStop;
@@ -33,7 +38,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleC
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerResolver;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleMotionResult;
 
-public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
+public class VehicleRoutePlaybackService implements RoutePlaybackService {
     private static final double ARRIVAL_DISTANCE = 0.5D;
     private static final double ENDPOINT_ARRIVAL_DISTANCE = 0.2D;
     private static final double ENDPOINT_SETTLE_DISTANCE = 0.65D;
@@ -45,10 +50,80 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
     private static final int ENDPOINT_SETTLE_TICKS = 40;
     private static final int MAX_STALLED_TICKS = 200;
     private static final int INITIAL_STALL_GRACE_TICKS = 60;
+    private static final int RESTORE_CATCH_TICKS = 200;
     private static final double STATIONARY_SEGMENT_DISTANCE = 0.1D;
+    private static final String ACTIVE_PLAYBACKS = "activePlaybacks";
+    private static final String ROUTE = "route";
+    private static final String STATION_POS = "stationPos";
+    private static final String JOIN_OFFSET = "joinOffset";
+    private static final String JOIN_START_ROTATION = "joinStartRotation";
+    private static final String TARGET_INDEX = "targetIndex";
+    private static final String DIRECTION = "direction";
+    private static final String SEGMENT_DURATION_TICKS = "segmentDurationTicks";
+    private static final String SEGMENT_ELAPSED_TICKS = "segmentElapsedTicks";
+    private static final String PREVIOUS_DISTANCE = "previousDistance";
+    private static final String STALLED_TICKS = "stalledTicks";
+    private static final String PLAYBACK_TICKS = "playbackTicks";
+    private static final String INITIAL_JOIN_SEGMENTS_ADVANCED = "initialJoinSegmentsAdvanced";
+    private static final String ENDPOINT_SETTLE_TICKS_TAG = "endpointSettleTicks";
+    private static final String WAITING_STOP_ID = "waitingStopId";
+    private static final String ACTIVE_DOCK_STATION_POS = "activeDockStationPos";
+    private static final String WAIT_TICKS_REMAINING = "waitTicksRemaining";
+    private static final String IDLE_WINDOW_TICKS = "idleWindowTicks";
+    private static final String DOCK_TIMEOUT_TICKS_REMAINING = "dockTimeoutTicksRemaining";
+    private static final String DOCK_IDLE_TIMEOUT_TICKS_REMAINING = "dockIdleTimeoutTicksRemaining";
+    private static final String DOCK_CARGO_TIMEOUT_TICKS_REMAINING = "dockCargoTimeoutTicksRemaining";
+    private static final String DOCK_LOCKED = "dockLocked";
+    private static final String RESTORE_CATCH_TICKS_REMAINING = "restoreCatchTicksRemaining";
+    private static final String COMPLETED = "completed";
 
     private final Map<RouteId, ActivePlayback> activePlaybacks = new HashMap<>();
+    private final Map<RouteId, CompoundTag> pendingRuntimePlaybacks = new HashMap<>();
+    private final Map<RouteId, Integer> pendingRuntimeRestoreCooldowns = new HashMap<>();
     private final Set<UUID> activeVisualShipIds = new HashSet<>();
+
+    public void resetRuntime() {
+        activePlaybacks.clear();
+        pendingRuntimePlaybacks.clear();
+        pendingRuntimeRestoreCooldowns.clear();
+        activeVisualShipIds.clear();
+    }
+
+    public CompoundTag saveRuntime() {
+        CompoundTag tag = new CompoundTag();
+        ListTag playbacks = new ListTag();
+        for (ActivePlayback activePlayback : activePlaybacks.values()) {
+            playbacks.add(writeActivePlayback(activePlayback));
+        }
+        for (CompoundTag pendingTag : pendingRuntimePlaybacks.values()) {
+            playbacks.add(pendingTag.copy());
+        }
+        tag.put(ACTIVE_PLAYBACKS, playbacks);
+        return tag;
+    }
+
+    public void loadRuntime(MinecraftServer server, CompoundTag tag) {
+        resetRuntime();
+        if (tag == null || !tag.contains(ACTIVE_PLAYBACKS, Tag.TAG_LIST)) {
+            CreateAeronauticsAutomatedLogistics.debugLog("Loaded route playback runtime: no saved active playbacks");
+            return;
+        }
+
+        ListTag playbacks = tag.getList(ACTIVE_PLAYBACKS, Tag.TAG_COMPOUND);
+        for (int i = 0; i < playbacks.size(); i++) {
+            CompoundTag playbackTag = playbacks.getCompound(i);
+            routeIdFromRuntimeTag(playbackTag)
+                    .ifPresent(routeId -> {
+                        pendingRuntimePlaybacks.put(routeId, playbackTag.copy());
+                        pendingRuntimeRestoreCooldowns.put(routeId, 0);
+                    });
+        }
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Loaded route playback runtime: {} pending active playback(s)",
+                pendingRuntimePlaybacks.size()
+        );
+        restorePendingRuntime(server);
+    }
 
     @Override
     public PlaybackOperationResult<RouteId> startPlayback(ServerLevel level, BlockPos stationPos, Route route) {
@@ -97,6 +172,8 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
         Objects.requireNonNull(routeId, "routeId");
         Objects.requireNonNull(reason, "reason");
 
+        pendingRuntimePlaybacks.remove(routeId);
+        pendingRuntimeRestoreCooldowns.remove(routeId);
         ActivePlayback activePlayback = activePlaybacks.remove(routeId);
         if (activePlayback == null) {
             return;
@@ -134,6 +211,7 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
     }
 
     public void tickAll(MinecraftServer server) {
+        restorePendingRuntime(server);
         for (ServerLevel level : server.getAllLevels()) {
             tickPlayback(level);
         }
@@ -143,22 +221,50 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
         return activePlaybacks.containsKey(routeId);
     }
 
+    public boolean isPending(RouteId routeId) {
+        return pendingRuntimePlaybacks.containsKey(routeId);
+    }
+
     public Set<UUID> activeVisualShipIds() {
         return Set.copyOf(activeVisualShipIds);
     }
 
     private PlaybackFailure tickOne(ServerLevel level, ActivePlayback activePlayback) {
         Optional<AirshipStationBlockEntity> station = stationAt(level, activePlayback.stationPos());
-        if (station.isEmpty()) {
+        if (station.isEmpty() && !activePlayback.isRestoring()) {
             return PlaybackFailure.STATION_MISSING;
         }
 
         VehicleController controller = activePlayback.controller();
         if (!controller.isLoaded(level)) {
+            if (activePlayback.tickRestoreGrace()) {
+                return null;
+            }
             return PlaybackFailure.VEHICLE_UNLOADED;
         }
         if (!controller.isAssembled()) {
+            if (activePlayback.tickRestoreGrace()) {
+                return null;
+            }
             return PlaybackFailure.VEHICLE_MISSING;
+        }
+        if (activePlayback.isRestoring()) {
+            Vec3 catchPosition = activePlayback.guidancePosition();
+            VehicleMotionResult motionResult = controller.moveToward(
+                    level,
+                    catchPosition,
+                    activePlayback.guidanceRotation(),
+                    AutomatedLogisticsConfig.MAX_SPEED_MULTIPLIER.get(),
+                    0.0D
+            );
+            activePlayback.tickRestoreGrace();
+            if (motionResult.successful()) {
+                activePlayback.resetProgress(controller.position().distanceTo(catchPosition));
+            }
+            return null;
+        }
+        if (station.isEmpty()) {
+            return PlaybackFailure.STATION_MISSING;
         }
         if (activePlayback.isWaiting()) {
             return tickWaiting(level, station.get(), activePlayback, controller);
@@ -192,7 +298,7 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
             return null;
         }
         if (distanceToTarget <= arrivalDistance && (!activePlayback.requiresRotationAlignmentForArrival() || rotationAligned)) {
-            CreateAeronauticsAutomatedLogistics.LOGGER.info(
+            CreateAeronauticsAutomatedLogistics.debugLog(
                     "Playback {} reached point {} at distance {} position={} target={}",
                     activePlayback.route().id().value(),
                     activePlayback.targetIndex(),
@@ -218,7 +324,7 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
             activePlayback.resetProgress(distanceToTarget);
         } else if (activePlayback.shouldSettleEndpoint(distanceToTarget, rotationAligned)) {
             if (activePlayback.tickEndpointSettle()) {
-                CreateAeronauticsAutomatedLogistics.LOGGER.info(
+                CreateAeronauticsAutomatedLogistics.debugLog(
                         "Playback {} accepted endpoint {} after {} settle ticks at distance {} position={} target={}",
                         activePlayback.route().id().value(),
                         activePlayback.targetIndex(),
@@ -267,7 +373,7 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
 
         double targetSpeed = activePlayback.targetSpeedBlocksPerTick();
         if (activePlayback.shouldLogProgress()) {
-            CreateAeronauticsAutomatedLogistics.LOGGER.info(
+            CreateAeronauticsAutomatedLogistics.debugLog(
                     "Playback {} tick {} point {} distance={} targetSpeed={} position={} target={}",
                     activePlayback.route().id().value(),
                     activePlayback.playbackTicks(),
@@ -315,14 +421,14 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
                 if (activePlayback.isIdleWait()) {
                     DockingRuntime.transferSnapshot(level, dockingStation.get(), activePlayback.route())
                             .ifPresent(activePlayback::dockTransferSnapshot);
-                    CreateAeronauticsAutomatedLogistics.LOGGER.info(
+                    CreateAeronauticsAutomatedLogistics.debugLog(
                             "Playback {} docked at stop {} and will wait for {} idle ticks",
                             activePlayback.route().id().value(),
                             activePlayback.waitingStop().map(RouteStop::name).orElse("unknown"),
                             activePlayback.waitTicksRemaining()
                     );
                 } else if (activePlayback.isCargoThresholdWait()) {
-                    CreateAeronauticsAutomatedLogistics.LOGGER.info(
+                    CreateAeronauticsAutomatedLogistics.debugLog(
                             "Playback {} docked at stop {} and will wait for cargo threshold {}",
                             activePlayback.route().id().value(),
                             activePlayback.waitingStop().map(RouteStop::name).orElse("unknown"),
@@ -332,7 +438,7 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
                                     .orElse(0)
                     );
                 } else {
-                    CreateAeronauticsAutomatedLogistics.LOGGER.info(
+                    CreateAeronauticsAutomatedLogistics.debugLog(
                             "Playback {} docked at stop {} and will hold for {} ticks",
                             activePlayback.route().id().value(),
                             activePlayback.waitingStop().map(RouteStop::name).orElse("unknown"),
@@ -362,7 +468,7 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
                 return PlaybackFailure.STATION_MISSING;
             }
             if (tickDockIdleWait(level, dockingStation.get(), activePlayback)) {
-                CreateAeronauticsAutomatedLogistics.LOGGER.info(
+                CreateAeronauticsAutomatedLogistics.debugLog(
                         "Playback {} finished dock idle wait at stop {}",
                         activePlayback.route().id().value(),
                         activePlayback.waitingStop().map(RouteStop::name).orElse("unknown")
@@ -378,7 +484,7 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
                 return PlaybackFailure.STATION_MISSING;
             }
             if (tickDockCargoThresholdWait(level, dockingStation.get(), activePlayback)) {
-                CreateAeronauticsAutomatedLogistics.LOGGER.info(
+                CreateAeronauticsAutomatedLogistics.debugLog(
                         "Playback {} finished dock cargo threshold wait at stop {}",
                         activePlayback.route().id().value(),
                         activePlayback.waitingStop().map(RouteStop::name).orElse("unknown")
@@ -389,7 +495,7 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
         }
 
         if (activePlayback.tickWait()) {
-            CreateAeronauticsAutomatedLogistics.LOGGER.info(
+            CreateAeronauticsAutomatedLogistics.debugLog(
                     "Playback {} finished waiting at stop {}",
                     activePlayback.route().id().value(),
                     activePlayback.waitingStop().map(RouteStop::name).orElse("unknown")
@@ -478,7 +584,7 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
             double distanceToTarget
     ) {
         station.waitPlayback(activePlayback.route());
-        CreateAeronauticsAutomatedLogistics.LOGGER.info(
+        CreateAeronauticsAutomatedLogistics.debugLog(
                 "Playback {} waiting at stop {} for {} ticks",
                 activePlayback.route().id().value(),
                 activePlayback.waitingStop().map(RouteStop::name).orElse("unknown"),
@@ -570,6 +676,13 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
     }
 
     private void fail(ServerLevel level, ActivePlayback activePlayback, PlaybackFailure failure) {
+        CreateAeronauticsAutomatedLogistics.LOGGER.warn(
+                "Route playback {} failed with {} at point {} after {} tick(s)",
+                activePlayback.route().id().value(),
+                failure,
+                activePlayback.targetIndex(),
+                activePlayback.playbackTicks()
+        );
         setVisualsActive(level, activePlayback, false);
         activePlayback.controller().stop(level);
         stationAt(level, activePlayback.stationPos()).ifPresent(station -> {
@@ -639,6 +752,196 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
         });
     }
 
+    private void restorePendingRuntime(MinecraftServer server) {
+        Iterator<Map.Entry<RouteId, CompoundTag>> iterator = pendingRuntimePlaybacks.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<RouteId, CompoundTag> entry = iterator.next();
+            if (activePlaybacks.containsKey(entry.getKey())) {
+                iterator.remove();
+                pendingRuntimeRestoreCooldowns.remove(entry.getKey());
+                continue;
+            }
+            int cooldown = pendingRuntimeRestoreCooldowns.getOrDefault(entry.getKey(), 0);
+            if (cooldown > 0) {
+                pendingRuntimeRestoreCooldowns.put(entry.getKey(), cooldown - 1);
+                continue;
+            }
+            Optional<ActivePlayback> activePlayback = readActivePlayback(server, entry.getValue());
+            if (activePlayback.isEmpty()) {
+                CreateAeronauticsAutomatedLogistics.debugLog(
+                        "Route playback {} is still pending restore; controller or level is not ready",
+                        entry.getKey().value()
+                );
+                pendingRuntimeRestoreCooldowns.put(entry.getKey(), 20);
+                continue;
+            }
+            ActivePlayback restored = activePlayback.get();
+            activePlaybacks.put(restored.route().id(), restored);
+            iterator.remove();
+            pendingRuntimeRestoreCooldowns.remove(entry.getKey());
+            ServerLevel level = server.getLevel(restored.route().dimension());
+            if (level == null) {
+                continue;
+            }
+            restored.beginRestoreCatch();
+            restored.controller().stop(level);
+            stationAt(level, restored.stationPos()).ifPresent(station -> {
+                if (restored.isWaiting()) {
+                    station.waitPlayback(restored.route());
+                    if (restored.isDockingWait()) {
+                        Optional<AirshipStationBlockEntity> dockingStation = dockingStation(level, station, restored);
+                        dockingStation.ifPresent(docking -> DockingRuntime.beginDockingWait(level, docking, restored.route()));
+                    }
+                } else {
+                    station.startPlayback(restored.route());
+                }
+            });
+            setVisualsActive(level, restored, true);
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Restored active route playback {} after server reload",
+                    restored.route().id().value()
+            );
+        }
+    }
+
+    private CompoundTag writeActivePlayback(ActivePlayback activePlayback) {
+        CompoundTag tag = new CompoundTag();
+        tag.put(ROUTE, RouteNbtSerializer.write(activePlayback.route()));
+        tag.put(STATION_POS, NbtUtils.writeBlockPos(activePlayback.stationPos()));
+        tag.put(JOIN_OFFSET, writeVec3(activePlayback.joinOffset()));
+        activePlayback.joinStartRotation().ifPresent(rotation -> tag.put(JOIN_START_ROTATION, writeRotation(rotation)));
+        tag.putInt(TARGET_INDEX, activePlayback.targetIndex());
+        tag.putInt(DIRECTION, activePlayback.direction());
+        tag.putLong(SEGMENT_DURATION_TICKS, activePlayback.segmentDurationTicks());
+        tag.putInt(SEGMENT_ELAPSED_TICKS, activePlayback.segmentElapsedTicks());
+        tag.putDouble(PREVIOUS_DISTANCE, activePlayback.previousDistance());
+        tag.putInt(STALLED_TICKS, activePlayback.stalledTicks());
+        tag.putInt(PLAYBACK_TICKS, activePlayback.playbackTicks());
+        tag.putInt(INITIAL_JOIN_SEGMENTS_ADVANCED, activePlayback.initialJoinSegmentsAdvanced());
+        tag.putInt(ENDPOINT_SETTLE_TICKS_TAG, activePlayback.endpointSettleTicks());
+        activePlayback.waitingStop().ifPresent(stop -> tag.putUUID(WAITING_STOP_ID, stop.id()));
+        activePlayback.activeDockStationPos().ifPresent(pos -> tag.put(ACTIVE_DOCK_STATION_POS, NbtUtils.writeBlockPos(pos)));
+        tag.putInt(WAIT_TICKS_REMAINING, activePlayback.waitTicksRemaining());
+        tag.putInt(IDLE_WINDOW_TICKS, activePlayback.idleWindowTicks());
+        tag.putInt(DOCK_TIMEOUT_TICKS_REMAINING, activePlayback.dockTimeoutTicksRemaining());
+        tag.putInt(DOCK_IDLE_TIMEOUT_TICKS_REMAINING, activePlayback.dockIdleTimeoutTicksRemaining());
+        tag.putInt(DOCK_CARGO_TIMEOUT_TICKS_REMAINING, activePlayback.dockCargoTimeoutTicksRemaining());
+        tag.putBoolean(DOCK_LOCKED, activePlayback.dockLocked());
+        tag.putInt(RESTORE_CATCH_TICKS_REMAINING, activePlayback.restoreCatchTicksRemaining());
+        tag.putBoolean(COMPLETED, activePlayback.completed());
+        return tag;
+    }
+
+    private Optional<ActivePlayback> readActivePlayback(MinecraftServer server, CompoundTag tag) {
+        if (!tag.contains(ROUTE, Tag.TAG_COMPOUND) || !tag.contains(STATION_POS)) {
+            return Optional.empty();
+        }
+
+        Optional<Route> route = RouteNbtSerializer.read(tag.getCompound(ROUTE));
+        if (route.isEmpty()) {
+            return Optional.empty();
+        }
+        ServerLevel level = server.getLevel(route.get().dimension());
+        if (level == null) {
+            return Optional.empty();
+        }
+        Optional<VehicleController> controller = VehicleControllerResolver.resolve(level, route.get().linkedController());
+        if (controller.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<BlockPos> stationPos = NbtUtils.readBlockPos(tag, STATION_POS);
+        if (stationPos.isEmpty()) {
+            return Optional.empty();
+        }
+
+        Vec3 joinOffset = readVec3(tag.getCompound(JOIN_OFFSET));
+        Optional<RouteRotation> joinStartRotation = tag.contains(JOIN_START_ROTATION, Tag.TAG_COMPOUND)
+                ? readRotation(tag.getCompound(JOIN_START_ROTATION))
+                : Optional.empty();
+        int targetIndex = tag.getInt(TARGET_INDEX);
+        if (targetIndex < 0 || targetIndex >= route.get().points().size()) {
+            return Optional.empty();
+        }
+        int direction = tag.getInt(DIRECTION);
+        if (direction != -1 && direction != 1) {
+            return Optional.empty();
+        }
+        Optional<RouteStop> waitingStop = tag.hasUUID(WAITING_STOP_ID)
+                ? route.get().stops().stream().filter(stop -> stop.id().equals(tag.getUUID(WAITING_STOP_ID))).findFirst()
+                : Optional.empty();
+        Optional<BlockPos> activeDockStationPos = tag.contains(ACTIVE_DOCK_STATION_POS)
+                ? NbtUtils.readBlockPos(tag, ACTIVE_DOCK_STATION_POS).map(BlockPos::immutable)
+                : Optional.empty();
+
+        return Optional.of(ActivePlayback.restore(
+                route.get(),
+                stationPos.get().immutable(),
+                controller.get(),
+                joinOffset,
+                joinStartRotation,
+                targetIndex,
+                direction,
+                tag.contains(SEGMENT_DURATION_TICKS, Tag.TAG_ANY_NUMERIC) ? Math.max(1L, tag.getLong(SEGMENT_DURATION_TICKS)) : 1L,
+                Math.max(0, tag.getInt(SEGMENT_ELAPSED_TICKS)),
+                tag.contains(PREVIOUS_DISTANCE, Tag.TAG_ANY_NUMERIC) ? tag.getDouble(PREVIOUS_DISTANCE) : Double.MAX_VALUE,
+                Math.max(0, tag.getInt(STALLED_TICKS)),
+                Math.max(0, tag.getInt(PLAYBACK_TICKS)),
+                Math.max(0, tag.getInt(INITIAL_JOIN_SEGMENTS_ADVANCED)),
+                Math.max(0, tag.getInt(ENDPOINT_SETTLE_TICKS_TAG)),
+                waitingStop,
+                activeDockStationPos,
+                Math.max(0, tag.getInt(WAIT_TICKS_REMAINING)),
+                Math.max(0, tag.getInt(IDLE_WINDOW_TICKS)),
+                Math.max(0, tag.getInt(DOCK_TIMEOUT_TICKS_REMAINING)),
+                Math.max(0, tag.getInt(DOCK_IDLE_TIMEOUT_TICKS_REMAINING)),
+                Math.max(0, tag.getInt(DOCK_CARGO_TIMEOUT_TICKS_REMAINING)),
+                tag.getBoolean(DOCK_LOCKED),
+                Math.max(0, tag.getInt(RESTORE_CATCH_TICKS_REMAINING)),
+                tag.getBoolean(COMPLETED)
+        ));
+    }
+
+    private Optional<RouteId> routeIdFromRuntimeTag(CompoundTag tag) {
+        if (!tag.contains(ROUTE, Tag.TAG_COMPOUND)) {
+            return Optional.empty();
+        }
+        return RouteNbtSerializer.read(tag.getCompound(ROUTE)).map(Route::id);
+    }
+
+    private CompoundTag writeVec3(Vec3 vec3) {
+        CompoundTag tag = new CompoundTag();
+        tag.putDouble("x", vec3.x);
+        tag.putDouble("y", vec3.y);
+        tag.putDouble("z", vec3.z);
+        return tag;
+    }
+
+    private Vec3 readVec3(CompoundTag tag) {
+        return new Vec3(tag.getDouble("x"), tag.getDouble("y"), tag.getDouble("z"));
+    }
+
+    private CompoundTag writeRotation(RouteRotation rotation) {
+        CompoundTag tag = new CompoundTag();
+        tag.putDouble("x", rotation.x());
+        tag.putDouble("y", rotation.y());
+        tag.putDouble("z", rotation.z());
+        tag.putDouble("w", rotation.w());
+        return tag;
+    }
+
+    private Optional<RouteRotation> readRotation(CompoundTag tag) {
+        try {
+            return Optional.of(new RouteRotation(
+                    tag.getDouble("x"),
+                    tag.getDouble("y"),
+                    tag.getDouble("z"),
+                    tag.getDouble("w")
+            ));
+        } catch (IllegalArgumentException ignored) {
+            return Optional.empty();
+        }
+    }
+
     private static final class ActivePlayback {
         private final Route route;
         private final BlockPos stationPos;
@@ -662,6 +965,7 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
         private int dockIdleTimeoutTicksRemaining;
         private int dockCargoTimeoutTicksRemaining;
         private boolean dockLocked;
+        private int restoreCatchTicksRemaining;
         private Optional<DockTransferSnapshot> dockTransferSnapshot = Optional.empty();
         private boolean completed;
 
@@ -704,6 +1008,62 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
             );
         }
 
+        private static ActivePlayback restore(
+                Route route,
+                BlockPos stationPos,
+                VehicleController controller,
+                Vec3 joinOffset,
+                Optional<RouteRotation> joinStartRotation,
+                int targetIndex,
+                int direction,
+                long segmentDurationTicks,
+                int segmentElapsedTicks,
+                double previousDistance,
+                int stalledTicks,
+                int playbackTicks,
+                int initialJoinSegmentsAdvanced,
+                int endpointSettleTicks,
+                Optional<RouteStop> waitingStop,
+                Optional<BlockPos> activeDockStationPos,
+                int waitTicksRemaining,
+                int idleWindowTicks,
+                int dockTimeoutTicksRemaining,
+                int dockIdleTimeoutTicksRemaining,
+                int dockCargoTimeoutTicksRemaining,
+                boolean dockLocked,
+                int restoreCatchTicksRemaining,
+                boolean completed
+        ) {
+            ActivePlayback activePlayback = new ActivePlayback(
+                    route,
+                    stationPos,
+                    controller,
+                    joinOffset,
+                    joinStartRotation,
+                    targetIndex,
+                    direction
+            );
+            activePlayback.segmentDurationTicks = Math.max(1L, segmentDurationTicks);
+            activePlayback.segmentElapsedTicks = Math.max(0, segmentElapsedTicks);
+            activePlayback.previousDistance = previousDistance;
+            activePlayback.stalledTicks = Math.max(0, stalledTicks);
+            activePlayback.playbackTicks = Math.max(0, playbackTicks);
+            activePlayback.initialJoinSegmentsAdvanced = Math.max(0, initialJoinSegmentsAdvanced);
+            activePlayback.endpointSettleTicks = Math.max(0, endpointSettleTicks);
+            activePlayback.waitingStop = waitingStop;
+            activePlayback.activeDockStationPos = activeDockStationPos;
+            activePlayback.waitTicksRemaining = Math.max(0, waitTicksRemaining);
+            activePlayback.idleWindowTicks = Math.max(0, idleWindowTicks);
+            activePlayback.dockTimeoutTicksRemaining = Math.max(0, dockTimeoutTicksRemaining);
+            activePlayback.dockIdleTimeoutTicksRemaining = Math.max(0, dockIdleTimeoutTicksRemaining);
+            activePlayback.dockCargoTimeoutTicksRemaining = Math.max(0, dockCargoTimeoutTicksRemaining);
+            activePlayback.dockLocked = dockLocked;
+            activePlayback.restoreCatchTicksRemaining = Math.max(0, restoreCatchTicksRemaining);
+            activePlayback.completed = completed;
+            activePlayback.dockTransferSnapshot = Optional.empty();
+            return activePlayback;
+        }
+
         private static double nearestEndpointDistance(Route route, VehicleController controller) {
             Vec3 vehiclePosition = controller.position();
             Vec3 first = route.points().getFirst().position();
@@ -723,6 +1083,14 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
             return controller;
         }
 
+        private Vec3 joinOffset() {
+            return joinOffset;
+        }
+
+        private Optional<RouteRotation> joinStartRotation() {
+            return joinStartRotation;
+        }
+
         private RoutePoint targetPoint() {
             return route.points().get(targetIndex);
         }
@@ -733,6 +1101,10 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
 
         private int targetIndex() {
             return targetIndex;
+        }
+
+        private int direction() {
+            return direction;
         }
 
         private double targetSpeedBlocksPerTick() {
@@ -870,8 +1242,44 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
             return waitTicksRemaining;
         }
 
+        private int idleWindowTicks() {
+            return idleWindowTicks;
+        }
+
         private boolean dockLocked() {
             return dockLocked;
+        }
+
+        private void beginRestoreCatch() {
+            restoreCatchTicksRemaining = Math.max(restoreCatchTicksRemaining, RESTORE_CATCH_TICKS);
+        }
+
+        private boolean isRestoring() {
+            return restoreCatchTicksRemaining > 0;
+        }
+
+        private boolean tickRestoreGrace() {
+            if (restoreCatchTicksRemaining <= 0) {
+                return false;
+            }
+            restoreCatchTicksRemaining--;
+            return true;
+        }
+
+        private int restoreCatchTicksRemaining() {
+            return restoreCatchTicksRemaining;
+        }
+
+        private int dockTimeoutTicksRemaining() {
+            return dockTimeoutTicksRemaining;
+        }
+
+        private int dockIdleTimeoutTicksRemaining() {
+            return dockIdleTimeoutTicksRemaining;
+        }
+
+        private int dockCargoTimeoutTicksRemaining() {
+            return dockCargoTimeoutTicksRemaining;
         }
 
         private void dockLocked(boolean dockLocked) {
@@ -1103,6 +1511,14 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
             segmentElapsedTicks = 0;
         }
 
+        private long segmentDurationTicks() {
+            return segmentDurationTicks;
+        }
+
+        private int segmentElapsedTicks() {
+            return segmentElapsedTicks;
+        }
+
         private long computeSegmentDurationTicks() {
             int previousIndex = targetIndex - direction;
             if (previousIndex < 0 || previousIndex >= route.points().size()) {
@@ -1147,6 +1563,10 @@ public class RiddenEntityRoutePlaybackService implements RoutePlaybackService {
 
         private int endpointSettleTicks() {
             return endpointSettleTicks;
+        }
+
+        private int initialJoinSegmentsAdvanced() {
+            return initialJoinSegmentsAdvanced;
         }
 
         private boolean shouldLogProgress() {

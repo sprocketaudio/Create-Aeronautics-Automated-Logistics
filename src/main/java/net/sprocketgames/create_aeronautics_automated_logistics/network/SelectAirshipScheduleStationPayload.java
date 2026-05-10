@@ -59,9 +59,11 @@ public record SelectAirshipScheduleStationPayload(int entryIndex, String filter)
                 .filter(station -> filter.isBlank() || station.stationName().toLowerCase(java.util.Locale.ROOT).contains(filter))
                 .toList();
         if (stations.isEmpty()) {
-            player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+            net.minecraft.network.chat.Component message = net.minecraft.network.chat.Component.translatable(
                     "message.create_aeronautics_automated_logistics.airship_schedule.no_matching_stations"
-            ));
+            );
+            player.displayClientMessage(message, true);
+            SetMenuActionBarMessagePayload.send(player, message);
             return;
         }
 

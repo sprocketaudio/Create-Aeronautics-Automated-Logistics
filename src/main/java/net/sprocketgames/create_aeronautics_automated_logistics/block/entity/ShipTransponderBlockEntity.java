@@ -79,6 +79,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         }
         if (level.getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
             transponder.refreshRuntimeShip(serverLevel);
+            transponder.refreshShipDockLink(serverLevel);
         }
     }
 
@@ -97,6 +98,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         if (level instanceof ServerLevel serverLevel) {
             refreshRuntimeShip(serverLevel);
             refreshShipDockLink(serverLevel);
+            migrateLegacyInstalledSchedule();
         }
         return new ShipTransponderMenu(containerId, playerInventory, worldPosition);
     }
@@ -189,30 +191,66 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
 
     public DockDiscoveryResult refreshShipDockLink(ServerLevel level) {
         refreshRuntimeShip(level);
-        DockDiscoveryResult result = shipDockPos
-                .filter(pos -> DockingConnectorDiscovery.isDock(level, pos))
-                .map(DockDiscoveryResult::linked)
-                .orElseGet(() -> SableSubLevelVehicleController.resolveControllerBlock(
-                                level,
-                                worldPosition,
-                                ModBlocks.SHIP_TRANSPONDER.get()
-                        )
-                        .map(controller -> DockingConnectorDiscovery.fromCandidates(
-                                controller.dockingConnectorPositionsNearController(
-                                        AutomatedLogisticsConfig.SHIP_DOCK_SEARCH_RADIUS.get()
-                                )
-                        ))
-                        .orElseGet(DockDiscoveryResult::missing));
+        DockDiscoveryResult result = validateShipDockLink(level);
         shipDockStatus = result.status() == DockLinkStatus.LINKED && result.dockPos().isEmpty()
                 ? DockLinkStatus.UNKNOWN
                 : result.status();
         if (result.status() == DockLinkStatus.LINKED) {
             shipDockPos = result.dockPos();
-        } else if (result.status() == DockLinkStatus.MISSING || result.status() == DockLinkStatus.AMBIGUOUS) {
+        } else {
             shipDockPos = Optional.empty();
         }
         setChanged();
         return result;
+    }
+
+    public DockDiscoveryResult setShipDockLink(ServerLevel level, BlockPos dockPos) {
+        refreshRuntimeShip(level);
+        if (!DockingConnectorDiscovery.isDock(level, dockPos)) {
+            shipDockPos = Optional.empty();
+            shipDockStatus = DockLinkStatus.INVALID;
+            setChanged();
+            return DockDiscoveryResult.invalid();
+        }
+        if (!dockBelongsToResolvedShip(level, dockPos)) {
+            shipDockPos = Optional.empty();
+            shipDockStatus = DockLinkStatus.INVALID;
+            setChanged();
+            return DockDiscoveryResult.invalid();
+        }
+        shipDockPos = Optional.of(dockPos.immutable());
+        shipDockStatus = DockLinkStatus.LINKED;
+        setChanged();
+        return DockDiscoveryResult.linked(dockPos.immutable());
+    }
+
+    public void clearShipDockLink() {
+        shipDockPos = Optional.empty();
+        shipDockStatus = DockLinkStatus.MISSING;
+        setChanged();
+    }
+
+    private DockDiscoveryResult validateShipDockLink(ServerLevel level) {
+        if (shipDockPos.isEmpty()) {
+            return DockDiscoveryResult.missing();
+        }
+        BlockPos dockPos = shipDockPos.get();
+        if (!DockingConnectorDiscovery.isDock(level, dockPos)) {
+            return DockDiscoveryResult.missing();
+        }
+        if (!dockBelongsToResolvedShip(level, dockPos)) {
+            return DockDiscoveryResult.invalid();
+        }
+        return DockDiscoveryResult.linked(dockPos);
+    }
+
+    private boolean dockBelongsToResolvedShip(ServerLevel level, BlockPos dockPos) {
+        if (runtimeShipId.isEmpty()) {
+            return false;
+        }
+        return SableSubLevelVehicleController.subLevelIdAt(level, dockPos)
+                .map(runtimeShipId.get()::equals)
+                .orElse(false);
     }
 
     private ShipTransponderSnapshot snapshot(ServerLevel level) {
@@ -263,6 +301,28 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
             return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.no_schedule");
         }
         return Component.literal(installedSchedule().title());
+    }
+
+    private void migrateLegacyInstalledSchedule() {
+        ItemStack stack = installedScheduleStack();
+        if (stack.isEmpty() || !AirshipScheduleItem.isLegacyUnboundSchedule(stack)) {
+            return;
+        }
+        AirshipScheduleItem.bindScheduleToTransponder(stack, transponderId, shipName());
+        setChanged();
+    }
+
+    public boolean canInstallSchedule(ItemStack stack) {
+        if (stack.isEmpty() || !stack.is(ModItems.AIRSHIP_SCHEDULE.get())) {
+            return false;
+        }
+        Optional<UUID> assignedTransponder = AirshipScheduleItem.readSchedule(stack).assignedTransponderId();
+        if (assignedTransponder.isPresent()) {
+            return assignedTransponder
+                .map(transponderId::equals)
+                .orElse(false);
+        }
+        return AirshipScheduleItem.isLegacyUnboundSchedule(stack);
     }
 
     @Override
@@ -332,6 +392,10 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     @Override
     public void onLoad() {
         super.onLoad();
+        if (level != null && !level.isClientSide && dockOutputActive) {
+            dockOutputActive = false;
+            setChanged();
+        }
         syncPoweredBlockState();
     }
 
@@ -433,7 +497,11 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         if (!stack.isEmpty() && !stack.is(ModItems.AIRSHIP_SCHEDULE.get())) {
             return;
         }
-        items.set(slot, stack.copyWithCount(Math.min(stack.getCount(), getMaxStackSize())));
+        ItemStack stored = stack.copyWithCount(Math.min(stack.getCount(), getMaxStackSize()));
+        if (!stored.isEmpty() && AirshipScheduleItem.isLegacyUnboundSchedule(stored)) {
+            AirshipScheduleItem.bindScheduleToTransponder(stored, transponderId, shipName());
+        }
+        items.set(slot, stored);
         setChanged();
     }
 
@@ -451,7 +519,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
 
     @Override
     public boolean canPlaceItem(int slot, ItemStack stack) {
-        return slot == INTERNAL_SCHEDULE_SLOT && stack.is(ModItems.AIRSHIP_SCHEDULE.get());
+        return slot == INTERNAL_SCHEDULE_SLOT && canInstallSchedule(stack);
     }
 
     @Override

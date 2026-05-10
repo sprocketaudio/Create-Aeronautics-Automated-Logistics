@@ -14,6 +14,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModCrea
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModItems;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModMenus;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomationVisualServerEvents;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RecordingServerEvents;
 import org.slf4j.Logger;
 
@@ -21,6 +22,18 @@ import org.slf4j.Logger;
 public class CreateAeronauticsAutomatedLogistics {
     public static final String MOD_ID = "create_aeronautics_automated_logistics";
     public static final Logger LOGGER = LogUtils.getLogger();
+
+    public static void debugLog(String message, Object... args) {
+        if (AutomatedLogisticsConfig.debugLogging()) {
+            LOGGER.info(message, args);
+        }
+    }
+
+    public static void debugWarn(String message, Object... args) {
+        if (AutomatedLogisticsConfig.debugLogging()) {
+            LOGGER.warn(message, args);
+        }
+    }
 
     public CreateAeronauticsAutomatedLogistics(IEventBus modEventBus, ModContainer modContainer) {
         modEventBus.addListener(ModNetworking::register);
@@ -31,7 +44,10 @@ public class CreateAeronauticsAutomatedLogistics {
         ModCreativeTabs.register(modEventBus);
         modContainer.registerConfig(ModConfig.Type.COMMON, AutomatedLogisticsConfig.SPEC);
         NeoForge.EVENT_BUS.addListener(RecordingServerEvents::onServerTick);
+        NeoForge.EVENT_BUS.addListener(RecordingServerEvents::onServerStopping);
+        NeoForge.EVENT_BUS.addListener(RecordingServerEvents::onServerStopped);
         NeoForge.EVENT_BUS.addListener(AutomationVisualServerEvents::onPlayerLogin);
+        NeoForge.EVENT_BUS.addListener(DockLinkInteractionService::onRightClickBlock);
         LOGGER.info("Create Aeronautics dependency state: {}", CreateAeronauticsCompat.describeLoadedState());
     }
 }

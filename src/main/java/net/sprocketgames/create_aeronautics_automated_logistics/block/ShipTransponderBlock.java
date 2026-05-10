@@ -26,6 +26,9 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.Containers;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
@@ -35,6 +38,10 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
     public static final MapCodec<ShipTransponderBlock> CODEC = simpleCodec(ShipTransponderBlock::new);
     public static final BooleanProperty POWERED = BlockStateProperties.POWERED;
     public static final DirectionProperty FACING = BlockStateProperties.HORIZONTAL_FACING;
+    private static final VoxelShape NORTH_SHAPE = Block.box(1.0D, 0.0D, 2.0D, 15.0D, 12.0D, 14.0D);
+    private static final VoxelShape EAST_SHAPE = Block.box(2.0D, 0.0D, 1.0D, 14.0D, 12.0D, 15.0D);
+    private static final VoxelShape SOUTH_SHAPE = Block.box(1.0D, 0.0D, 2.0D, 15.0D, 12.0D, 14.0D);
+    private static final VoxelShape WEST_SHAPE = Block.box(2.0D, 0.0D, 1.0D, 14.0D, 12.0D, 15.0D);
 
     public ShipTransponderBlock(BlockBehaviour.Properties properties) {
         super(properties);
@@ -69,6 +76,16 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
     @Override
     protected BlockState mirror(BlockState state, Mirror mirror) {
         return state.rotate(mirror.getRotation(state.getValue(FACING)));
+    }
+
+    @Override
+    protected VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+        return switch (state.getValue(FACING)) {
+            case EAST -> EAST_SHAPE;
+            case SOUTH -> SOUTH_SHAPE;
+            case WEST -> WEST_SHAPE;
+            default -> NORTH_SHAPE;
+        };
     }
 
     @Override

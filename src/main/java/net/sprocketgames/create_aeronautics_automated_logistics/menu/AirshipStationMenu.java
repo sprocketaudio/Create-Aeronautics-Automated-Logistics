@@ -1,11 +1,13 @@
 package net.sprocketgames.create_aeronautics_automated_logistics.menu;
 
+import com.simibubi.create.AllSoundEvents;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -25,6 +27,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTra
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderSnapshot;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.SetFlightPathPreviewPayload;
+import net.sprocketgames.create_aeronautics_automated_logistics.network.SetMenuActionBarMessagePayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModItems;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.FailureReason;
@@ -36,6 +39,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStop;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitCondition;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.PlaybackOperationResult;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RecordingFailure;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RecordingSession;
@@ -58,6 +62,8 @@ public class AirshipStationMenu extends AbstractContainerMenu {
     public static final int ACTION_RECORD_OR_FINISH_SEGMENT = 9;
     public static final int ACTION_FINISH_RECORDING = 10;
     public static final int ACTION_AUTO_SELECT_CLOSEST_SHIP = 11;
+    public static final int ACTION_BEGIN_LINK_DOCK = 12;
+    public static final int ACTION_CLEAR_DOCK_LINK = 13;
     public static final int ACTION_SELECT_SHIP_BASE = 1000;
     public static final int ACTION_PREVIEW_ROUTE_BASE = 2000;
     public static final int ACTION_DELETE_ROUTE_BASE = 3000;
@@ -124,6 +130,8 @@ public class AirshipStationMenu extends AbstractContainerMenu {
             case ACTION_RECORD_OR_FINISH_SEGMENT -> recordOrFinishSegment(serverPlayer, station);
             case ACTION_FINISH_RECORDING -> finishRecordingSession(serverPlayer, station);
             case ACTION_AUTO_SELECT_CLOSEST_SHIP -> autoSelectClosestShip(serverPlayer, station);
+            case ACTION_BEGIN_LINK_DOCK -> beginLinkDock(serverPlayer, station);
+            case ACTION_CLEAR_DOCK_LINK -> clearDockLink(serverPlayer, station);
             default -> false;
         };
     }
@@ -178,37 +186,75 @@ public class AirshipStationMenu extends AbstractContainerMenu {
     }
 
     public List<Component> failureTooltipLines(Player player) {
+        return statusTooltipLines(player);
+    }
+
+    public List<Component> statusTooltipLines(Player player) {
         if (!(player.level().getBlockEntity(stationPos) instanceof AirshipStationBlockEntity station)) {
-            return List.of();
+            return List.of(
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status_missing_station")
+                            .withStyle(ChatFormatting.RED),
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status_hover.missing_station.detail")
+                            .withStyle(ChatFormatting.GRAY)
+            );
         }
-        if (station.isRecording() || station.status() == RouteStatus.RECORDING) {
-            return List.of();
-        }
+
         Optional<FailureReason> reason = station.failureReason();
-        if (reason.isPresent() && reason.get() == FailureReason.INVALID_ROUTE_DATA) {
+        if (reason.isPresent() && reason.get() != FailureReason.NONE) {
+            return failureStatusTooltip(reason.get());
+        }
+
+        Optional<UUID> selected = station.selectedTransponderId();
+        if (selected.isPresent() && isSelectedShipRecording(player, selected.get())) {
             return List.of(
-                    Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.failure_title")
-                            .withStyle(net.minecraft.ChatFormatting.RED),
-                    Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.failure_reason.invalid_route")
-                            .withStyle(net.minecraft.ChatFormatting.GRAY),
-                    Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.failure_hint.invalid_route")
-                            .withStyle(net.minecraft.ChatFormatting.GRAY)
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status.recording")
+                            .withStyle(ChatFormatting.YELLOW),
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status_hover.recording.detail")
+                            .withStyle(ChatFormatting.GRAY),
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status_hover.recording.fix")
+                            .withStyle(ChatFormatting.GRAY)
             );
         }
-        if (station.status() == RouteStatus.INVALID_ROUTE) {
+
+        RouteStatus status = station.isRecording() ? RouteStatus.RECORDING : station.status();
+        if (status == RouteStatus.RECORDED) {
+            status = RouteStatus.IDLE;
+        }
+        if (status == RouteStatus.INVALID_ROUTE
+                && RouteSegmentResolver.validOutgoingSegments(station, player.level().dimension(), station.selectedTransponderId()).isEmpty()) {
             return List.of(
-                    Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.failure_title")
-                            .withStyle(net.minecraft.ChatFormatting.RED),
-                    Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.failure_reason.invalid_route")
-                            .withStyle(net.minecraft.ChatFormatting.GRAY),
-                    Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.failure_hint.invalid_route")
-                            .withStyle(net.minecraft.ChatFormatting.GRAY)
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status.no_route")
+                            .withStyle(ChatFormatting.RED),
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status_hover.no_route.detail")
+                            .withStyle(ChatFormatting.GRAY),
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status_hover.no_route.fix")
+                            .withStyle(ChatFormatting.GRAY)
             );
         }
-        Component failure = failureText(player);
-        return failure.getString().isBlank()
-                ? List.of()
-                : List.of(failure.copy().withStyle(net.minecraft.ChatFormatting.RED));
+
+        if (selected.isPresent() && AutomatedLogisticsServices.SCHEDULES.isRunning(selected.get())) {
+            return List.of(
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status.running")
+                            .withStyle(ChatFormatting.YELLOW),
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status_hover.running.detail")
+                            .withStyle(ChatFormatting.GRAY),
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status_hover.running.fix")
+                            .withStyle(ChatFormatting.GRAY)
+            );
+        }
+
+        ChatFormatting titleStyle = switch (status) {
+            case IDLE -> ChatFormatting.GRAY;
+            case RECORDING, RUNNING, WAITING -> ChatFormatting.YELLOW;
+            case FAILED, BLOCKED, MISSING_VEHICLE, INVALID_ROUTE -> ChatFormatting.RED;
+            case RECORDED -> ChatFormatting.GRAY;
+        };
+        return List.of(
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status." + status.name().toLowerCase(Locale.ROOT))
+                        .withStyle(titleStyle),
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status_hover." + status.name().toLowerCase(Locale.ROOT) + ".detail")
+                        .withStyle(ChatFormatting.GRAY)
+        );
     }
 
     public boolean isRecording(Player player) {
@@ -331,6 +377,10 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         if (!(player.level().getBlockEntity(stationPos) instanceof AirshipStationBlockEntity station)) {
             return Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status_missing_station");
         }
+        RouteStatus status = station.isRecording() ? RouteStatus.RECORDING : station.status();
+        if (status == RouteStatus.WAITING) {
+            return Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status.waiting");
+        }
         Optional<UUID> selected = station.selectedTransponderId();
         if (selected.isPresent()) {
             if (isSelectedShipRecording(player, selected.get())) {
@@ -340,7 +390,6 @@ public class AirshipStationMenu extends AbstractContainerMenu {
                 return Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status.running");
             }
         }
-        RouteStatus status = station.isRecording() ? RouteStatus.RECORDING : station.status();
         if (status == RouteStatus.RECORDED) {
             status = RouteStatus.IDLE;
         }
@@ -418,35 +467,81 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         if (!(player.level().getBlockEntity(stationPos) instanceof AirshipStationBlockEntity station)) {
             return Component.empty();
         }
-        DockLinkStatus status = station.groundDockStatus() == DockLinkStatus.LINKED && station.groundDockPos().isEmpty()
-                ? DockLinkStatus.UNKNOWN
-                : station.groundDockStatus();
-        Component statusText = Component.translatable(
-                "gui.create_aeronautics_automated_logistics.dock.status." + status.name().toLowerCase(Locale.ROOT)
-        );
-        Component position = station.groundDockPos()
-                .map(pos -> Component.literal(pos.getX() + ", " + pos.getY() + ", " + pos.getZ()))
-                .orElse(Component.literal("-"));
-        Component output = Component.translatable(
-                station.dockOutputActive()
-                        ? "gui.create_aeronautics_automated_logistics.dock.output.on"
-                        : "gui.create_aeronautics_automated_logistics.dock.output.off"
-        );
-        return Component.translatable(
-                "gui.create_aeronautics_automated_logistics.airship_station.dock",
-                statusText,
-                position,
-                output
-        );
+        return dockCompactText(player);
     }
 
     public Component dockCompactText(Player player) {
         if (!(player.level().getBlockEntity(stationPos) instanceof AirshipStationBlockEntity station)) {
-            return Component.empty();
+            return Component.translatable("gui.create_aeronautics_automated_logistics.dock.not_connected");
         }
-        return station.groundDockPos()
-                .map(pos -> Component.literal(pos.getX() + ", " + pos.getY() + ", " + pos.getZ()))
-                .orElseGet(() -> Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.not_found"));
+        DockLinkStatus status = station.groundDockStatus();
+        if (status == DockLinkStatus.LINKED && station.groundDockPos().isEmpty()) {
+            status = DockLinkStatus.UNKNOWN;
+        }
+        return Component.translatable("gui.create_aeronautics_automated_logistics.dock.status." + status.name().toLowerCase(Locale.ROOT));
+    }
+
+    public List<Component> dockTooltip(Player player) {
+        if (!(player.level().getBlockEntity(stationPos) instanceof AirshipStationBlockEntity station)) {
+            return List.of();
+        }
+        Component statusLine = Component.translatable(
+                "gui.create_aeronautics_automated_logistics.airship_station.dock.hover.status",
+                dockCompactText(player)
+        );
+        Component outputLine = Component.translatable(
+                "gui.create_aeronautics_automated_logistics.airship_station.dock.hover.redstone_output",
+                Component.translatable(
+                        station.dockOutputActive()
+                                ? "gui.create_aeronautics_automated_logistics.dock.output.on"
+                                : "gui.create_aeronautics_automated_logistics.dock.output.off"
+                )
+        );
+        Component positionLine = station.groundDockPos()
+                .map(pos -> Component.translatable(
+                        "gui.create_aeronautics_automated_logistics.airship_station.dock.hover.position",
+                        pos.getX(),
+                        pos.getY(),
+                        pos.getZ()
+                ))
+                .orElseGet(() -> Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.dock.hover.none"));
+        Component hintLine = Component.translatable(
+                "gui.create_aeronautics_automated_logistics.airship_station.dock.hover."
+                        + station.groundDockStatus().name().toLowerCase(Locale.ROOT)
+        );
+        return List.of(
+                statusLine,
+                outputLine.copy().withStyle(station.dockOutputActive() ? ChatFormatting.YELLOW : ChatFormatting.GRAY),
+                positionLine.copy().withStyle(ChatFormatting.GRAY),
+                hintLine.copy().withStyle(ChatFormatting.GRAY)
+        );
+    }
+
+    private List<Component> failureStatusTooltip(FailureReason reason) {
+        String key = reason.name().toLowerCase(Locale.ROOT);
+        RouteStatus status = switch (reason) {
+            case COLLISION_OR_OBSTRUCTION -> RouteStatus.BLOCKED;
+            case VEHICLE_DESTROYED_OR_MISSING, VEHICLE_UNLOADED -> RouteStatus.MISSING_VEHICLE;
+            case MISSING_AUTOPILOT_CONTROLLER, MISSING_STATION, INVALID_ROUTE_DATA, DIMENSION_MISMATCH,
+                    MISSING_DOCK, AMBIGUOUS_DOCK -> RouteStatus.INVALID_ROUTE;
+            case NONE -> RouteStatus.IDLE;
+            case START_TOO_FAR_FROM_ROUTE, DOCK_LOCK_FAILED, CARGO_CONDITION_TIMEOUT, MOVEMENT_FAILURE -> RouteStatus.FAILED;
+        };
+        return List.of(
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status." + status.name().toLowerCase(Locale.ROOT))
+                        .withStyle(ChatFormatting.RED),
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.failure_reason." + key)
+                        .withStyle(ChatFormatting.GRAY),
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.failure_hint." + key)
+                        .withStyle(ChatFormatting.GRAY)
+        );
+    }
+
+    public Optional<BlockPos> dockPreviewPos(Player player) {
+        if (!(player.level().getBlockEntity(stationPos) instanceof AirshipStationBlockEntity station)) {
+            return Optional.empty();
+        }
+        return station.groundDockPos();
     }
 
     public List<Component> segmentLines(Player player) {
@@ -481,7 +576,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
     private boolean selectNextShip(ServerPlayer player, AirshipStationBlockEntity station) {
         List<ShipTransponderSnapshot> ships = sortedShips(player, station);
         if (ships.isEmpty()) {
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.ship_selection.none_found"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.ship_selection.none_found"));
             return false;
         }
 
@@ -498,11 +593,6 @@ public class AirshipStationMenu extends AbstractContainerMenu {
 
         ShipTransponderSnapshot selected = ships.get((currentIndex + 1) % ships.size());
         station.selectShip(selected);
-        player.sendSystemMessage(Component.translatable(
-                "message.create_aeronautics_automated_logistics.ship_selection.selected",
-                selected.shipName(),
-                IdentityNames.shortId(selected.transponderId())
-        ));
         return true;
     }
 
@@ -513,11 +603,6 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         }
         ShipTransponderSnapshot selected = ships.get(shipIndex);
         station.selectShip(selected);
-        player.sendSystemMessage(Component.translatable(
-                "message.create_aeronautics_automated_logistics.ship_selection.selected",
-                selected.shipName(),
-                IdentityNames.shortId(selected.transponderId())
-        ));
         return true;
     }
 
@@ -530,6 +615,18 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         return true;
     }
 
+    private boolean beginLinkDock(ServerPlayer player, AirshipStationBlockEntity station) {
+        DockLinkInteractionService.beginStationLink(player, station.getBlockPos());
+        return true;
+    }
+
+    private boolean clearDockLink(ServerPlayer player, AirshipStationBlockEntity station) {
+        station.clearGroundDockLink();
+        DockLinkInteractionService.clearPending(player);
+        actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.dock_link.cleared"));
+        return true;
+    }
+
     private boolean recordOrFinishSegment(ServerPlayer player, AirshipStationBlockEntity station) {
         if (AutomatedLogisticsServices.RECORDING.hasActiveRecording(player)) {
             return finishSegmentRecording(player, station);
@@ -539,18 +636,18 @@ public class AirshipStationMenu extends AbstractContainerMenu {
 
     private boolean startSegmentRecording(ServerPlayer player, AirshipStationBlockEntity station) {
         if (station.isRecording()) {
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.recording.busy"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.recording.busy"));
             return false;
         }
         if (station.isPlaybackRunning()) {
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.playback.running"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.playback.running"));
             return false;
         }
 
         Optional<UUID> selectedTransponderId = station.selectedTransponderId();
         if (selectedTransponderId.isEmpty()) {
             station.setFailure(FailureReason.MISSING_AUTOPILOT_CONTROLLER);
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.recording.no_selected_ship"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.recording.no_selected_ship"));
             return false;
         }
 
@@ -558,7 +655,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
                 .filter(ship -> ship.dimension().equals(player.serverLevel().dimension()));
         if (selectedShip.isEmpty() || selectedShip.get().controllerRef().isEmpty()) {
             station.setFailure(FailureReason.VEHICLE_DESTROYED_OR_MISSING);
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.recording.selected_ship_unavailable"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.recording.selected_ship_unavailable"));
             return false;
         }
 
@@ -566,7 +663,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
                 .flatMap(controllerRef -> VehicleControllerResolver.resolve(player.serverLevel(), controllerRef));
         if (controller.isEmpty()) {
             station.setFailure(FailureReason.VEHICLE_DESTROYED_OR_MISSING);
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.recording.selected_ship_unavailable"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.recording.selected_ship_unavailable"));
             return false;
         }
 
@@ -576,17 +673,14 @@ public class AirshipStationMenu extends AbstractContainerMenu {
                 controller.get()
         );
         result.value().ifPresentOrElse(
-                session -> {
-                    player.sendSystemMessage(Component.translatable(
-                            "message.create_aeronautics_automated_logistics.segment_recording.started",
-                            station.stationName(),
-                            selectedShip.get().shipName()
-                    ));
-                    player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.segment_recording.hint"));
-                },
+                session -> actionBar(player, Component.translatable(
+                        "message.create_aeronautics_automated_logistics.segment_recording.started",
+                        station.stationName(),
+                        selectedShip.get().shipName()
+                )),
                 () -> result.failure().ifPresent(failure -> {
                     station.setFailure(failure.failureReason());
-                    player.sendSystemMessage(recordingFailureMessage(failure));
+                    actionBar(player, recordingFailureMessage(failure));
                 })
         );
         return result.value().isPresent();
@@ -595,7 +689,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
     private boolean finishSegmentRecording(ServerPlayer player, AirshipStationBlockEntity station) {
         RouteOperationResult<RouteSegment> result = AutomatedLogisticsServices.RECORDING.finishSegmentRecording(player, stationPos);
         result.value().ifPresentOrElse(
-                segment -> player.sendSystemMessage(Component.translatable(
+                segment -> actionBar(player, Component.translatable(
                         "message.create_aeronautics_automated_logistics.segment_recording.saved",
                         segment.startStationName(),
                         segment.endStationName(),
@@ -604,7 +698,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
                 )),
                 () -> result.failure().ifPresent(failure -> {
                     station.setFailure(failure.failureReason());
-                    player.sendSystemMessage(recordingFailureMessage(failure));
+                    actionBar(player, recordingFailureMessage(failure));
                 })
         );
         return result.value().isPresent();
@@ -613,67 +707,65 @@ public class AirshipStationMenu extends AbstractContainerMenu {
     private boolean finishRecordingSession(ServerPlayer player, AirshipStationBlockEntity station) {
         Optional<RecordingSession> session = AutomatedLogisticsServices.RECORDING.activeRecordingForPlayer(player.getUUID());
         if (session.isEmpty()) {
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.stop_mark.not_recording"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.stop_mark.not_recording"));
             return false;
         }
         RouteOperationResult<Route> result = AutomatedLogisticsServices.RECORDING.stopRecording(player, session.get().routeId());
         result.value().ifPresentOrElse(
-                route -> player.sendSystemMessage(Component.translatable(
+                route -> actionBar(player, Component.translatable(
                         "message.create_aeronautics_automated_logistics.recording.saved",
                         route.points().size()
                 )),
-                () -> result.failure().ifPresent(failure -> player.sendSystemMessage(recordingFailureMessage(failure)))
+                () -> result.failure().ifPresent(failure -> actionBar(player, recordingFailureMessage(failure)))
         );
         return result.value().isPresent();
     }
 
     private boolean runSchedule(ServerPlayer player, AirshipStationBlockEntity station) {
         if (station.isRecording()) {
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.recording.busy"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.recording.busy"));
             return false;
         }
         if (station.isPlaybackRunning()) {
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.playback.running"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.playback.running"));
             return false;
         }
 
         Optional<UUID> selectedTransponderId = station.selectedTransponderId();
         if (selectedTransponderId.isEmpty()) {
             station.setFailure(FailureReason.MISSING_AUTOPILOT_CONTROLLER);
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.recording.no_selected_ship"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.recording.no_selected_ship"));
             return false;
         }
         Optional<ShipTransponderBlockEntity> transponder = selectedTransponder(player.serverLevel(), selectedTransponderId.get());
         if (transponder.isEmpty()) {
             station.setFailure(FailureReason.VEHICLE_DESTROYED_OR_MISSING);
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.recording.selected_ship_unavailable"));
-            return false;
-        }
-        if (!AutomatedLogisticsServices.SCHEDULES.canStationStartFor(player.serverLevel(), station, transponder.get())) {
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.ship_not_in_landing_area"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.recording.selected_ship_unavailable"));
             return false;
         }
         if (!transponder.get().hasInstalledSchedule()) {
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.transponder_no_schedule"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.transponder_no_schedule"));
             return false;
         }
 
         AirshipSchedule schedule = transponder.get().installedSchedule();
-        PlaybackOperationResult<?> result = AutomatedLogisticsServices.SCHEDULES.start(
+        PlaybackOperationResult<?> result = AutomatedLogisticsServices.SCHEDULES.startFromTransponder(
                 player,
-                station,
-                stationPos,
                 transponder.get(),
                 schedule
         );
         result.value().ifPresentOrElse(
-                routeId -> player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.started")),
+                routeId -> {
+                    actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.started"));
+                    AllSoundEvents.CONFIRM.playOnServer(player.level(), station.getBlockPos(), 0.6f, 1.0f);
+                },
                 () -> result.failure().ifPresent(failure -> {
                     station.setFailure(failure.failureReason());
-                    player.sendSystemMessage(Component.translatable(
+                    actionBar(player, Component.translatable(
                             "message.create_aeronautics_automated_logistics.playback.failed",
                             Component.translatable("failure.create_aeronautics_automated_logistics.playback." + failure.name().toLowerCase(Locale.ROOT))
                     ));
+                    AllSoundEvents.DENY.playOnServer(player.level(), station.getBlockPos(), 0.5f, 1.0f);
                 })
         );
         return result.value().isPresent();
@@ -684,12 +776,9 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         if (transponderId.isEmpty() || !AutomatedLogisticsServices.SCHEDULES.isRunning(transponderId.get())) {
             return false;
         }
-        if (!AutomatedLogisticsServices.SCHEDULES.canStationStopFor(player.serverLevel(), station, transponderId.get())) {
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.stop_denied_station_scope"));
-            return false;
-        }
         AutomatedLogisticsServices.SCHEDULES.stop(player.serverLevel(), transponderId.get());
-        player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.stopped"));
+        actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.stopped"));
+        AllSoundEvents.CONTRAPTION_DISASSEMBLE.playOnServer(player.level(), station.getBlockPos(), 0.45f, 1.2f);
         return true;
     }
 
@@ -701,7 +790,11 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         RouteSegment segment = routes.get(routeIndex);
         PacketDistributor.sendToPlayer(
                 player,
-                new SetFlightPathPreviewPayload(true, segment.points().stream().map(point -> point.position()).toList())
+                new SetFlightPathPreviewPayload(
+                        true,
+                        segment.points().stream().map(point -> point.position()).toList(),
+                        List.of(Math.max(0, segment.points().size() - 1))
+                )
         );
         return true;
     }
@@ -713,13 +806,13 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         }
         RouteSegment segment = routes.get(routeIndex);
         if (!canControlSegment(player, segment)) {
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.station.permission_denied"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.station.permission_denied"));
             return false;
         }
 
         removeRouteFromLoadedStation(player.serverLevel(), segment.startStationId(), segment.id().value());
         removeRouteFromLoadedStation(player.serverLevel(), segment.endStationId(), segment.id().value());
-        player.sendSystemMessage(Component.translatable(
+        actionBar(player, Component.translatable(
                 "message.create_aeronautics_automated_logistics.route.deleted",
                 segment.startStationName(),
                 segment.endStationName()
@@ -768,7 +861,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
 
     private boolean markStop(ServerPlayer player, AirshipStationBlockEntity station) {
         if (!station.isRecording()) {
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.stop_mark.not_recording"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.stop_mark.not_recording"));
             return false;
         }
         return station.activeRecording()
@@ -780,13 +873,13 @@ public class AirshipStationMenu extends AbstractContainerMenu {
                             WaitCondition.timed(WaitCondition.DEFAULT_TIMED_WAIT_TICKS)
                     );
                     result.value().ifPresentOrElse(
-                            stop -> player.sendSystemMessage(Component.translatable(
+                            stop -> actionBar(player, Component.translatable(
                                     "message.create_aeronautics_automated_logistics.stop_mark.added",
                                     stop.name(),
                                     stop.pointIndex(),
                                     waitText(stop.waitCondition())
                             )),
-                            () -> result.failure().ifPresent(failure -> player.sendSystemMessage(recordingFailureMessage(failure)))
+                            () -> result.failure().ifPresent(failure -> actionBar(player, recordingFailureMessage(failure)))
                     );
                     return result.value().isPresent();
                 })
@@ -796,7 +889,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
     private boolean cycleLastStopWait(ServerPlayer player, AirshipStationBlockEntity station) {
         Optional<RouteStop> lastStop = lastEditableStop(station);
         if (lastStop.isEmpty()) {
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.stop_mark.no_stop"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.stop_mark.no_stop"));
             return false;
         }
 
@@ -809,7 +902,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
     private boolean adjustLastStopWait(ServerPlayer player, AirshipStationBlockEntity station, int deltaTicks) {
         Optional<RouteStop> lastStop = lastEditableStop(station);
         if (lastStop.isEmpty()) {
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.stop_mark.no_stop"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.stop_mark.no_stop"));
             return false;
         }
 
@@ -842,12 +935,12 @@ public class AirshipStationMenu extends AbstractContainerMenu {
                                 waitCondition
                         );
                         result.value().ifPresentOrElse(
-                                stop -> player.sendSystemMessage(Component.translatable(
+                                stop -> actionBar(player, Component.translatable(
                                         "message.create_aeronautics_automated_logistics.stop_mark.wait_updated",
                                         stop.name(),
                                         waitText(stop.waitCondition())
                                 )),
-                                () -> result.failure().ifPresent(failure -> player.sendSystemMessage(recordingFailureMessage(failure)))
+                                () -> result.failure().ifPresent(failure -> actionBar(player, recordingFailureMessage(failure)))
                         );
                         return result.value().isPresent();
                     })
@@ -856,17 +949,17 @@ public class AirshipStationMenu extends AbstractContainerMenu {
 
         return station.recordedRoute().map(route -> {
             if (!canControlRoute(player, route)) {
-                player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.station.permission_denied"));
+                actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.station.permission_denied"));
                 return false;
             }
             if (route.stops().isEmpty()) {
-                player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.stop_mark.no_stop"));
+                actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.stop_mark.no_stop"));
                 return false;
             }
 
             RouteStop updated = route.stops().getLast().withWaitCondition(waitCondition);
             station.replaceLastRouteStop(updated);
-            player.sendSystemMessage(Component.translatable(
+            actionBar(player, Component.translatable(
                     "message.create_aeronautics_automated_logistics.stop_mark.wait_updated",
                     updated.name(),
                     waitText(updated.waitCondition())
@@ -891,6 +984,13 @@ public class AirshipStationMenu extends AbstractContainerMenu {
                 "message.create_aeronautics_automated_logistics.recording.failed",
                 Component.translatable("failure.create_aeronautics_automated_logistics." + failure.name().toLowerCase(Locale.ROOT))
         );
+    }
+
+    private void actionBar(Player player, Component message) {
+        player.displayClientMessage(message, true);
+        if (player instanceof ServerPlayer serverPlayer) {
+            SetMenuActionBarMessagePayload.send(serverPlayer, message);
+        }
     }
 
     private List<ShipTransponderSnapshot> sortedShips(ServerPlayer player, AirshipStationBlockEntity station) {

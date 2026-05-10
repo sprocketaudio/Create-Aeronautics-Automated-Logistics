@@ -11,7 +11,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.LogisticsClientOverlays;
 
-public record SetFlightPathPreviewPayload(boolean enabled, List<Vec3> points) implements CustomPacketPayload {
+public record SetFlightPathPreviewPayload(boolean enabled, List<Vec3> points, List<Integer> legEndIndices) implements CustomPacketPayload {
     public static final Type<SetFlightPathPreviewPayload> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath(CreateAeronauticsAutomatedLogistics.MOD_ID, "set_flight_path_preview")
     );
@@ -25,7 +25,12 @@ public record SetFlightPathPreviewPayload(boolean enabled, List<Vec3> points) im
         for (int i = 0; i < count; i++) {
             points.add(new Vec3(buffer.readDouble(), buffer.readDouble(), buffer.readDouble()));
         }
-        return new SetFlightPathPreviewPayload(enabled, points);
+        int legCount = buffer.readVarInt();
+        List<Integer> legEndIndices = new ArrayList<>(legCount);
+        for (int i = 0; i < legCount; i++) {
+            legEndIndices.add(buffer.readVarInt());
+        }
+        return new SetFlightPathPreviewPayload(enabled, points, legEndIndices);
     }
 
     private void write(RegistryFriendlyByteBuf buffer) {
@@ -35,6 +40,10 @@ public record SetFlightPathPreviewPayload(boolean enabled, List<Vec3> points) im
             buffer.writeDouble(point.x);
             buffer.writeDouble(point.y);
             buffer.writeDouble(point.z);
+        }
+        buffer.writeVarInt(legEndIndices.size());
+        for (Integer legEndIndex : legEndIndices) {
+            buffer.writeVarInt(legEndIndex == null ? 0 : Math.max(0, legEndIndex));
         }
     }
 
@@ -46,11 +55,10 @@ public record SetFlightPathPreviewPayload(boolean enabled, List<Vec3> points) im
     public static void handle(SetFlightPathPreviewPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (payload.enabled()) {
-                LogisticsClientOverlays.setFlightPath(payload.points());
+                LogisticsClientOverlays.setFlightPath(payload.points(), payload.legEndIndices());
             } else {
                 LogisticsClientOverlays.clearFlightPath();
             }
         });
     }
 }
-

@@ -14,7 +14,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.FailureRea
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteRotation;
 import org.joml.Quaterniond;
 
-public class RiddenEntityVehicleController implements VehicleController {
+public class EntityVehicleController implements VehicleController {
     public static final ResourceLocation TYPE = ResourceLocation.fromNamespaceAndPath(
             CreateAeronauticsAutomatedLogistics.MOD_ID,
             "ridden_entity"
@@ -22,7 +22,7 @@ public class RiddenEntityVehicleController implements VehicleController {
 
     private final Entity entity;
 
-    public RiddenEntityVehicleController(Entity entity) {
+    public EntityVehicleController(Entity entity) {
         this.entity = entity;
     }
 

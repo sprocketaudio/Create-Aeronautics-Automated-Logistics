@@ -15,6 +15,7 @@ import net.minecraft.world.item.ItemStack;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationSnapshot;
 import net.sprocketgames.create_aeronautics_automated_logistics.item.AirshipScheduleItem;
+import net.sprocketgames.create_aeronautics_automated_logistics.network.SetMenuActionBarMessagePayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModItems;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModMenus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
@@ -147,10 +148,6 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
             };
             if (updated != schedule) {
                 AirshipScheduleItem.writeSchedule(stack, updated);
-                player.sendSystemMessage(Component.translatable(
-                        "message.create_aeronautics_automated_logistics.airship_schedule.updated",
-                        updated.entries().size()
-                ));
             }
             return id >= ACTION_ADD_TRAVEL && id <= ACTION_PIN_NEWEST_SEGMENT;
         }).orElse(false);
@@ -243,7 +240,7 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         }
         List<AirshipStationSnapshot> stations = AirshipStationRegistry.knownStations(player.level().dimension());
         if (stations.isEmpty()) {
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.no_stations"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.no_stations"));
             return schedule;
         }
 
@@ -262,10 +259,6 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         AirshipStationSnapshot selectedStation = stations.get((currentIndex + 1) % stations.size());
         List<AirshipScheduleEntry> entries = new ArrayList<>(schedule.entries());
         entries.set(selectedIndex, entry.withTargetStation(selectedStation.stationId(), selectedStation.stationName()));
-        player.sendSystemMessage(Component.translatable(
-                "message.create_aeronautics_automated_logistics.airship_schedule.station_selected",
-                selectedStation.stationName()
-        ));
         return schedule.withEntries(entries);
     }
 
@@ -289,13 +282,13 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
 
     private AirshipSchedule pinNewestSegment(Player player, AirshipSchedule schedule) {
         if (selectedIndex <= 0 || selectedIndex >= schedule.entries().size()) {
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.no_segment_to_pin"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.no_segment_to_pin"));
             return schedule;
         }
         AirshipScheduleEntry previous = schedule.entries().get(selectedIndex - 1);
         AirshipScheduleEntry current = schedule.entries().get(selectedIndex);
         if (previous.targetStationId().isEmpty() || current.targetStationId().isEmpty()) {
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.no_segment_to_pin"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.no_segment_to_pin"));
             return schedule;
         }
 
@@ -306,13 +299,13 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
                 Optional.empty()
         );
         if (segment.isEmpty()) {
-            player.sendSystemMessage(Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.no_segment_to_pin"));
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.no_segment_to_pin"));
             return schedule;
         }
 
         List<AirshipScheduleEntry> entries = new ArrayList<>(schedule.entries());
         entries.set(selectedIndex, current.withPinnedSegment(Optional.of(segment.get().id())));
-        player.sendSystemMessage(Component.translatable(
+        actionBar(player, Component.translatable(
                 "message.create_aeronautics_automated_logistics.airship_schedule.segment_pinned",
                 segment.get().startStationName(),
                 segment.get().endStationName()
@@ -345,5 +338,12 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
             return java.util.Optional.of(player.getOffhandItem());
         }
         return java.util.Optional.empty();
+    }
+
+    private void actionBar(Player player, Component message) {
+        player.displayClientMessage(message, true);
+        if (player instanceof ServerPlayer serverPlayer) {
+            SetMenuActionBarMessagePayload.send(serverPlayer, message);
+        }
     }
 }

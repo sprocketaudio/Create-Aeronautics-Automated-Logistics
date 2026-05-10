@@ -10,6 +10,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import net.createmod.catnip.gui.element.ScreenElement;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
@@ -38,17 +39,25 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     private static final int SHIP_BOX_Y = 65;
     private static final int SHIP_BOX_WIDTH = 120;
     private static final int SHIP_BOX_HEIGHT = 20;
-    private static final int ROUTES_VISIBLE_ROWS = 5;
+    private static final int ROUTES_VISIBLE_ROWS = 3;
     private static final int ROUTES_POPUP_X = 8;
     private static final int ROUTES_POPUP_Y = 42;
     private static final int ROUTES_POPUP_W = 176;
-    private static final int ROUTES_POPUP_H = 158;
-    private static final int ROUTES_ROW_Y = ROUTES_POPUP_Y + 27;
-    private static final int ROUTES_ROW_H = 22;
+    private static final int ROUTES_POPUP_H = 159;
+    private static final int ROUTES_ROW_Y = ROUTES_POPUP_Y + 25;
+    private static final int ROUTES_ROW_H = 35;
+    private static final int ROUTES_ROW_FILL_H = 33;
+    private static final int ROUTES_ROW_TEXT_1_Y = 2;
+    private static final int ROUTES_ROW_TEXT_2_Y = 12;
+    private static final int ROUTES_ROW_TEXT_3_Y = 22;
+    private static final int ROUTES_FOOTER_Y = ROUTES_POPUP_H - 10;
+    private static final int ROUTES_FADE_HEIGHT = 16;
     private static final DateTimeFormatter ROUTE_TIME_FORMAT =
             DateTimeFormatter.ofPattern("dd MMM HH:mm").withZone(ZoneId.systemDefault());
     private static final ResourceLocation BACKGROUND =
             ResourceLocation.fromNamespaceAndPath(CreateAeronauticsAutomatedLogistics.MOD_ID, "textures/gui/airship_station.png");
+    private static final ScreenElement SHOW_DOCK_ICON =
+            new AtlasIcon(ResourceLocation.fromNamespaceAndPath("create", "textures/gui/icons.png"), 64, 192, 16, 16, 256);
 
     private final List<ButtonTooltip> buttonTooltips = new ArrayList<>();
     private EditBox nameBox;
@@ -56,6 +65,9 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     private IconButton finishRecordingButton;
     private IconButton landingAreaButton;
     private IconButton routesButton;
+    private IconButton dockPreviewButton;
+    private MiniIconButton dockLinkButton;
+    private MiniIconButton dockClearButton;
     private boolean shipDropdownOpen;
     private boolean routesOpen;
     private int routeScroll;
@@ -66,7 +78,11 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     private int statusValueY;
     private int statusValueWidth;
     private int statusValueHeight;
-    private List<Component> failureTooltipLines = List.of();
+    private int dockValueX;
+    private int dockValueY;
+    private int dockValueWidth;
+    private int dockValueHeight;
+    private List<Component> statusTooltipLines = List.of();
 
     public AirshipStationScreen(AirshipStationMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
@@ -145,12 +161,34 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
                 this::toggleLandingArea,
                 landingAreaTooltip()
         );
+        dockPreviewButton = addIconButton(
+                x + 56,
+                bottomButtonsY,
+                SHOW_DOCK_ICON,
+                this::toggleDockPreview,
+                dockPreviewTooltip()
+        );
         addIconButton(
                 x + PANEL_WIDTH - 33,
                 y + PANEL_HEIGHT - 24,
                 AllIcons.I_CONFIRM,
                 this::onClose,
                 Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.close.tooltip")
+        );
+        int dockButtonsY = y + 182;
+        dockLinkButton = addMiniIconButton(
+                x + 141,
+                dockButtonsY,
+                AllIcons.I_ADD,
+                () -> pressAction(AirshipStationMenu.ACTION_BEGIN_LINK_DOCK),
+                Component.translatable("gui.create_aeronautics_automated_logistics.dock.link")
+        );
+        dockClearButton = addMiniIconButton(
+                x + 155,
+                dockButtonsY,
+                AllIcons.I_MTD_CLOSE,
+                () -> pressAction(AirshipStationMenu.ACTION_CLEAR_DOCK_LINK),
+                Component.translatable("gui.create_aeronautics_automated_logistics.dock.clear")
         );
 
         if (this.minecraft != null && this.minecraft.player != null) {
@@ -189,6 +227,16 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         if (landingAreaButton != null) {
             landingAreaButton.setToolTip(landingAreaTooltip());
             landingAreaButton.green = LogisticsClientOverlays.isLandingAreaVisible(this.menu.stationPos());
+        }
+        if (dockPreviewButton != null && this.minecraft != null && this.minecraft.player != null) {
+            dockPreviewButton.setToolTip(dockPreviewTooltip());
+            dockPreviewButton.active = menu.dockPreviewPos(this.minecraft.player).isPresent();
+            dockPreviewButton.green = menu.dockPreviewPos(this.minecraft.player)
+                    .map(LogisticsClientOverlays::isDockVisible)
+                    .orElse(false);
+        }
+        if (dockClearButton != null && this.minecraft != null && this.minecraft.player != null) {
+            dockClearButton.active = menu.dockPreviewPos(this.minecraft.player).isPresent();
         }
         boolean recording = false;
         if (this.minecraft != null && this.minecraft.player != null) {
@@ -262,8 +310,16 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
     }
 
-    private IconButton addIconButton(int x, int y, AllIcons icon, Runnable callback, Component... tooltip) {
+    private IconButton addIconButton(int x, int y, ScreenElement icon, Runnable callback, Component... tooltip) {
         IconButton button = new IconButton(x, y, icon);
+        button.withCallback(callback);
+        addRenderableWidget(button);
+        buttonTooltips.add(new ButtonTooltip(button, List.of(tooltip)));
+        return button;
+    }
+
+    private MiniIconButton addMiniIconButton(int x, int y, AllIcons icon, Runnable callback, Component... tooltip) {
+        MiniIconButton button = new MiniIconButton(x, y, icon);
         button.withCallback(callback);
         addRenderableWidget(button);
         buttonTooltips.add(new ButtonTooltip(button, List.of(tooltip)));
@@ -352,7 +408,7 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         if (this.minecraft == null || this.minecraft.player == null) {
             return;
         }
-        failureTooltipLines = List.of();
+        statusTooltipLines = List.of();
         statusValueX = 0;
         statusValueY = 0;
         statusValueWidth = 0;
@@ -395,22 +451,14 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
 
         int dockRowY = this.topPos + 181;
         guiGraphics.drawString(this.font, "Dock:", x, dockRowY + 3, 0xFF9EA5AA, false);
-        guiGraphics.drawString(
-                this.font,
-                shortText(menu.dockCompactText(this.minecraft.player), 126 - this.font.width("Dock: ") - 2),
-                x + this.font.width("Dock: ") + 2,
-                dockRowY + 3,
-                0xFFB9C4D0,
-                false
-        );
+        String dockValue = shortText(menu.dockCompactText(this.minecraft.player), 92);
+        dockValueX = x + this.font.width("Dock: ") + 2;
+        dockValueY = dockRowY + 3;
+        dockValueWidth = this.font.width(dockValue);
+        dockValueHeight = this.font.lineHeight;
+        guiGraphics.drawString(this.font, dockValue, dockValueX, dockValueY, 0xFFB9C4D0, false);
 
-        List<Component> failureLines = menu.failureTooltipLines(this.minecraft.player);
-        if (!failureLines.isEmpty()
-                && (statusText.equalsIgnoreCase("Failed")
-                || statusText.equalsIgnoreCase("Invalid Route")
-                || statusText.equalsIgnoreCase("No Route"))) {
-            failureTooltipLines = failureLines;
-        }
+        statusTooltipLines = menu.statusTooltipLines(this.minecraft.player);
     }
 
     private void renderRoutesPopup(GuiGraphics guiGraphics, int mouseX, int mouseY) {
@@ -432,51 +480,69 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         hoveredRouteIndex = null;
 
         if (routes.isEmpty()) {
-            guiGraphics.drawCenteredString(this.font, "No routes saved here", x + width / 2, y + 62, 0xFFB9C4D0);
+            guiGraphics.drawWordWrap(
+                    this.font,
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.no_routes_for_selected_ship"),
+                    x + 21,
+                    y + 56,
+                    width - 42,
+                    0xFFB9C4D0
+            );
             return;
         }
 
         routeScroll = Math.max(0, Math.min(routeScroll, Math.max(0, routes.size() - ROUTES_VISIBLE_ROWS)));
         int rowY = y + (ROUTES_ROW_Y - ROUTES_POPUP_Y);
         int rowHeight = ROUTES_ROW_H;
-        for (int visibleIndex = 0; visibleIndex < ROUTES_VISIBLE_ROWS; visibleIndex++) {
+        int maxScroll = Math.max(0, routes.size() - ROUTES_VISIBLE_ROWS);
+        boolean hasAbove = routeScroll > 0;
+        boolean hasBelow = routeScroll < maxScroll;
+        int clipLeft = x + 5;
+        int clipTop = rowY;
+        int clipRight = x + width - 5;
+        int clipBottom = y + ROUTES_FOOTER_Y - 2;
+        int renderedRows = Math.min(routes.size() - routeScroll, ROUTES_VISIBLE_ROWS + (hasBelow ? 1 : 0));
+
+        guiGraphics.enableScissor(clipLeft, clipTop, clipRight, clipBottom);
+        for (int visibleIndex = 0; visibleIndex < renderedRows; visibleIndex++) {
             int routeIndex = routeScroll + visibleIndex;
             if (routeIndex >= routes.size()) {
                 break;
             }
             RouteSegment route = routes.get(routeIndex);
             int ry = rowY + visibleIndex * rowHeight;
-            boolean hovered = isInside(mouseX, mouseY, x + 5, ry, width - 10, 20);
+            int visibleBottom = Math.min(ry + ROUTES_ROW_FILL_H, clipBottom);
+            boolean hovered = visibleBottom > ry && isInside(mouseX, mouseY, x + 5, ry, width - 10, visibleBottom - ry);
             if (hovered) {
                 hoveredRouteIndex = routeIndex;
             }
             boolean previewed = previewedRouteId != null && previewedRouteId.equals(route.id().value());
             boolean invalid = routeInvalidReason(route, this.minecraft.player.level()).isPresent();
             int rowColor = invalid ? (hovered ? 0xAA704545 : 0x885A3A3A) : (hovered ? 0xAA555B65 : 0x88414850);
-            guiGraphics.fill(x + 5, ry, x + width - 5, ry + 20, rowColor);
+            guiGraphics.fill(x + 5, ry, x + width - 5, ry + ROUTES_ROW_FILL_H, rowColor);
             if (previewed) {
                 guiGraphics.fill(x + 4, ry - 1, x + width - 4, ry, 0xFFFFE27A);
-                guiGraphics.fill(x + 4, ry + 20, x + width - 4, ry + 21, 0xFFFFE27A);
-                guiGraphics.fill(x + 4, ry, x + 5, ry + 20, 0xFFFFE27A);
-                guiGraphics.fill(x + width - 5, ry, x + width - 4, ry + 20, 0xFFFFE27A);
+                guiGraphics.fill(x + 4, ry + ROUTES_ROW_FILL_H, x + width - 4, ry + ROUTES_ROW_FILL_H + 1, 0xFFFFE27A);
+                guiGraphics.fill(x + 4, ry, x + 5, ry + ROUTES_ROW_FILL_H, 0xFFFFE27A);
+                guiGraphics.fill(x + width - 5, ry, x + width - 4, ry + ROUTES_ROW_FILL_H, 0xFFFFE27A);
             }
-            String routeName = route.startStationName() + " -> " + route.endStationName();
-            guiGraphics.drawString(this.font, shortText(Component.literal(routeName), 158), x + 9, ry + 3, 0xFFFFFFFF, false);
+            guiGraphics.drawString(this.font, shortText(Component.literal("From: " + route.startStationName()), 158), x + 9, ry + ROUTES_ROW_TEXT_1_Y, 0xFFFFFFFF, false);
+            guiGraphics.drawString(this.font, shortText(Component.literal("To: " + route.endStationName()), 158), x + 9, ry + ROUTES_ROW_TEXT_2_Y, 0xFFFFFFFF, false);
             String meta = ROUTE_TIME_FORMAT.format(Instant.ofEpochMilli(route.createdEpochMillis()))
                     + " | " + route.points().size() + " pts";
-            guiGraphics.drawString(this.font, this.font.plainSubstrByWidth(meta, 158), x + 9, ry + 13, 0xFFB9C4D0, false);
+            guiGraphics.drawString(this.font, this.font.plainSubstrByWidth(meta, 158), x + 9, ry + ROUTES_ROW_TEXT_3_Y, 0xFFB9C4D0, false);
+        }
+        guiGraphics.disableScissor();
+
+        if (hasAbove) {
+            guiGraphics.fillGradient(clipLeft, clipTop, clipRight, clipTop + ROUTES_FADE_HEIGHT, 0xF0333840, 0x00333943);
+        }
+        if (hasBelow) {
+            guiGraphics.fillGradient(clipLeft, clipBottom - ROUTES_FADE_HEIGHT, clipRight, clipBottom, 0x00333943, 0xF0333840);
+            guiGraphics.fill(clipLeft, clipBottom - 1, clipRight, clipBottom, 0xAA707780);
         }
 
-        if (routeScroll > 0) {
-            guiGraphics.fill(x + 5, rowY, x + width - 5, rowY + 4, 0xCC333943);
-        }
-        int maxScroll = Math.max(0, routes.size() - ROUTES_VISIBLE_ROWS);
-        if (routeScroll < maxScroll) {
-            int bottomY = rowY + ROUTES_VISIBLE_ROWS * rowHeight - 4;
-            guiGraphics.fill(x + 5, bottomY, x + width - 5, bottomY + 4, 0xCC333943);
-        }
-
-        guiGraphics.drawString(this.font, "LMB Preview Route  RMB Delete", x + 8, y + height - 10, 0xFF9EA5AA, false);
+        guiGraphics.drawString(this.font, "LMB Preview Route  RMB Delete", x + 8, y + ROUTES_FOOTER_Y, 0xFF9EA5AA, false);
 
         if (pendingDeleteRouteIndex != null) {
             renderDeleteConfirm(guiGraphics, x, y, width, height, routes, mouseX, mouseY);
@@ -535,8 +601,13 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
             );
             return;
         }
-        if (!failureTooltipLines.isEmpty() && isInside(mouseX, mouseY, statusValueX, statusValueY, Math.max(1, statusValueWidth), Math.max(1, statusValueHeight))) {
-            guiGraphics.renderTooltip(this.font, failureTooltipLines, java.util.Optional.empty(), mouseX, mouseY);
+        if (!statusTooltipLines.isEmpty() && isInside(mouseX, mouseY, statusValueX, statusValueY, Math.max(1, statusValueWidth), Math.max(1, statusValueHeight))) {
+            guiGraphics.renderTooltip(this.font, statusTooltipLines, java.util.Optional.empty(), mouseX, mouseY);
+            return;
+        }
+        if (this.minecraft != null && this.minecraft.player != null
+                && isInside(mouseX, mouseY, dockValueX, dockValueY, Math.max(1, dockValueWidth), Math.max(1, dockValueHeight))) {
+            guiGraphics.renderTooltip(this.font, menu.dockTooltip(this.minecraft.player), java.util.Optional.empty(), mouseX, mouseY);
             return;
         }
         for (ButtonTooltip tooltip : buttonTooltips) {
@@ -616,8 +687,10 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         int width = ROUTES_POPUP_W;
         int height = ROUTES_POPUP_H;
         int rowY = y + (ROUTES_ROW_Y - ROUTES_POPUP_Y);
+        int clipBottom = y + ROUTES_FOOTER_Y - 2;
         var routes = menu.routeChoices(this.minecraft.player);
         int routeCount = routes.size();
+        int maxScroll = Math.max(0, routeCount - ROUTES_VISIBLE_ROWS);
 
         if (pendingDeleteRouteIndex != null) {
             int boxW = 146;
@@ -639,13 +712,15 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
             return true;
         }
 
-        for (int visibleIndex = 0; visibleIndex < ROUTES_VISIBLE_ROWS; visibleIndex++) {
+        int renderedRows = Math.min(routeCount - routeScroll, ROUTES_VISIBLE_ROWS + (routeScroll < maxScroll ? 1 : 0));
+        for (int visibleIndex = 0; visibleIndex < renderedRows; visibleIndex++) {
             int routeIndex = routeScroll + visibleIndex;
             if (routeIndex >= routeCount) {
                 break;
             }
-            int ry = rowY + visibleIndex * 22;
-            if (isInside(mouseX, mouseY, x + 5, ry, width - 10, 20)) {
+            int ry = rowY + visibleIndex * ROUTES_ROW_H;
+            int visibleBottom = Math.min(ry + ROUTES_ROW_FILL_H, clipBottom);
+            if (visibleBottom > ry && isInside(mouseX, mouseY, x + 5, ry, width - 10, visibleBottom - ry)) {
                 if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
                     pendingDeleteRouteIndex = routeIndex;
                 } else {
@@ -781,11 +856,35 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         );
     }
 
+    private void toggleDockPreview() {
+        if (this.minecraft == null || this.minecraft.player == null) {
+            return;
+        }
+        this.menu.dockPreviewPos(this.minecraft.player).ifPresentOrElse(
+                LogisticsClientOverlays::toggleDock,
+                LogisticsClientOverlays::clearDock
+        );
+        if (dockPreviewButton != null) {
+            dockPreviewButton.setToolTip(dockPreviewTooltip());
+        }
+    }
+
     private Component landingAreaTooltip() {
         return Component.translatable(
                 LogisticsClientOverlays.isLandingAreaVisible(this.menu.stationPos())
                         ? "gui.create_aeronautics_automated_logistics.airship_station.hide_landing_area"
                         : "gui.create_aeronautics_automated_logistics.airship_station.show_landing_area"
+        );
+    }
+
+    private Component dockPreviewTooltip() {
+        boolean visible = this.minecraft != null
+                && this.minecraft.player != null
+                && this.menu.dockPreviewPos(this.minecraft.player).map(LogisticsClientOverlays::isDockVisible).orElse(false);
+        return Component.translatable(
+                visible
+                        ? "gui.create_aeronautics_automated_logistics.dock.hide"
+                        : "gui.create_aeronautics_automated_logistics.dock.show"
         );
     }
 
@@ -806,7 +905,8 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     }
 
     private int statusColor(String status) {
-        if (status.equalsIgnoreCase("Failed") || status.equalsIgnoreCase("Blocked") || status.equalsIgnoreCase("Invalid Route")) {
+        if (status.equalsIgnoreCase("Needs Attention") || status.equalsIgnoreCase("Blocked") || status.equalsIgnoreCase("Route Problem")
+                || status.equalsIgnoreCase("No Route") || status.equalsIgnoreCase("Ship Missing")) {
             return 0xFFFFB4B4;
         }
         if (status.equalsIgnoreCase("Running") || status.equalsIgnoreCase("Waiting") || status.equalsIgnoreCase("Recording")) {

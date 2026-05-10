@@ -2,6 +2,9 @@ package net.sprocketgames.create_aeronautics_automated_logistics.item;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
+import com.simibubi.create.foundation.item.ItemDescription;
+import net.createmod.catnip.lang.FontHelper;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
@@ -50,6 +53,10 @@ public class AirshipScheduleItem extends Item {
                 schedule.entries().size()
         ).withStyle(ChatFormatting.GRAY));
         tooltipComponents.add(Component.translatable("tooltip.create_aeronautics_automated_logistics.airship_schedule.open").withStyle(ChatFormatting.GRAY));
+        ItemDescription description = ItemDescription.create(getDescriptionId() + ".tooltip", FontHelper.Palette.STANDARD_CREATE);
+        if (description != null) {
+            tooltipComponents.addAll(description.getCurrentLines());
+        }
     }
 
     public static AirshipSchedule readSchedule(ItemStack stack) {
@@ -64,6 +71,15 @@ public class AirshipScheduleItem extends Item {
         CompoundTag root = stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY).copyTag();
         root.put(SCHEDULE_TAG, AirshipScheduleNbtSerializer.write(schedule));
         CustomData.set(DataComponents.CUSTOM_DATA, stack, root);
+    }
+
+    public static boolean isLegacyUnboundSchedule(ItemStack stack) {
+        return readScheduleTag(stack).map(AirshipScheduleNbtSerializer::isLegacyUnbound).orElse(false);
+    }
+
+    public static void bindScheduleToTransponder(ItemStack stack, UUID transponderId, String shipName) {
+        AirshipSchedule schedule = readSchedule(stack).withAssignedShip(Optional.of(transponderId), shipName);
+        writeSchedule(stack, schedule);
     }
 
     private static Optional<CompoundTag> readScheduleTag(ItemStack stack) {

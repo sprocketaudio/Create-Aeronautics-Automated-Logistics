@@ -13,17 +13,25 @@ import net.minecraft.world.phys.Vec3;
 
 public final class LogisticsClientOverlays {
     private static final int LANDING_COLOR = 0x95E06C;
-    private static final int ROUTE_COLOR_A = 0x7AD7FF;
-    private static final int ROUTE_COLOR_B = 0x2F9BFF;
-    private static final int ROUTE_PULSE_COLOR = 0xE6FCFF;
+    private static final int[][] LEG_COLORS = new int[][]{
+            {0x7AD7FF, 0x2F9BFF},
+            {0x9BEA8B, 0x57C96C}
+    };
+    private static final int[][] LEG_PULSE_COLORS = new int[][]{
+            {0xDFFDFF, 0xBFEFFF},
+            {0xE8FFD9, 0xCAFFB2}
+    };
     private static final int START_COLOR = 0x95E06C;
     private static final int END_COLOR = 0xFFD36C;
+    private static final int DOCK_COLOR = 0x7AD7FF;
     private static final int LANDING_SEGMENTS = 48;
     private static final int LATITUDE_RINGS = 5;
     private static final int ROUTE_ARROW_SPACING = 12;
 
     private static Optional<LandingAreaOverlay> landingAreaOverlay = Optional.empty();
+    private static Optional<BlockPos> dockOverlay = Optional.empty();
     private static List<Vec3> flightPath = List.of();
+    private static List<Integer> flightPathLegEnds = List.of();
     private static Optional<UUID> previewedRouteId = Optional.empty();
 
     private LogisticsClientOverlays() {
@@ -47,9 +55,28 @@ public final class LogisticsClientOverlays {
         return landingAreaOverlay.isPresent() && landingAreaOverlay.get().stationPos().equals(stationPos);
     }
 
-    public static void setFlightPath(List<Vec3> points) {
+    public static void toggleDock(BlockPos dockPos) {
+        if (dockOverlay.isPresent() && dockOverlay.get().equals(dockPos)) {
+            clearDock();
+            return;
+        }
+        clearDock();
+        dockOverlay = Optional.of(dockPos.immutable());
+    }
+
+    public static void clearDock() {
+        dockOverlay.ifPresent(LogisticsClientOverlays::removeDock);
+        dockOverlay = Optional.empty();
+    }
+
+    public static boolean isDockVisible(BlockPos dockPos) {
+        return dockOverlay.isPresent() && dockOverlay.get().equals(dockPos);
+    }
+
+    public static void setFlightPath(List<Vec3> points, List<Integer> legEndIndices) {
         removeFlightPath(flightPath);
         flightPath = List.copyOf(points);
+        flightPathLegEnds = List.copyOf(legEndIndices);
     }
 
     public static void setPreviewedRouteId(UUID routeId) {
@@ -63,6 +90,7 @@ public final class LogisticsClientOverlays {
     public static void clearFlightPath() {
         removeFlightPath(flightPath);
         flightPath = List.of();
+        flightPathLegEnds = List.of();
         previewedRouteId = Optional.empty();
     }
 
@@ -72,8 +100,9 @@ public final class LogisticsClientOverlays {
 
     public static void refresh() {
         landingAreaOverlay.ifPresent(LogisticsClientOverlays::showLandingArea);
+        dockOverlay.ifPresent(LogisticsClientOverlays::showDock);
         if (flightPath.size() >= 2) {
-            showFlightPath(flightPath);
+            showFlightPath(flightPath, flightPathLegEnds);
         }
     }
 
@@ -127,14 +156,29 @@ public final class LogisticsClientOverlays {
         }
     }
 
-    private static void showFlightPath(List<Vec3> points) {
+    private static void showDock(BlockPos dockPos) {
+        Outliner.getInstance()
+                .showAABB(Pair.of("dock_overlay", dockPos), AABB.ofSize(Vec3.atCenterOf(dockPos), 1.05D, 1.05D, 1.05D))
+                .colored(DOCK_COLOR)
+                .lineWidth(1 / 12f)
+                .disableLineNormals()
+                .withFaceTexture(AllSpecialTextures.SELECTION);
+    }
+
+    private static void removeDock(BlockPos dockPos) {
+        Outliner.getInstance().remove(Pair.of("dock_overlay", dockPos));
+    }
+
+    private static void showFlightPath(List<Vec3> points, List<Integer> legEndIndices) {
         long gameTime = Minecraft.getInstance().level != null ? Minecraft.getInstance().level.getGameTime() : 0L;
         int pulsingSegment = points.size() <= 1 ? -1 : (int) (gameTime % (points.size() - 1));
 
         for (int i = 1; i < points.size(); i++) {
-            int color = i == pulsingSegment
-                    ? ROUTE_PULSE_COLOR
-                    : (i % 2 == 0 ? ROUTE_COLOR_A : ROUTE_COLOR_B);
+            int legIndex = legIndexForSegment(i, legEndIndices);
+            int[] shades = LEG_COLORS[Math.floorMod(legIndex, LEG_COLORS.length)];
+            int[] pulseShades = LEG_PULSE_COLORS[Math.floorMod(legIndex, LEG_PULSE_COLORS.length)];
+            int shadeIndex = i % 2 == 0 ? 0 : 1;
+            int color = i == pulsingSegment ? pulseShades[shadeIndex] : shades[shadeIndex];
             Outliner.getInstance()
                     .showLine(Pair.of("flight_path_segment", Integer.valueOf(i)), points.get(i - 1), points.get(i))
                     .colored(color)
@@ -204,6 +248,18 @@ public final class LogisticsClientOverlays {
         }
         Outliner.getInstance().remove("flight_path_start");
         Outliner.getInstance().remove("flight_path_end");
+    }
+
+    private static int legIndexForSegment(int segmentPointIndex, List<Integer> legEndIndices) {
+        if (legEndIndices.isEmpty()) {
+            return 0;
+        }
+        for (int i = 0; i < legEndIndices.size(); i++) {
+            if (segmentPointIndex <= legEndIndices.get(i)) {
+                return i;
+            }
+        }
+        return legEndIndices.size() - 1;
     }
 
     private static Vec3 pointOnCircle(Vec3 center, double radius, double theta, int axis) {

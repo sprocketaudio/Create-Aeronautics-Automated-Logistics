@@ -44,5 +44,15 @@ public final class ModNetworking {
                 SyncAutomatedShipVisualsPayload.STREAM_CODEC,
                 SyncAutomatedShipVisualsPayload::handle
         );
+        registrar.playToClient(
+                SetDockLinkPromptPayload.TYPE,
+                SetDockLinkPromptPayload.STREAM_CODEC,
+                SetDockLinkPromptPayload::handle
+        );
+        registrar.playToClient(
+                SetMenuActionBarMessagePayload.TYPE,
+                SetMenuActionBarMessagePayload.STREAM_CODEC,
+                SetMenuActionBarMessagePayload::handle
+        );
     }
 }

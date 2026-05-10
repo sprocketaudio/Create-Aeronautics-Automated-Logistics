@@ -26,6 +26,7 @@ public class AutomatedLogisticsConfig {
     public static final ModConfigSpec.IntValue DOCK_CARGO_TIMEOUT_TICKS;
 
     public static final ModConfigSpec.IntValue MAX_ACTIVE_VEHICLES_PER_PLAYER;
+    public static final ModConfigSpec.BooleanValue DEBUG_LOGGING;
 
     static final ModConfigSpec SPEC;
 
@@ -93,7 +94,17 @@ public class AutomatedLogisticsConfig {
                 .defineInRange("maxActiveVehiclesPerPlayer", 8, 0, 1024);
         BUILDER.pop();
 
+        BUILDER.push("debug");
+        DEBUG_LOGGING = BUILDER
+                .comment("Enable verbose automated logistics debug logging.")
+                .define("debugLogging", false);
+        BUILDER.pop();
+
         SPEC = BUILDER.build();
+    }
+
+    public static boolean debugLogging() {
+        return DEBUG_LOGGING.get();
     }
 
 }

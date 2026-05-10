@@ -10,10 +10,10 @@ public final class VehicleControllerResolver {
     }
 
     public static Optional<VehicleController> resolve(ServerLevel level, VehicleControllerRef controllerRef) {
-        if (controllerRef.controllerType().equals(RiddenEntityVehicleController.TYPE)) {
+        if (controllerRef.controllerType().equals(EntityVehicleController.TYPE)) {
             return controllerRef.vehicleId()
                     .map(level::getEntity)
-                    .map(RiddenEntityVehicleController::new)
+                    .map(EntityVehicleController::new)
                     .map(VehicleController.class::cast);
         }
 

@@ -63,7 +63,7 @@ public final class DockingConnectorDiscovery {
                 .filter(pos -> isDock(level, pos))
                 .sorted(Comparator.comparingDouble(pos -> pos.distSqr(center)))
                 .toList();
-        CreateAeronauticsAutomatedLogistics.LOGGER.info(
+        CreateAeronauticsAutomatedLogistics.debugLog(
                 "Dock discovery at {} radius {} found {} candidate(s): {}",
                 center,
                 radius,

@@ -7,14 +7,19 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
+import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.client.gui.ConfigurationScreen;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.common.NeoForge;
+import net.createmod.ponder.foundation.PonderIndex;
+import net.sprocketgames.create_aeronautics_automated_logistics.client.ponder.AutomatedLogisticsPonderPlugin;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.AirshipScheduleScreen;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.AirshipStationScreen;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.ShipTransponderScreen;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.AutomatedShipVisualClientState;
+import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.DockLinkPromptClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.LogisticsClientOverlays;
+import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.MenuActionBarClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModMenus;
 
 @Mod(value = CreateAeronauticsAutomatedLogistics.MOD_ID, dist = Dist.CLIENT)
@@ -23,6 +28,8 @@ public class CreateAeronauticsAutomatedLogisticsClient {
     public CreateAeronauticsAutomatedLogisticsClient(ModContainer container) {
         container.registerExtensionPoint(IConfigScreenFactory.class, ConfigurationScreen::new);
         NeoForge.EVENT_BUS.addListener(CreateAeronauticsAutomatedLogisticsClient::onClientTick);
+        NeoForge.EVENT_BUS.addListener(CreateAeronauticsAutomatedLogisticsClient::onScreenRenderPost);
+        PonderIndex.addPlugin(new AutomatedLogisticsPonderPlugin());
     }
 
     @SubscribeEvent
@@ -34,6 +41,12 @@ public class CreateAeronauticsAutomatedLogisticsClient {
 
     public static void onClientTick(ClientTickEvent.Post event) {
         AutomatedShipVisualClientState.clearIfWorldMissing();
+        DockLinkPromptClientState.tick();
+        MenuActionBarClientState.tick();
         LogisticsClientOverlays.refresh();
+    }
+
+    public static void onScreenRenderPost(ScreenEvent.Render.Post event) {
+        MenuActionBarClientState.render(event.getGuiGraphics());
     }
 }

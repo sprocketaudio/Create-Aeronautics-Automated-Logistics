@@ -16,17 +16,27 @@ import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.entity.BlockEntityTicker;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraft.world.level.block.state.properties.DirectionProperty;
+import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.level.BlockGetter;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity;
+import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
 
 public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock {
     public static final MapCodec<AirshipStationBlock> CODEC = simpleCodec(AirshipStationBlock::new);
     public static final BooleanProperty POWERED = BlockStateProperties.POWERED;
     public static final DirectionProperty FACING = BlockStateProperties.HORIZONTAL_FACING;
+    private static final VoxelShape NORTH_SHAPE = Block.box(1.0D, 0.0D, 0.0D, 15.0D, 14.0D, 15.0D);
+    private static final VoxelShape EAST_SHAPE = rotateShape(NORTH_SHAPE, net.minecraft.core.Direction.EAST);
+    private static final VoxelShape SOUTH_SHAPE = rotateShape(NORTH_SHAPE, net.minecraft.core.Direction.SOUTH);
+    private static final VoxelShape WEST_SHAPE = rotateShape(NORTH_SHAPE, net.minecraft.core.Direction.WEST);
 
     public AirshipStationBlock(BlockBehaviour.Properties properties) {
         super(properties);
@@ -64,6 +74,16 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
     }
 
     @Override
+    protected VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+        return switch (state.getValue(FACING)) {
+            case EAST -> EAST_SHAPE;
+            case SOUTH -> SOUTH_SHAPE;
+            case WEST -> WEST_SHAPE;
+            default -> NORTH_SHAPE;
+        };
+    }
+
+    @Override
     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hitResult) {
         if (level.isClientSide) {
             return InteractionResult.SUCCESS;
@@ -81,6 +101,22 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
     @Override
     public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
         return new AirshipStationBlockEntity(pos, state);
+    }
+
+    @Override
+    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(
+            Level level,
+            BlockState state,
+            BlockEntityType<T> blockEntityType
+    ) {
+        if (level.isClientSide) {
+            return null;
+        }
+        return createTickerHelper(
+                blockEntityType,
+                ModBlockEntities.AIRSHIP_STATION.get(),
+                AirshipStationBlockEntity::serverTick
+        );
     }
 
     @Override
@@ -104,5 +140,14 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
     @Override
     protected int getDirectSignal(BlockState state, net.minecraft.world.level.BlockGetter level, BlockPos pos, net.minecraft.core.Direction direction) {
         return getSignal(state, level, pos, direction);
+    }
+
+    private static VoxelShape rotateShape(VoxelShape shape, net.minecraft.core.Direction facing) {
+        return switch (facing) {
+            case EAST -> Block.box(16.0D - 15.0D, 0.0D, 1.0D, 16.0D - 0.0D, 14.0D, 15.0D);
+            case SOUTH -> Block.box(1.0D, 0.0D, 1.0D, 15.0D, 14.0D, 16.0D);
+            case WEST -> Block.box(0.0D, 0.0D, 1.0D, 15.0D, 14.0D, 15.0D);
+            default -> shape;
+        };
     }
 }

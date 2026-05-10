@@ -5,6 +5,7 @@ import com.simibubi.create.foundation.gui.AllIcons;
 import com.simibubi.create.foundation.gui.widget.IconButton;
 import java.util.ArrayList;
 import java.util.List;
+import net.createmod.catnip.gui.element.ScreenElement;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
@@ -27,10 +28,17 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             ResourceLocation.fromNamespaceAndPath(CreateAeronauticsAutomatedLogistics.MOD_ID, "textures/gui/transponder.png");
     private static final ResourceLocation PLAYER_INVENTORY =
             ResourceLocation.fromNamespaceAndPath("create", "textures/gui/player_inventory.png");
+    private static final ScreenElement SHOW_ROUTE_ICON =
+            new AtlasIcon(ResourceLocation.fromNamespaceAndPath("create", "textures/gui/icons.png"), 176, 16, 16, 16, 256);
+    private static final ScreenElement SHOW_DOCK_ICON =
+            new AtlasIcon(ResourceLocation.fromNamespaceAndPath("create", "textures/gui/icons.png"), 64, 192, 16, 16, 256);
 
     private final List<ButtonTooltip> buttonTooltips = new ArrayList<>();
     private EditBox nameBox;
     private IconButton previewButton;
+    private IconButton dockPreviewButton;
+    private MiniIconButton dockLinkButton;
+    private MiniIconButton dockClearButton;
     private int statusValueX;
     private int statusValueY;
     private int statusValueWidth;
@@ -84,9 +92,16 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         previewButton = addIconButton(
                 this.leftPos + 135,
                 buttonY,
-                AllIcons.I_TARGET,
+                SHOW_ROUTE_ICON,
                 this::togglePreview,
                 routePreviewButtonText()
+        );
+        dockPreviewButton = addIconButton(
+                this.leftPos + 17,
+                this.topPos + 154,
+                SHOW_DOCK_ICON,
+                this::toggleDockPreview,
+                dockPreviewTooltip()
         );
         addIconButton(
                 this.leftPos + 167,
@@ -94,6 +109,20 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                 AllIcons.I_CONFIRM,
                 this::onClose,
                 Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.close.tooltip")
+        );
+        dockLinkButton = addMiniIconButton(
+                this.leftPos + 140,
+                this.topPos + 119,
+                AllIcons.I_ADD,
+                () -> pressAction(ShipTransponderMenu.ACTION_BEGIN_LINK_DOCK),
+                Component.translatable("gui.create_aeronautics_automated_logistics.dock.link")
+        );
+        dockClearButton = addMiniIconButton(
+                this.leftPos + 154,
+                this.topPos + 119,
+                AllIcons.I_MTD_CLOSE,
+                () -> pressAction(ShipTransponderMenu.ACTION_CLEAR_DOCK_LINK),
+                Component.translatable("gui.create_aeronautics_automated_logistics.dock.clear")
         );
     }
 
@@ -111,6 +140,12 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     protected void renderBg(GuiGraphics guiGraphics, float partialTick, int mouseX, int mouseY) {
         guiGraphics.blit(BACKGROUND, this.leftPos, this.topPos, 0, 0, PANEL_WIDTH, PANEL_HEIGHT, 256, 256);
         guiGraphics.blit(PLAYER_INVENTORY, this.leftPos + INVENTORY_X, this.topPos + INVENTORY_Y, 0, 0, 176, 108);
+        if (this.minecraft != null && this.minecraft.player != null && this.menu.isScheduleSlotLocked(this.minecraft.player)) {
+            int slotX = this.leftPos + 43;
+            int slotY = this.topPos + 63;
+            guiGraphics.fill(slotX, slotY, slotX + 18, slotY + 18, 0x7A2B2323);
+            guiGraphics.fill(slotX + 1, slotY + 1, slotX + 17, slotY + 17, 0x55331212);
+        }
     }
 
     @Override
@@ -119,6 +154,16 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         if (previewButton != null) {
             previewButton.setToolTip(routePreviewButtonText());
             previewButton.green = LogisticsClientOverlays.hasFlightPath();
+        }
+        if (dockPreviewButton != null && this.minecraft != null && this.minecraft.player != null) {
+            dockPreviewButton.setToolTip(dockPreviewTooltip());
+            dockPreviewButton.active = menu.dockPreviewPos(this.minecraft.player).isPresent();
+            dockPreviewButton.green = menu.dockPreviewPos(this.minecraft.player)
+                    .map(LogisticsClientOverlays::isDockVisible)
+                    .orElse(false);
+        }
+        if (dockClearButton != null && this.minecraft != null && this.minecraft.player != null) {
+            dockClearButton.active = menu.dockPreviewPos(this.minecraft.player).isPresent();
         }
         super.render(guiGraphics, mouseX, mouseY, partialTick);
         renderHeaderEditIcon(guiGraphics);
@@ -174,8 +219,16 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         super.removed();
     }
 
-    private IconButton addIconButton(int x, int y, AllIcons icon, Runnable callback, Component... tooltip) {
+    private IconButton addIconButton(int x, int y, ScreenElement icon, Runnable callback, Component... tooltip) {
         IconButton button = new IconButton(x, y, icon);
+        button.withCallback(callback);
+        addRenderableWidget(button);
+        buttonTooltips.add(new ButtonTooltip(button, List.of(tooltip)));
+        return button;
+    }
+
+    private MiniIconButton addMiniIconButton(int x, int y, AllIcons icon, Runnable callback, Component... tooltip) {
+        MiniIconButton button = new MiniIconButton(x, y, icon);
         button.withCallback(callback);
         addRenderableWidget(button);
         buttonTooltips.add(new ButtonTooltip(button, List.of(tooltip)));
@@ -232,10 +285,10 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     private void renderHoveredTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
         renderTooltip(guiGraphics, mouseX, mouseY);
         if (this.minecraft != null && this.minecraft.player != null) {
-            var failureTooltip = menu.runtimeFailureTooltip(this.minecraft.player);
-            if (!failureTooltip.isEmpty()
+            var statusTooltip = menu.runtimeStatusTooltip(this.minecraft.player);
+            if (!statusTooltip.isEmpty()
                     && isInside(mouseX, mouseY, statusValueX, statusValueY, Math.max(1, statusValueWidth), Math.max(1, statusValueHeight))) {
-                guiGraphics.renderTooltip(this.font, failureTooltip, java.util.Optional.empty(), mouseX, mouseY);
+                guiGraphics.renderTooltip(this.font, statusTooltip, java.util.Optional.empty(), mouseX, mouseY);
                 return;
             }
             if (isInside(mouseX, mouseY, dockValueX, dockValueY, Math.max(1, dockValueWidth), Math.max(1, dockValueHeight))) {
@@ -277,11 +330,35 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         }
     }
 
+    private void toggleDockPreview() {
+        if (this.minecraft == null || this.minecraft.player == null) {
+            return;
+        }
+        menu.dockPreviewPos(this.minecraft.player).ifPresentOrElse(
+                LogisticsClientOverlays::toggleDock,
+                LogisticsClientOverlays::clearDock
+        );
+        if (dockPreviewButton != null) {
+            dockPreviewButton.setToolTip(dockPreviewTooltip());
+        }
+    }
+
     private Component routePreviewButtonText() {
         return Component.translatable(
                 LogisticsClientOverlays.hasFlightPath()
                         ? "gui.create_aeronautics_automated_logistics.ship_transponder.hide_flight_path"
                         : "gui.create_aeronautics_automated_logistics.ship_transponder.show_flight_path"
+        );
+    }
+
+    private Component dockPreviewTooltip() {
+        boolean visible = this.minecraft != null
+                && this.minecraft.player != null
+                && menu.dockPreviewPos(this.minecraft.player).map(LogisticsClientOverlays::isDockVisible).orElse(false);
+        return Component.translatable(
+                visible
+                        ? "gui.create_aeronautics_automated_logistics.dock.hide"
+                        : "gui.create_aeronautics_automated_logistics.dock.show"
         );
     }
 
