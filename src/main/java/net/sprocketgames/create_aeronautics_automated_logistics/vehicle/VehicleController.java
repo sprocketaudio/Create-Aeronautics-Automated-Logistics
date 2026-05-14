@@ -65,5 +65,13 @@ public interface VehicleController {
         return moveToward(level, targetPosition, maxSpeedMultiplier, desiredSpeedBlocksPerTick);
     }
 
+    default void hold(ServerLevel level, Vec3 holdPosition, Optional<RouteRotation> holdRotation) {
+        stop(level);
+    }
+
+    default void relocate(ServerLevel level, Vec3 targetPosition, Optional<RouteRotation> targetRotation) {
+        stop(level);
+    }
+
     void stop(ServerLevel level);
 }

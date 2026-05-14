@@ -29,6 +29,36 @@ public final class ModNetworking {
                 SelectAirshipScheduleStationPayload.STREAM_CODEC,
                 SelectAirshipScheduleStationPayload::handle
         );
+        registrar.playToServer(
+                OpenInstalledScheduleEditorPayload.TYPE,
+                OpenInstalledScheduleEditorPayload.STREAM_CODEC,
+                OpenInstalledScheduleEditorPayload::handle
+        );
+        registrar.playToServer(
+                ReopenShipTransponderPayload.TYPE,
+                ReopenShipTransponderPayload.STREAM_CODEC,
+                ReopenShipTransponderPayload::handle
+        );
+        registrar.playToServer(
+                StartTransponderRouteRecordingPayload.TYPE,
+                StartTransponderRouteRecordingPayload.STREAM_CODEC,
+                StartTransponderRouteRecordingPayload::handle
+        );
+        registrar.playToServer(
+                FinishTransponderRouteRecordingPayload.TYPE,
+                FinishTransponderRouteRecordingPayload.STREAM_CODEC,
+                FinishTransponderRouteRecordingPayload::handle
+        );
+        registrar.playToServer(
+                CancelTransponderRouteRecordingPayload.TYPE,
+                CancelTransponderRouteRecordingPayload.STREAM_CODEC,
+                CancelTransponderRouteRecordingPayload::handle
+        );
+        registrar.playToServer(
+                SetTransponderAppendModePayload.TYPE,
+                SetTransponderAppendModePayload.STREAM_CODEC,
+                SetTransponderAppendModePayload::handle
+        );
         registrar.playToClient(
                 SetFlightPathPreviewPayload.TYPE,
                 SetFlightPathPreviewPayload.STREAM_CODEC,
@@ -53,6 +83,11 @@ public final class ModNetworking {
                 SetMenuActionBarMessagePayload.TYPE,
                 SetMenuActionBarMessagePayload.STREAM_CODEC,
                 SetMenuActionBarMessagePayload::handle
+        );
+        registrar.playToClient(
+                SetTransponderRecordingStatePayload.TYPE,
+                SetTransponderRecordingStatePayload.STREAM_CODEC,
+                SetTransponderRecordingStatePayload::handle
         );
     }
 }

@@ -23,6 +23,14 @@ public final class ShipTransponderRegistry {
         return Optional.ofNullable(SHIPS.get(transponderId));
     }
 
+    public static List<ShipTransponderSnapshot> allShips() {
+        return SHIPS.values().stream()
+                .sorted(Comparator
+                        .comparing(ShipTransponderSnapshot::shipName, String.CASE_INSENSITIVE_ORDER)
+                        .thenComparing(snapshot -> snapshot.transponderId().toString()))
+                .toList();
+    }
+
     public static List<ShipTransponderSnapshot> knownShips(ResourceKey<Level> dimension) {
         return SHIPS.values().stream()
                 .filter(snapshot -> snapshot.dimension().equals(dimension))

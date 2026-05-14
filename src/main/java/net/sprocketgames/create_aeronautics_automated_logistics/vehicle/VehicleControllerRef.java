@@ -24,4 +24,17 @@ public record VehicleControllerRef(
             throw new IllegalArgumentException("vehicleId or controllerPos must be present");
         }
     }
+
+    public boolean matches(VehicleControllerRef other) {
+        Objects.requireNonNull(other, "other");
+        if (!controllerType.equals(other.controllerType) || !dimension.equals(other.dimension)) {
+            return false;
+        }
+        if (vehicleId.isPresent() && other.vehicleId.isPresent() && vehicleId.get().equals(other.vehicleId.get())) {
+            return true;
+        }
+        return controllerPos.isPresent()
+                && other.controllerPos.isPresent()
+                && controllerPos.get().equals(other.controllerPos.get());
+    }
 }

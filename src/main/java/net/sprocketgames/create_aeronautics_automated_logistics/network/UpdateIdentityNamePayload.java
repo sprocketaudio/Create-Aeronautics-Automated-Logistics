@@ -10,6 +10,8 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.StationPermissionService;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.TransponderPermissionService;
 
 public record UpdateIdentityNamePayload(BlockPos pos, String name) implements CustomPacketPayload {
     public static final Type<UpdateIdentityNamePayload> TYPE = new Type<>(
@@ -41,10 +43,16 @@ public record UpdateIdentityNamePayload(BlockPos pos, String name) implements Cu
         }
 
         if (player.serverLevel().getBlockEntity(payload.pos()) instanceof AirshipStationBlockEntity station) {
+            if (!StationPermissionService.ensureCanControl(player, station)) {
+                return;
+            }
             station.setStationName(payload.name());
             return;
         }
         if (player.serverLevel().getBlockEntity(payload.pos()) instanceof ShipTransponderBlockEntity transponder) {
+            if (!TransponderPermissionService.ensureCanControl(player, transponder)) {
+                return;
+            }
             transponder.setShipName(payload.name());
             transponder.refreshRuntimeShip(player.serverLevel());
         }

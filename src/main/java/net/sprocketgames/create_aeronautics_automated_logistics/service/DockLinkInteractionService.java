@@ -30,18 +30,50 @@ public final class DockLinkInteractionService {
     public static void beginStationLink(ServerPlayer player, BlockPos stationPos) {
         PENDING.put(player.getUUID(), new PendingDockLink(LinkTarget.STATION, stationPos.immutable(), player.level().dimension(), player.level().getGameTime() + LINK_TIMEOUT_TICKS));
         actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.dock_link.station_begin"));
-        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(true, false));
+        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(true, false, stationPos.immutable()));
     }
 
     public static void beginTransponderLink(ServerPlayer player, BlockPos transponderPos) {
         PENDING.put(player.getUUID(), new PendingDockLink(LinkTarget.TRANSPONDER, transponderPos.immutable(), player.level().dimension(), player.level().getGameTime() + LINK_TIMEOUT_TICKS));
         actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.dock_link.transponder_begin"));
-        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(true, true));
+        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(true, true, transponderPos.immutable()));
     }
 
     public static void clearPending(ServerPlayer player) {
         PENDING.remove(player.getUUID());
-        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false));
+        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false, BlockPos.ZERO));
+    }
+
+    public static boolean cancelPending(ServerPlayer player) {
+        PendingDockLink removed = PENDING.remove(player.getUUID());
+        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false, BlockPos.ZERO));
+        if (removed == null) {
+            return false;
+        }
+        actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.dock_link.cancelled"));
+        return true;
+    }
+
+    public static boolean cancelPendingIfSource(ServerPlayer player, BlockPos ownerPos) {
+        PendingDockLink pending = pending(player);
+        if (pending == null || !pending.ownerPos().equals(ownerPos)) {
+            return false;
+        }
+        return cancelPending(player);
+    }
+
+    public static boolean hasPendingStationLink(ServerPlayer player, BlockPos stationPos) {
+        PendingDockLink pending = pending(player);
+        return pending != null
+                && pending.target() == LinkTarget.STATION
+                && pending.ownerPos().equals(stationPos);
+    }
+
+    public static boolean hasPendingTransponderLink(ServerPlayer player, BlockPos transponderPos) {
+        PendingDockLink pending = pending(player);
+        return pending != null
+                && pending.target() == LinkTarget.TRANSPONDER
+                && pending.ownerPos().equals(transponderPos);
     }
 
     public static void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
@@ -55,13 +87,19 @@ public final class DockLinkInteractionService {
         if (!pending.dimension().equals(player.level().dimension()) || player.level().getGameTime() > pending.expiresAt()) {
             PENDING.remove(player.getUUID());
             actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.dock_link.expired"));
-            PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false));
+            PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false, BlockPos.ZERO));
             event.setCanceled(true);
             event.setCancellationResult(InteractionResult.SUCCESS);
             return;
         }
 
         BlockPos clickedPos = event.getPos();
+        if (clickedPos.equals(pending.ownerPos())) {
+            cancelPending(player);
+            event.setCanceled(true);
+            event.setCancellationResult(InteractionResult.SUCCESS);
+            return;
+        }
         if (!DockingConnectorDiscovery.isDock(player.serverLevel(), clickedPos)) {
             actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.dock_link.not_a_dock"));
             event.setCanceled(true);
@@ -75,7 +113,7 @@ public final class DockLinkInteractionService {
         };
         if (linked) {
             PENDING.remove(player.getUUID());
-            PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false));
+            PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false, BlockPos.ZERO));
         }
         event.setCanceled(true);
         event.setCancellationResult(InteractionResult.SUCCESS);
@@ -84,6 +122,9 @@ public final class DockLinkInteractionService {
     private static boolean tryLinkStation(ServerPlayer player, BlockPos stationPos, BlockPos dockPos) {
         if (!(player.serverLevel().getBlockEntity(stationPos) instanceof AirshipStationBlockEntity station)) {
             actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.dock_link.owner_missing"));
+            return false;
+        }
+        if (!StationPermissionService.ensureCanControl(player, station)) {
             return false;
         }
         DockDiscoveryResult result = station.setGroundDockLink(player.serverLevel(), dockPos);
@@ -106,6 +147,9 @@ public final class DockLinkInteractionService {
             actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.dock_link.owner_missing"));
             return false;
         }
+        if (!TransponderPermissionService.ensureCanControl(player, transponder)) {
+            return false;
+        }
         DockDiscoveryResult result = transponder.setShipDockLink(player.serverLevel(), dockPos);
         if (result.status() == DockLinkStatus.LINKED) {
             actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.dock_link.transponder_saved"));
@@ -119,6 +163,19 @@ public final class DockLinkInteractionService {
     private static void actionBar(ServerPlayer player, Component message) {
         player.displayClientMessage(message, true);
         SetMenuActionBarMessagePayload.send(player, message);
+    }
+
+    private static PendingDockLink pending(ServerPlayer player) {
+        PendingDockLink pending = PENDING.get(player.getUUID());
+        if (pending == null) {
+            return null;
+        }
+        if (!pending.dimension().equals(player.level().dimension()) || player.level().getGameTime() > pending.expiresAt()) {
+            PENDING.remove(player.getUUID());
+            PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false, BlockPos.ZERO));
+            return null;
+        }
+        return pending;
     }
 
     private enum LinkTarget {

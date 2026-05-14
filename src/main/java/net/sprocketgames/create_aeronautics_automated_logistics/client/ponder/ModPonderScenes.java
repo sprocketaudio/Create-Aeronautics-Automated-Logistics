@@ -10,8 +10,6 @@ public final class ModPonderScenes {
     }
 
     public static void register(PonderSceneRegistrationHelper<ResourceLocation> helper) {
-        helper.forComponents(id("airship_station"))
-                .addStoryBoard("airship_station/recording_between_stations", AirshipStationPonderScenes::recordingBetweenStations);
         helper.forComponents(id("ship_transponder"))
                 .addStoryBoard("ship_transponder/installing_and_running_a_schedule", AirshipStationPonderScenes::installingAndRunningASchedule)
                 .addStoryBoard("ship_transponder/docking_waits", AirshipStationPonderScenes::dockingWaits);

@@ -18,6 +18,12 @@ public interface RouteRecordingService {
 
     RouteOperationResult<RouteSegment> finishSegmentRecording(ServerPlayer player, BlockPos endStationPos);
 
+    default RouteOperationResult<RouteSegment> finishSegmentRecording(ServerPlayer player, BlockPos endStationPos, boolean continueRecording) {
+        return finishSegmentRecording(player, endStationPos);
+    }
+
+    RouteOperationResult<Boolean> cancelRecording(ServerPlayer player);
+
     RouteOperationResult<RouteStop> markStop(ServerPlayer player, RouteId routeId, WaitCondition waitCondition);
 
     RouteOperationResult<RouteStop> markStop(ServerPlayer player, WaitCondition waitCondition);

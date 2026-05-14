@@ -1,29 +1,37 @@
 package net.sprocketgames.create_aeronautics_automated_logistics.menu;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationSnapshot;
 import net.sprocketgames.create_aeronautics_automated_logistics.item.AirshipScheduleItem;
+import net.sprocketgames.create_aeronautics_automated_logistics.network.SetFlightPathPreviewPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.SetMenuActionBarMessagePayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModItems;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModMenus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleEntry;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentResolver;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitCondition;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.TransponderPermissionService;
 
 public class AirshipScheduleMenu extends AbstractContainerMenu {
     public static final int ACTION_ADD_TRAVEL = 0;
@@ -46,14 +54,42 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
     private static final int WAIT_ADJUST_TICKS = 20 * 5;
 
     private int selectedIndex;
+    private final BlockPos originTransponderPos;
+    private final boolean returnToRecordingMode;
 
     public AirshipScheduleMenu(int containerId, Inventory playerInventory, FriendlyByteBuf buffer) {
-        this(containerId, playerInventory);
+        this(containerId, playerInventory, readContext(buffer));
     }
 
     public AirshipScheduleMenu(int containerId, Inventory playerInventory) {
+        this(containerId, playerInventory, null, false);
+    }
+
+    private AirshipScheduleMenu(int containerId, Inventory playerInventory, OpenContext context) {
+        this(containerId, playerInventory, context.originTransponderPos(), context.returnToRecordingMode());
+    }
+
+    public AirshipScheduleMenu(int containerId, Inventory playerInventory, BlockPos originTransponderPos, boolean returnToRecordingMode) {
         super(ModMenus.AIRSHIP_SCHEDULE.get(), containerId);
+        this.originTransponderPos = originTransponderPos;
+        this.returnToRecordingMode = returnToRecordingMode;
         addPlayerInventory(playerInventory);
+    }
+
+    private static OpenContext readContext(FriendlyByteBuf buffer) {
+        if (buffer == null || buffer.readableBytes() <= 0) {
+            return new OpenContext(null, false);
+        }
+        boolean fromTransponder = buffer.readBoolean();
+        if (!fromTransponder || buffer.readableBytes() < 9) {
+            return new OpenContext(null, false);
+        }
+        BlockPos originPos = buffer.readBlockPos();
+        boolean returnToRecordingMode = buffer.readBoolean();
+        return new OpenContext(originPos, returnToRecordingMode);
+    }
+
+    private record OpenContext(BlockPos originTransponderPos, boolean returnToRecordingMode) {
     }
 
     @Override
@@ -71,7 +107,10 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
     }
 
     public AirshipSchedule schedule(Player player) {
-        return scheduleStack(player).map(AirshipScheduleItem::readSchedule).orElseGet(AirshipSchedule::empty);
+        return editableTransponder(player)
+                .map(ShipTransponderBlockEntity::ownedSchedule)
+                .or(() -> editableScheduleStack(player).map(AirshipScheduleItem::readSchedule))
+                .orElseGet(AirshipSchedule::empty);
     }
 
     public int selectedIndex(Player player) {
@@ -100,7 +139,29 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
 
     @Override
     public boolean stillValid(Player player) {
-        return scheduleStack(player).isPresent();
+        if (originTransponderPos != null) {
+            if (!(player.level().getBlockEntity(originTransponderPos) instanceof ShipTransponderBlockEntity transponder)) {
+                return false;
+            }
+            return player.distanceToSqr(
+                    originTransponderPos.getX() + 0.5D,
+                    originTransponderPos.getY() + 0.5D,
+                    originTransponderPos.getZ() + 0.5D
+            ) <= 64.0D;
+        }
+        return editableScheduleStack(player).isPresent();
+    }
+
+    public boolean openedFromTransponder() {
+        return originTransponderPos != null;
+    }
+
+    public Optional<BlockPos> originTransponderPos() {
+        return Optional.ofNullable(originTransponderPos);
+    }
+
+    public boolean returnToRecordingMode() {
+        return returnToRecordingMode;
     }
 
     private void addPlayerInventory(Inventory inventory) {
@@ -124,12 +185,18 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
             selectedIndex = Math.max(0, Math.min(id - ACTION_SELECT_ENTRY_BASE, Math.max(0, schedule.entries().size() - 1)));
             return true;
         }
-        return scheduleStack(player).map(stack -> {
-            AirshipSchedule schedule = AirshipScheduleItem.readSchedule(stack);
-            clampSelectedIndex(schedule);
-            AirshipSchedule updated = switch (id) {
+        if (!canModify(player)) {
+            return false;
+        }
+        AirshipSchedule schedule = schedule(player);
+        clampSelectedIndex(schedule);
+        if (openedFromTransponder()
+                && (id == ACTION_ADD_TRAVEL || id == ACTION_DUPLICATE || id == ACTION_CYCLE_TARGET_STATION)) {
+            return true;
+        }
+        AirshipSchedule updated = switch (id) {
                 case ACTION_ADD_TRAVEL -> addTravel(schedule);
-                case ACTION_REMOVE -> removeSelected(schedule);
+                case ACTION_REMOVE -> removeSelected(player, schedule);
                 case ACTION_DUPLICATE -> duplicateSelected(schedule);
                 case ACTION_MOVE_UP -> moveSelected(schedule, -1);
                 case ACTION_MOVE_DOWN -> moveSelected(schedule, 1);
@@ -146,11 +213,10 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
                 case ACTION_PIN_NEWEST_SEGMENT -> pinNewestSegment(player, schedule);
                 default -> schedule;
             };
-            if (updated != schedule) {
-                AirshipScheduleItem.writeSchedule(stack, updated);
-            }
-            return id >= ACTION_ADD_TRAVEL && id <= ACTION_PIN_NEWEST_SEGMENT;
-        }).orElse(false);
+        if (updated != schedule) {
+            writeSchedule(player, updated);
+        }
+        return id >= ACTION_ADD_TRAVEL && id <= ACTION_PIN_NEWEST_SEGMENT;
     }
 
     private AirshipSchedule addTravel(AirshipSchedule schedule) {
@@ -161,14 +227,103 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         return schedule.withEntries(entries);
     }
 
-    private AirshipSchedule removeSelected(AirshipSchedule schedule) {
+    private AirshipSchedule removeSelected(Player player, AirshipSchedule schedule) {
         if (schedule.entries().isEmpty()) {
             return schedule;
         }
+        deleteAssociatedSegments(player, schedule, selectedIndex);
         List<AirshipScheduleEntry> entries = new ArrayList<>(schedule.entries());
         entries.remove(selectedIndex);
         selectedIndex = Math.max(0, Math.min(selectedIndex, entries.size() - 1));
         return schedule.withEntries(entries);
+    }
+
+    private void deleteAssociatedSegments(Player player, AirshipSchedule schedule, int removedIndex) {
+        Optional<ShipTransponderBlockEntity> transponder = editableTransponder(player);
+        if (transponder.isEmpty() || !(player instanceof ServerPlayer serverPlayer)) {
+            return;
+        }
+        ServerLevel level = serverPlayer.serverLevel();
+        UUID transponderId = transponder.get().transponderId();
+        LinkedHashSet<RouteSegment> segmentsToDelete = new LinkedHashSet<>();
+        if (removedIndex >= 0 && removedIndex < schedule.entries().size() - 1) {
+            resolveSegmentForEntry(schedule, removedIndex + 1, transponderId, level)
+                    .ifPresent(segmentsToDelete::add);
+        }
+        if (removedIndex == schedule.entries().size() - 1) {
+            resolveSegmentForEntry(schedule, removedIndex, transponderId, level)
+                    .ifPresent(segmentsToDelete::add);
+        }
+        if (removedIndex == 0 && schedule.entries().size() == 1) {
+            resolveSegmentForEntry(schedule, removedIndex, transponderId, level)
+                    .ifPresent(segmentsToDelete::add);
+        }
+        if (segmentsToDelete.isEmpty()) {
+            return;
+        }
+        for (RouteSegment segment : segmentsToDelete) {
+            removeRouteFromLoadedStation(level, segment.startStationId(), segment.id().value());
+            removeRouteFromLoadedStation(level, segment.endStationId(), segment.id().value());
+            RouteSegmentRegistry.unregister(segment.id());
+        }
+        actionBar(player, Component.translatable(
+                "message.create_aeronautics_automated_logistics.airship_schedule.stop_deleted_with_routes",
+                schedule.entries().get(removedIndex).displayStationName(),
+                segmentsToDelete.size()
+        ));
+        PacketDistributor.sendToPlayer(
+                serverPlayer,
+                new SetFlightPathPreviewPayload(false, List.of(), List.of())
+        );
+    }
+
+    private Optional<RouteSegment> resolveSegmentForEntry(
+            AirshipSchedule schedule,
+            int entryIndex,
+            UUID transponderId,
+            ServerLevel level
+    ) {
+        if (entryIndex < 0 || entryIndex >= schedule.entries().size()) {
+            return Optional.empty();
+        }
+        AirshipScheduleEntry entry = schedule.entries().get(entryIndex);
+        if (entry.targetStationId().isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<RouteSegment> pinned = entry.pinnedSegmentId()
+                .flatMap(RouteSegmentRegistry::byId)
+                .filter(segment -> segment.transponderId().equals(transponderId))
+                .filter(segment -> segment.dimension().equals(level.dimension()));
+        if (pinned.isPresent()) {
+            return pinned;
+        }
+        if (entryIndex == 0) {
+            return RouteSegmentRegistry.endingAt(
+                    entry.targetStationId().get(),
+                    level.dimension(),
+                    Optional.of(transponderId)
+            ).stream().findFirst();
+        }
+        AirshipScheduleEntry previous = schedule.entries().get(entryIndex - 1);
+        if (previous.targetStationId().isEmpty()) {
+            return Optional.empty();
+        }
+        return RouteSegmentResolver.newestFor(
+                previous.targetStationId().get(),
+                entry.targetStationId().get(),
+                level.dimension(),
+                Optional.of(transponderId)
+        );
+    }
+
+    private void removeRouteFromLoadedStation(ServerLevel level, UUID stationId, UUID segmentId) {
+        AirshipStationRegistry.snapshot(stationId)
+                .filter(snapshot -> snapshot.dimension().equals(level.dimension()))
+                .map(AirshipStationSnapshot::stationPos)
+                .map(level::getBlockEntity)
+                .filter(net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity.class::isInstance)
+                .map(net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity.class::cast)
+                .ifPresent(station -> station.removeRouteSegment(segmentId));
     }
 
     private AirshipSchedule duplicateSelected(AirshipSchedule schedule) {
@@ -330,7 +485,7 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         selectedIndex = Math.max(0, Math.min(selectedIndex, schedule.entries().size() - 1));
     }
 
-    private java.util.Optional<ItemStack> scheduleStack(Player player) {
+    public java.util.Optional<ItemStack> editableScheduleStack(Player player) {
         if (player.getMainHandItem().is(ModItems.AIRSHIP_SCHEDULE.get())) {
             return java.util.Optional.of(player.getMainHandItem());
         }
@@ -340,10 +495,72 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         return java.util.Optional.empty();
     }
 
+    public void writeSchedule(Player player, AirshipSchedule schedule) {
+        Optional<ShipTransponderBlockEntity> transponder = editableTransponder(player);
+        if (transponder.isPresent()) {
+            if (player instanceof ServerPlayer serverPlayer
+                    && !TransponderPermissionService.ensureCanControl(serverPlayer, transponder.get())) {
+                return;
+            }
+            AirshipSchedule current = transponder.get().ownedSchedule();
+            if (!containsOnlyExistingStops(current, schedule)) {
+                return;
+            }
+            transponder.get().setOwnedSchedule(schedule);
+            return;
+        }
+        editableScheduleStack(player).ifPresent(stack -> {
+            AirshipScheduleItem.writeSchedule(stack, schedule);
+            markSourceChanged(player);
+        });
+    }
+
+    private Optional<ShipTransponderBlockEntity> editableTransponder(Player player) {
+        if (originTransponderPos != null
+                && player.level().getBlockEntity(originTransponderPos) instanceof ShipTransponderBlockEntity transponder) {
+            return Optional.of(transponder);
+        }
+        return Optional.empty();
+    }
+
+    private boolean containsOnlyExistingStops(AirshipSchedule current, AirshipSchedule updated) {
+        List<AirshipScheduleEntry> remaining = new ArrayList<>(current.entries());
+        for (AirshipScheduleEntry updatedEntry : updated.entries()) {
+            int matchingIndex = -1;
+            for (int i = 0; i < remaining.size(); i++) {
+                AirshipScheduleEntry candidate = remaining.get(i);
+                if (candidate.targetStationId().equals(updatedEntry.targetStationId())
+                        && candidate.pinnedSegmentId().equals(updatedEntry.pinnedSegmentId())) {
+                    matchingIndex = i;
+                    break;
+                }
+            }
+            if (matchingIndex < 0) {
+                return false;
+            }
+            remaining.remove(matchingIndex);
+        }
+        return true;
+    }
+
+    private void markSourceChanged(Player player) {
+        if (originTransponderPos != null
+                && player.level().getBlockEntity(originTransponderPos) instanceof ShipTransponderBlockEntity transponder) {
+            transponder.setChanged();
+        }
+    }
+
     private void actionBar(Player player, Component message) {
-        player.displayClientMessage(message, true);
         if (player instanceof ServerPlayer serverPlayer) {
             SetMenuActionBarMessagePayload.send(serverPlayer, message);
         }
+    }
+
+    private boolean canModify(Player player) {
+        Optional<ShipTransponderBlockEntity> transponder = editableTransponder(player);
+        if (transponder.isEmpty() || !(player instanceof ServerPlayer serverPlayer)) {
+            return true;
+        }
+        return TransponderPermissionService.ensureCanControl(serverPlayer, transponder.get());
     }
 }

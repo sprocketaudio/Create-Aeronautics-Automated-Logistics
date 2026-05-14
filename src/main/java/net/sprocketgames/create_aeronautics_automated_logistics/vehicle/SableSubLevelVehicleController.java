@@ -34,8 +34,10 @@ public class SableSubLevelVehicleController implements VehicleController {
     private static final double ANGULAR_DAMPING = 0.9D;
     private static final double ROTATION_ALIGNMENT_GAIN = 0.18D;
     private static final double MAX_ALIGNMENT_ANGULAR_CHANGE = 0.06D;
+    private static final double HOLD_POSITION_GAIN = 0.45D;
+    private static final double HOLD_VELOCITY_DAMPING = 1.1D;
+    private static final double MAX_HOLD_LINEAR_CHANGE = 0.18D;
     private static final double TICKS_PER_SECOND = 20.0D;
-    private static final double MIN_AUTOPILOT_SPEED_BLOCKS_PER_SECOND = 1.2D;
     private static final int MOVEMENT_LOG_INTERVAL_TICKS = 20;
 
     public static final ResourceLocation TYPE = ResourceLocation.fromNamespaceAndPath(
@@ -58,7 +60,8 @@ public class SableSubLevelVehicleController implements VehicleController {
         CreateAeronauticsAutomatedLogistics.debugLog("Resolving Sable controller from {}", controllerRef);
         Optional<ServerSubLevel> byId = controllerRef.vehicleId().flatMap(vehicleId -> findSubLevel(level, vehicleId));
         if (byId.isPresent()) {
-            BlockPos localPos = controllerRef.controllerPos().orElseGet(() -> BlockPos.containing(0, 0, 0));
+            BlockPos localPos = resolveControllerLocalPos(byId.get(), controllerRef.controllerPos())
+                    .orElseGet(() -> BlockPos.containing(0, 0, 0));
             CreateAeronauticsAutomatedLogistics.debugLog(
                     "Resolved Sable controller by id {} at local {}",
                     byId.get().getUniqueId(),
@@ -73,6 +76,26 @@ public class SableSubLevelVehicleController implements VehicleController {
             CreateAeronauticsAutomatedLogistics.debugWarn("Could not resolve linked Sable controller from {}", controllerRef);
         }
         return resolved;
+    }
+
+    private static Optional<BlockPos> resolveControllerLocalPos(ServerSubLevel subLevel, Optional<BlockPos> storedPos) {
+        if (storedPos.isEmpty()) {
+            return Optional.empty();
+        }
+
+        BlockPos candidate = storedPos.get();
+        if (isInsideStorageBounds(subLevel, candidate) && hasControllerBlockAtStorage(subLevel, candidate, ModBlocks.SHIP_TRANSPONDER.get())) {
+            return Optional.of(candidate);
+        }
+
+        Vec3 worldAnchor = Vec3.atCenterOf(candidate);
+        Vec3 localAnchor = subLevel.logicalPose().transformPositionInverse(worldAnchor);
+        BlockPos localPos = BlockPos.containing(localAnchor.x, localAnchor.y, localAnchor.z);
+        if (isInsideStorageBounds(subLevel, localPos) && hasControllerBlockAtStorage(subLevel, localPos, ModBlocks.SHIP_TRANSPONDER.get())) {
+            return Optional.of(localPos);
+        }
+
+        return Optional.empty();
     }
 
     public static Optional<SableSubLevelVehicleController> resolveControllerBlock(
@@ -189,18 +212,15 @@ public class SableSubLevelVehicleController implements VehicleController {
 
         Vec3 delta = targetPosition.subtract(position());
         double distance = delta.length();
-        if (distance < 0.05D && targetRotation.isEmpty()) {
+        if (distance < 0.05D && targetRotation.isEmpty() && desiredSpeedBlocksPerTick <= 0.0D) {
             stop(level);
             return VehicleMotionResult.moved();
         }
 
-        double requestedSpeedBlocksPerSecond = Math.max(
-                MIN_AUTOPILOT_SPEED_BLOCKS_PER_SECOND,
-                desiredSpeedBlocksPerTick * TICKS_PER_SECOND
-        );
-        double maxSpeedBlocksPerSecond = Math.max(0.02D, requestedSpeedBlocksPerSecond * maxSpeedMultiplier);
+        double requestedSpeedBlocksPerSecond = Math.max(0.0D, desiredSpeedBlocksPerTick * TICKS_PER_SECOND);
+        double maxSpeedBlocksPerSecond = requestedSpeedBlocksPerSecond * maxSpeedMultiplier;
         double maxOneTickTravelSpeed = distance * TICKS_PER_SECOND;
-        Vec3 desiredVelocity = distance < 0.05D
+        Vec3 desiredVelocity = distance < 1.0E-6D
                 ? Vec3.ZERO
                 : delta.normalize().scale(Math.min(maxOneTickTravelSpeed, maxSpeedBlocksPerSecond));
         Vector3dc currentVelocity = handle.getLinearVelocity();
@@ -248,6 +268,44 @@ public class SableSubLevelVehicleController implements VehicleController {
                 new Vector3d(-linearVelocity.x(), -linearVelocity.y(), -linearVelocity.z()),
                 new Vector3d(-angularVelocity.x(), -angularVelocity.y(), -angularVelocity.z())
         );
+    }
+
+    @Override
+    public void hold(ServerLevel level, Vec3 holdPosition, Optional<RouteRotation> holdRotation) {
+        RigidBodyHandle handle = RigidBodyHandle.of(subLevel);
+        if (handle == null || !handle.isValid()) {
+            return;
+        }
+        applyHoldStabilization(handle, holdPosition, holdRotation);
+    }
+
+    @Override
+    public void relocate(ServerLevel level, Vec3 targetPosition, Optional<RouteRotation> targetRotation) {
+        RigidBodyHandle handle = RigidBodyHandle.of(subLevel);
+        if (handle == null || !handle.isValid()) {
+            return;
+        }
+        stop(level);
+    }
+
+    private void applyHoldStabilization(
+            RigidBodyHandle handle,
+            Vec3 holdPosition,
+            Optional<RouteRotation> holdRotation
+    ) {
+        Vec3 positionError = holdPosition.subtract(position());
+        Vector3dc currentVelocity = handle.getLinearVelocity();
+        Vector3dc currentAngularVelocity = handle.getAngularVelocity();
+
+        Vector3d linearCorrection = new Vector3d(
+                positionError.x * HOLD_POSITION_GAIN - currentVelocity.x() * HOLD_VELOCITY_DAMPING,
+                positionError.y * HOLD_POSITION_GAIN - currentVelocity.y() * HOLD_VELOCITY_DAMPING,
+                positionError.z * HOLD_POSITION_GAIN - currentVelocity.z() * HOLD_VELOCITY_DAMPING
+        );
+        clampMagnitude(linearCorrection, MAX_HOLD_LINEAR_CHANGE);
+
+        Vector3d angularCorrection = computeAngularCorrection(holdRotation, currentAngularVelocity);
+        handle.addLinearAndAngularVelocity(linearCorrection, angularCorrection);
     }
 
     private static Optional<ServerSubLevel> findSubLevel(ServerLevel level, UUID subLevelId) {

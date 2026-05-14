@@ -27,6 +27,14 @@ public final class AirshipStationRegistry {
         return Optional.ofNullable(STATIONS.get(stationId));
     }
 
+    public static List<AirshipStationSnapshot> allStations() {
+        return STATIONS.values().stream()
+                .sorted(Comparator
+                        .comparing(AirshipStationSnapshot::stationName, String.CASE_INSENSITIVE_ORDER)
+                        .thenComparing(snapshot -> snapshot.stationId().toString()))
+                .toList();
+    }
+
     public static List<AirshipStationSnapshot> knownStations(ResourceKey<Level> dimension) {
         return STATIONS.values().stream()
                 .filter(snapshot -> snapshot.dimension().equals(dimension))

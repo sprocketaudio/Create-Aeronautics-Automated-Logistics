@@ -21,6 +21,7 @@ import net.minecraft.world.level.Level;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.sprocketgames.create_aeronautics_automated_logistics.AutomatedLogisticsConfig;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
+import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.DockLinkPromptClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.LogisticsClientOverlays;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipStationMenu;
@@ -61,8 +62,8 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
 
     private final List<ButtonTooltip> buttonTooltips = new ArrayList<>();
     private EditBox nameBox;
-    private IconButton recordButton;
-    private IconButton finishRecordingButton;
+    private IconButton runButton;
+    private IconButton stopButton;
     private IconButton landingAreaButton;
     private IconButton routesButton;
     private IconButton dockPreviewButton;
@@ -72,7 +73,6 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     private boolean routesOpen;
     private int routeScroll;
     private UUID previewedRouteId;
-    private Integer pendingDeleteRouteIndex;
     private Integer hoveredRouteIndex;
     private int statusValueX;
     private int statusValueY;
@@ -109,60 +109,43 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         addRenderableWidget(nameBox);
 
         int controlsY = y + SHIP_BOX_Y + SHIP_BOX_HEIGHT + 8;
-        int controlsStartX = x + (PANEL_WIDTH - (18 * 4 + 8 * 3)) / 2;
-        recordButton = addIconButton(
+        int controlsStartX = x + 109;
+        runButton = addIconButton(
                 controlsStartX,
-                controlsY,
-                AllIcons.I_ADD,
-                () -> pressAction(AirshipStationMenu.ACTION_RECORD_OR_FINISH_SEGMENT),
-                Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.start_or_save_segment.tooltip")
-        );
-        finishRecordingButton = addIconButton(
-                controlsStartX + 26,
-                controlsY,
-                AllIcons.I_CONFIRM,
-                () -> pressAction(AirshipStationMenu.ACTION_FINISH_RECORDING),
-                Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.finish_recording.tooltip")
-        );
-        addIconButton(
-                controlsStartX + 52,
                 controlsY,
                 AllIcons.I_PLAY,
                 () -> pressAction(AirshipStationMenu.ACTION_RUN_SCHEDULE),
                 Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.run_schedule.tooltip")
         );
-        addIconButton(
-                controlsStartX + 78,
+        stopButton = addIconButton(
+                controlsStartX + 26,
                 controlsY,
                 AllIcons.I_STOP,
                 () -> pressAction(AirshipStationMenu.ACTION_STOP_SCHEDULE),
                 Component.translatable("tooltip.create_aeronautics_automated_logistics.schedule_stop.warning_1"),
                 Component.translatable("tooltip.create_aeronautics_automated_logistics.schedule_stop.warning_2")
         );
-
-        int bottomButtonsY = y + PANEL_HEIGHT - 24;
         routesButton = addIconButton(
-                x + 16,
-                bottomButtonsY,
+                controlsStartX,
+                controlsY + 31,
                 AllIcons.I_VIEW_SCHEDULE,
                 () -> {
                     routesOpen = !routesOpen;
                     shipDropdownOpen = false;
-                    if (!routesOpen) {
-                        pendingDeleteRouteIndex = null;
-                    }
                 },
                 Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.routes.tooltip")
         );
+
+        int bottomButtonsY = y + PANEL_HEIGHT - 24;
         landingAreaButton = addIconButton(
-                x + 36,
+                x + 16,
                 bottomButtonsY,
                 AllIcons.I_TARGET,
                 this::toggleLandingArea,
                 landingAreaTooltip()
         );
         dockPreviewButton = addIconButton(
-                x + 56,
+                x + 41,
                 bottomButtonsY,
                 SHOW_DOCK_ICON,
                 this::toggleDockPreview,
@@ -177,14 +160,14 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         );
         int dockButtonsY = y + 182;
         dockLinkButton = addMiniIconButton(
-                x + 141,
+                x + 127,
                 dockButtonsY,
                 AllIcons.I_ADD,
                 () -> pressAction(AirshipStationMenu.ACTION_BEGIN_LINK_DOCK),
                 Component.translatable("gui.create_aeronautics_automated_logistics.dock.link")
         );
         dockClearButton = addMiniIconButton(
-                x + 155,
+                x + 141,
                 dockButtonsY,
                 AllIcons.I_MTD_CLOSE,
                 () -> pressAction(AirshipStationMenu.ACTION_CLEAR_DOCK_LINK),
@@ -200,6 +183,10 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     protected void containerTick() {
         super.containerTick();
         if (nameBox != null && !nameBox.isFocused()) {
+            String authoritativeName = stationName();
+            if (!nameBox.getValue().equals(authoritativeName)) {
+                nameBox.setValue(authoritativeName);
+            }
             nameBox.setCursorPosition(nameBox.getValue().length());
             nameBox.setHighlightPos(nameBox.getCursorPosition());
         }
@@ -225,76 +212,43 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(guiGraphics, mouseX, mouseY, partialTick);
         if (landingAreaButton != null) {
-            landingAreaButton.setToolTip(landingAreaTooltip());
             landingAreaButton.green = LogisticsClientOverlays.isLandingAreaVisible(this.menu.stationPos());
         }
         if (dockPreviewButton != null && this.minecraft != null && this.minecraft.player != null) {
-            dockPreviewButton.setToolTip(dockPreviewTooltip());
-            dockPreviewButton.active = menu.dockPreviewPos(this.minecraft.player).isPresent();
+            boolean hasLinkedDock = menu.dockPreviewPos(this.minecraft.player).isPresent();
+            if (!hasLinkedDock) {
+                LogisticsClientOverlays.clearDock();
+            }
+            dockPreviewButton.active = hasLinkedDock;
             dockPreviewButton.green = menu.dockPreviewPos(this.minecraft.player)
                     .map(LogisticsClientOverlays::isDockVisible)
                     .orElse(false);
         }
         if (dockClearButton != null && this.minecraft != null && this.minecraft.player != null) {
-            dockClearButton.active = menu.dockPreviewPos(this.minecraft.player).isPresent();
+            boolean pendingDockLink = DockLinkPromptClientState.isPendingForStation(this.menu.stationPos());
+            dockClearButton.active = pendingDockLink || menu.dockPreviewPos(this.minecraft.player).isPresent();
+            dockClearButton.green = pendingDockLink;
         }
-        boolean recording = false;
+        previewedRouteId = LogisticsClientOverlays.previewedRouteId().orElse(null);
         if (this.minecraft != null && this.minecraft.player != null) {
-            recording = menu.isRecording(this.minecraft.player);
-        }
-        if (recordButton != null) {
-            recordButton.setIcon(recording ? AllIcons.I_CONFIG_SAVE : AllIcons.I_ADD);
-            recordButton.green = recording;
-            if (finishRecordingButton != null) {
-                finishRecordingButton.active = recording;
-                finishRecordingButton.green = false;
+            boolean running = menu.selectedShipScheduleRunning(this.minecraft.player);
+            boolean held = menu.selectedShipScheduleHeld(this.minecraft.player);
+            if (runButton != null) {
+                runButton.active = !running || held;
+                runButton.green = running;
+            }
+            if (stopButton != null) {
+                stopButton.active = running;
+            }
+            if (routesButton != null) {
+                routesButton.active = menu.canControlStationLocally(this.minecraft.player);
+                routesButton.green = previewedRouteId != null;
             }
         }
         super.render(guiGraphics, mouseX, mouseY, partialTick);
         renderHeaderEditIcon(guiGraphics);
-        int headerColor = 0xFFE7D7B3;
-        String headerText = "Route recording & playback";
-        if (recording) {
-            headerText = null;
-            int ticks = this.minecraft != null && this.minecraft.player != null ? this.minecraft.player.tickCount : 0;
-            float pulse = (float) ((Math.sin((ticks + partialTick) * 0.25F) + 1.0F) * 0.5F);
-            int bright = 0xD0 + (int) (0x2F * pulse);
-            int mid = 0xA8 + (int) (0x35 * pulse);
-            headerColor = 0xFF000000 | (bright << 16) | (mid << 8) | 0x4E;
-        }
         int headerY = this.topPos + 21;
-        if (headerText != null) {
-            guiGraphics.drawCenteredString(this.font, headerText, this.leftPos + PANEL_WIDTH / 2, headerY, headerColor);
-        } else {
-            String left = "Save segment with ";
-            String middle = ", finish with ";
-            String right = "";
-            float iconScale = 2.0F / 3.0F;
-            int iconWidth = Math.round(16 * iconScale);
-            int totalWidth = this.font.width(left) + iconWidth + this.font.width(middle) + iconWidth + this.font.width(right);
-            int startX = this.leftPos + (PANEL_WIDTH - totalWidth) / 2 - 3;
-            int iconY = headerY - 2;
-            guiGraphics.drawString(this.font, left, startX, headerY, headerColor, false);
-            int x = startX + this.font.width(left);
-            renderScaledIcon(guiGraphics, AllIcons.I_CONFIG_SAVE, x, iconY, iconScale);
-            x += iconWidth;
-            guiGraphics.drawString(this.font, middle, x, headerY, headerColor, false);
-            x += this.font.width(middle);
-            renderScaledIcon(guiGraphics, AllIcons.I_CONFIRM, x, iconY, iconScale);
-            x += iconWidth;
-            guiGraphics.drawString(this.font, right, x, headerY, headerColor, false);
-        }
-        if (recording && finishRecordingButton != null) {
-            int bx = finishRecordingButton.getX();
-            int by = finishRecordingButton.getY();
-            int bw = finishRecordingButton.getWidth();
-            int bh = finishRecordingButton.getHeight();
-            int outline = 0xFF66CC66;
-            guiGraphics.fill(bx - 1, by - 1, bx + bw + 1, by, outline);
-            guiGraphics.fill(bx - 1, by + bh, bx + bw + 1, by + bh + 1, outline);
-            guiGraphics.fill(bx - 1, by, bx, by + bh, outline);
-            guiGraphics.fill(bx + bw, by, bx + bw + 1, by + bh, outline);
-        }
+        guiGraphics.drawCenteredString(this.font, "Station Control", this.leftPos + PANEL_WIDTH / 2, headerY, 0xFFE7D7B3);
         renderShipSelector(guiGraphics, mouseX, mouseY);
         renderMainStatus(guiGraphics);
         if (shipDropdownOpen) {
@@ -413,50 +367,51 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         statusValueY = 0;
         statusValueWidth = 0;
         statusValueHeight = 0;
-        int x = this.leftPos + INNER_X + 24;
-        int dividerY = this.topPos + 121;
+        int x = this.leftPos + SHIP_BOX_X;
+        int dividerY = this.topPos + 176;
         guiGraphics.hLine(this.leftPos + INNER_X + 11, this.leftPos + INNER_X + INNER_WIDTH - 21, dividerY, 0xFF515151);
 
         Component status = menu.panelStatusText(this.minecraft.player);
         String statusText = status.getString();
-        Component statusLabel = Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status_inline", status);
-        int statusY = dividerY + 9;
-        guiGraphics.drawString(this.font, "Status:", x, statusY, 0xFF9EA5AA, false);
+        int runY = this.topPos + SHIP_BOX_Y + SHIP_BOX_HEIGHT + 17;
+        guiGraphics.drawString(this.font, "Run:", x, runY, 0xFFB9C4D0, false);
+
+        int routesY = runY + 31;
+        guiGraphics.drawString(this.font, "Routes:", x, routesY, 0xFFB9C4D0, false);
+
+        int statusY = runY + 61;
+        guiGraphics.drawString(this.font, "Status:", x, statusY, 0xFFB9C4D0, false);
+        int statusValueAreaLeft = x + this.font.width("Status: ") + 10;
+        int statusValueAreaRight = this.leftPos + INNER_X + INNER_WIDTH - 29;
+        int statusValueAreaWidth = Math.max(1, statusValueAreaRight - statusValueAreaLeft);
+        String statusValue = shortText(status, statusValueAreaWidth);
+        int statusValueDrawX = statusValueAreaLeft + Math.max(0, (statusValueAreaWidth - this.font.width(statusValue)) / 2);
+        statusValueDrawX = Math.max(statusValueAreaLeft, statusValueDrawX);
         guiGraphics.drawString(
                 this.font,
-                shortText(status, 126 - this.font.width("Status: ") - 2),
-                x + this.font.width("Status: ") + 2,
+                statusValue,
+                statusValueDrawX,
                 statusY,
-                statusColor(statusText),
+                menu.panelStatusColor(this.minecraft.player),
                 false
         );
-        String statusValue = shortText(status, 126 - this.font.width("Status: ") - 2);
-        statusValueX = x + this.font.width("Status: ") + 2;
+        statusValueX = statusValueDrawX;
         statusValueY = statusY;
         statusValueWidth = this.font.width(statusValue);
         statusValueHeight = this.font.lineHeight;
 
-        int routesY = dividerY + 30;
-        guiGraphics.drawString(this.font, "Routes:", x, routesY, 0xFF9EA5AA, false);
-        int outCount = menu.routesFromHereCount(this.minecraft.player);
-        int inCount = menu.routesToHereCount(this.minecraft.player);
-        int valuesY = routesY + 11;
-        guiGraphics.drawString(this.font, "Out:", x, valuesY, 0xFF9EA5AA, false);
-        int outValueX = x + this.font.width("Out: ") + 1;
-        guiGraphics.drawString(this.font, Integer.toString(outCount), outValueX, valuesY, 0xFFB9C4D0, false);
-        int inLabelX = outValueX + this.font.width(Integer.toString(outCount)) + 14;
-        guiGraphics.drawString(this.font, "In:", inLabelX, valuesY, 0xFF9EA5AA, false);
-        int inValueX = inLabelX + this.font.width("In: ") + 1;
-        guiGraphics.drawString(this.font, Integer.toString(inCount), inValueX, valuesY, 0xFFB9C4D0, false);
-
         int dockRowY = this.topPos + 181;
-        guiGraphics.drawString(this.font, "Dock:", x, dockRowY + 3, 0xFF9EA5AA, false);
-        String dockValue = shortText(menu.dockCompactText(this.minecraft.player), 92);
-        dockValueX = x + this.font.width("Dock: ") + 2;
+        guiGraphics.drawString(this.font, "Dock:", x, dockRowY + 3, 0xFFB9C4D0, false);
+        int dockValueAreaLeft = x + this.font.width("Dock: ") + 2;
+        int dockButtonsLeft = this.leftPos + INNER_X + INNER_WIDTH - 65;
+        int dockValueAreaWidth = Math.max(1, (dockButtonsLeft - 4) - dockValueAreaLeft);
+        String dockValue = shortText(menu.dockCompactText(this.minecraft.player), dockValueAreaWidth);
+        int dockValueDrawX = dockValueAreaLeft + Math.max(0, (dockValueAreaWidth - this.font.width(dockValue)) / 2);
+        dockValueX = Math.max(dockValueAreaLeft, dockValueDrawX);
         dockValueY = dockRowY + 3;
         dockValueWidth = this.font.width(dockValue);
         dockValueHeight = this.font.lineHeight;
-        guiGraphics.drawString(this.font, dockValue, dockValueX, dockValueY, 0xFFB9C4D0, false);
+        guiGraphics.drawString(this.font, dockValue, dockValueX, dockValueY, menu.dockStatusColor(this.minecraft.player), false);
 
         statusTooltipLines = menu.statusTooltipLines(this.minecraft.player);
     }
@@ -519,13 +474,12 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
             boolean previewed = previewedRouteId != null && previewedRouteId.equals(route.id().value());
             boolean invalid = routeInvalidReason(route, this.minecraft.player.level()).isPresent();
             int rowColor = invalid ? (hovered ? 0xAA704545 : 0x885A3A3A) : (hovered ? 0xAA555B65 : 0x88414850);
-            guiGraphics.fill(x + 5, ry, x + width - 5, ry + ROUTES_ROW_FILL_H, rowColor);
-            if (previewed) {
-                guiGraphics.fill(x + 4, ry - 1, x + width - 4, ry, 0xFFFFE27A);
-                guiGraphics.fill(x + 4, ry + ROUTES_ROW_FILL_H, x + width - 4, ry + ROUTES_ROW_FILL_H + 1, 0xFFFFE27A);
-                guiGraphics.fill(x + 4, ry, x + 5, ry + ROUTES_ROW_FILL_H, 0xFFFFE27A);
-                guiGraphics.fill(x + width - 5, ry, x + width - 4, ry + ROUTES_ROW_FILL_H, 0xFFFFE27A);
+            if (previewed && !invalid) {
+                rowColor = hovered ? 0xCCE7C46E : 0x99D9B968;
+            } else if (previewed) {
+                rowColor = hovered ? 0xAA8A6A45 : 0x887A5B3D;
             }
+            guiGraphics.fill(x + 5, ry, x + width - 5, ry + ROUTES_ROW_FILL_H, rowColor);
             guiGraphics.drawString(this.font, shortText(Component.literal("From: " + route.startStationName()), 158), x + 9, ry + ROUTES_ROW_TEXT_1_Y, 0xFFFFFFFF, false);
             guiGraphics.drawString(this.font, shortText(Component.literal("To: " + route.endStationName()), 158), x + 9, ry + ROUTES_ROW_TEXT_2_Y, 0xFFFFFFFF, false);
             String meta = ROUTE_TIME_FORMAT.format(Instant.ofEpochMilli(route.createdEpochMillis()))
@@ -542,32 +496,7 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
             guiGraphics.fill(clipLeft, clipBottom - 1, clipRight, clipBottom, 0xAA707780);
         }
 
-        guiGraphics.drawString(this.font, "LMB Preview Route  RMB Delete", x + 8, y + ROUTES_FOOTER_Y, 0xFF9EA5AA, false);
-
-        if (pendingDeleteRouteIndex != null) {
-            renderDeleteConfirm(guiGraphics, x, y, width, height, routes, mouseX, mouseY);
-        }
-    }
-
-    private void renderDeleteConfirm(GuiGraphics guiGraphics, int popupX, int popupY, int popupW, int popupH, List<RouteSegment> routes, int mouseX, int mouseY) {
-        guiGraphics.fill(popupX, popupY, popupX + popupW, popupY + popupH, 0xAA111316);
-        int boxW = 146;
-        int boxH = 52;
-        int x = popupX + (popupW - boxW) / 2;
-        int y = popupY + (popupH - boxH) / 2;
-        guiGraphics.fill(x - 1, y - 1, x + boxW + 1, y + boxH + 1, 0xFF111111);
-        guiGraphics.fill(x, y, x + boxW, y + boxH, 0xF0292A2E);
-        guiGraphics.drawCenteredString(this.font, "Delete route?", x + boxW / 2, y + 6, 0xFFFFC66E);
-        if (pendingDeleteRouteIndex >= 0 && pendingDeleteRouteIndex < routes.size()) {
-            String route = routes.get(pendingDeleteRouteIndex).startStationName() + " -> " + routes.get(pendingDeleteRouteIndex).endStationName();
-            guiGraphics.drawString(this.font, this.font.plainSubstrByWidth(route, boxW - 10), x + 5, y + 18, 0xFFD8DDE6, false);
-        }
-        boolean yesHovered = isInside(mouseX, mouseY, x + 20, y + 33, 44, 14);
-        boolean noHovered = isInside(mouseX, mouseY, x + boxW - 64, y + 33, 44, 14);
-        guiGraphics.fill(x + 20, y + 33, x + 64, y + 47, yesHovered ? 0xFF9E5A5A : 0xFF7A4444);
-        guiGraphics.fill(x + boxW - 64, y + 33, x + boxW - 20, y + 47, noHovered ? 0xFF6A6A6A : 0xFF525252);
-        guiGraphics.drawCenteredString(this.font, "Delete", x + 42, y + 37, 0xFFFFFFFF);
-        guiGraphics.drawCenteredString(this.font, "Cancel", x + boxW - 42, y + 37, 0xFFFFFFFF);
+        guiGraphics.drawString(this.font, "LMB Preview Route", x + 8, y + ROUTES_FOOTER_Y, 0xFF9EA5AA, false);
     }
 
     private void renderHoveredTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
@@ -608,6 +537,18 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         if (this.minecraft != null && this.minecraft.player != null
                 && isInside(mouseX, mouseY, dockValueX, dockValueY, Math.max(1, dockValueWidth), Math.max(1, dockValueHeight))) {
             guiGraphics.renderTooltip(this.font, menu.dockTooltip(this.minecraft.player), java.util.Optional.empty(), mouseX, mouseY);
+            return;
+        }
+        if (landingAreaButton != null && landingAreaButton.isHovered()) {
+            guiGraphics.renderTooltip(this.font, List.of(landingAreaTooltip()), java.util.Optional.empty(), mouseX, mouseY);
+            return;
+        }
+        if (dockPreviewButton != null && dockPreviewButton.isHovered()) {
+            guiGraphics.renderTooltip(this.font, List.of(dockPreviewTooltip()), java.util.Optional.empty(), mouseX, mouseY);
+            return;
+        }
+        if (dockClearButton != null && dockClearButton.isHovered()) {
+            guiGraphics.renderTooltip(this.font, List.of(dockClearTooltip()), java.util.Optional.empty(), mouseX, mouseY);
             return;
         }
         for (ButtonTooltip tooltip : buttonTooltips) {
@@ -654,7 +595,7 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
             setFocused(nameBox);
             return true;
         }
-        if (routesOpen && (button == GLFW.GLFW_MOUSE_BUTTON_LEFT || button == GLFW.GLFW_MOUSE_BUTTON_RIGHT)) {
+        if (routesOpen && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             if (handleRouteClick(mouseX, mouseY, button)) {
                 return true;
             }
@@ -692,26 +633,6 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         int routeCount = routes.size();
         int maxScroll = Math.max(0, routeCount - ROUTES_VISIBLE_ROWS);
 
-        if (pendingDeleteRouteIndex != null) {
-            int boxW = 146;
-            int boxH = 52;
-            int cx = x + (width - boxW) / 2;
-            int cy = y + (height - boxH) / 2;
-            if (isInside(mouseX, mouseY, cx + 20, cy + 33, 44, 14)) {
-                int idx = pendingDeleteRouteIndex;
-                if (idx >= 0 && idx < routeCount) {
-                    pressAction(AirshipStationMenu.ACTION_DELETE_ROUTE_BASE + idx);
-                }
-                pendingDeleteRouteIndex = null;
-                return true;
-            }
-            if (isInside(mouseX, mouseY, cx + boxW - 64, cy + 33, 44, 14) || !isInside(mouseX, mouseY, cx, cy, boxW, boxH)) {
-                pendingDeleteRouteIndex = null;
-                return true;
-            }
-            return true;
-        }
-
         int renderedRows = Math.min(routeCount - routeScroll, ROUTES_VISIBLE_ROWS + (routeScroll < maxScroll ? 1 : 0));
         for (int visibleIndex = 0; visibleIndex < renderedRows; visibleIndex++) {
             int routeIndex = routeScroll + visibleIndex;
@@ -721,18 +642,14 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
             int ry = rowY + visibleIndex * ROUTES_ROW_H;
             int visibleBottom = Math.min(ry + ROUTES_ROW_FILL_H, clipBottom);
             if (visibleBottom > ry && isInside(mouseX, mouseY, x + 5, ry, width - 10, visibleBottom - ry)) {
-                if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
-                    pendingDeleteRouteIndex = routeIndex;
+                UUID routeId = routes.get(routeIndex).id().value();
+                if (previewedRouteId != null && previewedRouteId.equals(routeId)) {
+                    LogisticsClientOverlays.clearFlightPath();
+                    previewedRouteId = null;
                 } else {
-                    UUID routeId = routes.get(routeIndex).id().value();
-                    if (previewedRouteId != null && previewedRouteId.equals(routeId)) {
-                        LogisticsClientOverlays.clearFlightPath();
-                        previewedRouteId = null;
-                    } else {
-                        pressAction(AirshipStationMenu.ACTION_PREVIEW_ROUTE_BASE + routeIndex);
-                        previewedRouteId = routeId;
-                        LogisticsClientOverlays.setPreviewedRouteId(routeId);
-                    }
+                    pressAction(AirshipStationMenu.ACTION_PREVIEW_ROUTE_BASE + routeIndex);
+                    previewedRouteId = routeId;
+                    LogisticsClientOverlays.setPreviewedRouteId(routeId);
                 }
                 return true;
             }
@@ -742,7 +659,6 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         }
         if (!isInside(mouseX, mouseY, x - 4, y - 4, width + 8, height + 8)) {
             routesOpen = false;
-            pendingDeleteRouteIndex = null;
             return true;
         }
         return false;
@@ -801,10 +717,6 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
             }
         }
         if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
-            if (pendingDeleteRouteIndex != null) {
-                pendingDeleteRouteIndex = null;
-                return true;
-            }
             if (routesOpen) {
                 routesOpen = false;
                 return true;
@@ -864,9 +776,6 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
                 LogisticsClientOverlays::toggleDock,
                 LogisticsClientOverlays::clearDock
         );
-        if (dockPreviewButton != null) {
-            dockPreviewButton.setToolTip(dockPreviewTooltip());
-        }
     }
 
     private Component landingAreaTooltip() {
@@ -885,6 +794,14 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
                 visible
                         ? "gui.create_aeronautics_automated_logistics.dock.hide"
                         : "gui.create_aeronautics_automated_logistics.dock.show"
+        );
+    }
+
+    private Component dockClearTooltip() {
+        return Component.translatable(
+                DockLinkPromptClientState.isPendingForStation(this.menu.stationPos())
+                        ? "gui.create_aeronautics_automated_logistics.dock.cancel"
+                        : "gui.create_aeronautics_automated_logistics.dock.clear"
         );
     }
 

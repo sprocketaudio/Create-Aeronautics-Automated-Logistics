@@ -43,13 +43,11 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
     private static final double ENDPOINT_ARRIVAL_DISTANCE = 0.2D;
     private static final double ENDPOINT_SETTLE_DISTANCE = 0.65D;
     private static final double ARRIVAL_ROTATION_TOLERANCE_DEGREES = 4.0D;
-    private static final double MIN_PROGRESS_PER_TICK = 0.001D;
-    private static final double MIN_REPLAY_SPEED = 0.08D;
+    private static final double MIN_EFFECTIVE_REPLAY_SPEED = 0.03D;
     private static final double MAX_REPLAY_SPEED = 3.0D;
+    private static final double RESTORE_CATCH_SPEED = 0.06D;
     private static final int JOIN_BLEND_SEGMENTS = 5;
     private static final int ENDPOINT_SETTLE_TICKS = 40;
-    private static final int MAX_STALLED_TICKS = 200;
-    private static final int INITIAL_STALL_GRACE_TICKS = 60;
     private static final int RESTORE_CATCH_TICKS = 200;
     private static final double STATIONARY_SEGMENT_DISTANCE = 0.1D;
     private static final String ACTIVE_PLAYBACKS = "activePlaybacks";
@@ -75,6 +73,10 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
     private static final String DOCK_CARGO_TIMEOUT_TICKS_REMAINING = "dockCargoTimeoutTicksRemaining";
     private static final String DOCK_LOCKED = "dockLocked";
     private static final String RESTORE_CATCH_TICKS_REMAINING = "restoreCatchTicksRemaining";
+    private static final String PAUSE_STATE = "pauseState";
+    private static final String HELD_FAILURE = "heldFailure";
+    private static final String HOLD_POSITION = "holdPosition";
+    private static final String HOLD_ROTATION = "holdRotation";
     private static final String COMPLETED = "completed";
 
     private final Map<RouteId, ActivePlayback> activePlaybacks = new HashMap<>();
@@ -180,7 +182,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         }
 
         setVisualsActive(level, activePlayback, false);
-        activePlayback.controller().stop(level);
+        activePlayback.controller(level).stop(level);
         stationAt(level, activePlayback.stationPos()).ifPresent(station -> {
             clearDockOutputs(level, station, activePlayback);
             if (reason == FailureReason.NONE) {
@@ -202,6 +204,17 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
 
             PlaybackFailure failure = tickOne(level, activePlayback);
             if (failure != null) {
+                if (failure == PlaybackFailure.VEHICLE_UNLOADED) {
+                    holdTransient(level, activePlayback, failure);
+                    continue;
+                }
+                if (failure == PlaybackFailure.COLLISION_OR_OBSTRUCTION
+                        || failure == PlaybackFailure.STATION_MISSING
+                        || failure == PlaybackFailure.MOVEMENT_FAILURE
+                        || failure == PlaybackFailure.STUCK) {
+                    holdFault(level, activePlayback, failure);
+                    continue;
+                }
                 fail(level, activePlayback, failure);
                 iterator.remove();
             } else if (activePlayback.completed()) {
@@ -217,6 +230,55 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         }
     }
 
+    public void holdPausedVehicles(ServerLevel level) {
+        for (ActivePlayback activePlayback : activePlaybacks.values()) {
+            if (!activePlayback.route().dimension().equals(level.dimension()) || !activePlayback.isHoldLocked()) {
+                continue;
+            }
+            VehicleController controller = activePlayback.controller(level);
+            if (controller.isLoaded(level) && controller.isAssembled()) {
+                controller.hold(level, activePlayback.holdPosition(), activePlayback.holdRotation());
+            }
+        }
+    }
+
+    public PlaybackOperationResult<RouteId> startHeldFaultPlayback(
+            ServerLevel level,
+            BlockPos stationPos,
+            Route route,
+            PlaybackFailure failure
+    ) {
+        Objects.requireNonNull(level, "level");
+        Objects.requireNonNull(stationPos, "stationPos");
+        Objects.requireNonNull(route, "route");
+        Objects.requireNonNull(failure, "failure");
+
+        if (activePlaybacks.containsKey(route.id())) {
+            return PlaybackOperationResult.failure(PlaybackFailure.ALREADY_RUNNING);
+        }
+        if (!route.dimension().equals(level.dimension())) {
+            return PlaybackOperationResult.failure(PlaybackFailure.DIMENSION_MISMATCH);
+        }
+        if (route.points().size() < 2) {
+            return PlaybackOperationResult.failure(PlaybackFailure.INVALID_ROUTE);
+        }
+        if (route.points().stream().anyMatch(point -> !point.dimension().equals(route.dimension()))) {
+            return PlaybackOperationResult.failure(PlaybackFailure.INVALID_ROUTE);
+        }
+        Optional<VehicleController> controller = VehicleControllerResolver.resolve(level, route.linkedController());
+        if (controller.isEmpty()) {
+            return PlaybackOperationResult.failure(PlaybackFailure.VEHICLE_MISSING);
+        }
+        if (!controller.get().isAutomationCapable()) {
+            return PlaybackOperationResult.failure(PlaybackFailure.MISSING_CONTROLLER);
+        }
+
+        ActivePlayback activePlayback = ActivePlayback.create(route, stationPos, controller.get());
+        activePlaybacks.put(route.id(), activePlayback);
+        holdFault(level, activePlayback, failure);
+        return PlaybackOperationResult.success(route.id());
+    }
+
     public boolean isRunning(RouteId routeId) {
         return activePlaybacks.containsKey(routeId);
     }
@@ -225,21 +287,96 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         return pendingRuntimePlaybacks.containsKey(routeId);
     }
 
+    public boolean isHeld(RouteId routeId) {
+        return Optional.ofNullable(activePlaybacks.get(routeId)).map(ActivePlayback::isPaused).orElse(false);
+    }
+
+    public Optional<PlaybackFailure> heldFailure(RouteId routeId) {
+        return Optional.ofNullable(activePlaybacks.get(routeId)).flatMap(ActivePlayback::heldFailure);
+    }
+
+    public boolean resumeHeldPlayback(ServerLevel level, RouteId routeId) {
+        ActivePlayback activePlayback = activePlaybacks.get(routeId);
+        if (activePlayback == null || !activePlayback.isPaused()) {
+            return false;
+        }
+        if (activePlayback.heldFailure().filter(failure -> failure == PlaybackFailure.STATION_MISSING).isPresent()) {
+            Optional<AirshipStationBlockEntity> station = stationAt(level, activePlayback.stationPos());
+            if (station.isEmpty()) {
+                return false;
+            }
+            if (activePlayback.isDockingWait() && dockingStation(level, station.get(), activePlayback).isEmpty()) {
+                return false;
+            }
+        }
+        activePlayback.resumeFromPause();
+        activePlayback.beginRestoreCatch();
+        stationAt(level, activePlayback.stationPos()).ifPresent(station -> resumeStationState(station, activePlayback));
+        setVisualsActive(level, activePlayback, true);
+        return true;
+    }
+
+    public boolean releaseHeldPlayback(ServerLevel level, RouteId routeId) {
+        ActivePlayback activePlayback = activePlaybacks.get(routeId);
+        if (activePlayback == null || !activePlayback.isPaused()) {
+            return false;
+        }
+        activePlayback.releaseFromHold();
+        setVisualsActive(level, activePlayback, false);
+        activePlayback.controller(level).stop(level);
+        stationAt(level, activePlayback.stationPos()).ifPresent(station ->
+                station.holdPlayback(activePlayback.route(), false, activePlayback.heldFailure().map(PlaybackFailure::failureReason)));
+        return true;
+    }
+
+    public int stopLinkedPlaybacks(ServerLevel level, net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerRef controllerRef, FailureReason reason) {
+        Objects.requireNonNull(level, "level");
+        Objects.requireNonNull(controllerRef, "controllerRef");
+        Objects.requireNonNull(reason, "reason");
+
+        int stopped = 0;
+        java.util.List<RouteId> activeRouteIds = activePlaybacks.values().stream()
+                .filter(activePlayback -> activePlayback.route().dimension().equals(level.dimension()))
+                .filter(activePlayback -> activePlayback.route().linkedController().matches(controllerRef))
+                .map(activePlayback -> activePlayback.route().id())
+                .toList();
+        for (RouteId routeId : activeRouteIds) {
+            stopPlayback(level, routeId, reason);
+            stopped++;
+        }
+
+        Iterator<Map.Entry<RouteId, CompoundTag>> iterator = pendingRuntimePlaybacks.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<RouteId, CompoundTag> entry = iterator.next();
+            Optional<Route> route = entry.getValue().contains(ROUTE, Tag.TAG_COMPOUND)
+                    ? RouteNbtSerializer.read(entry.getValue().getCompound(ROUTE))
+                    : Optional.empty();
+            if (route.isEmpty()
+                    || !route.get().dimension().equals(level.dimension())
+                    || !route.get().linkedController().matches(controllerRef)) {
+                continue;
+            }
+            iterator.remove();
+            pendingRuntimeRestoreCooldowns.remove(entry.getKey());
+            stopped++;
+        }
+        return stopped;
+    }
+
     public Set<UUID> activeVisualShipIds() {
         return Set.copyOf(activeVisualShipIds);
     }
 
     private PlaybackFailure tickOne(ServerLevel level, ActivePlayback activePlayback) {
         Optional<AirshipStationBlockEntity> station = stationAt(level, activePlayback.stationPos());
+        VehicleController controller = activePlayback.controller(level);
+        if (activePlayback.isPaused()) {
+            return tickPaused(level, station, activePlayback, controller);
+        }
         if (station.isEmpty() && !activePlayback.isRestoring()) {
             return PlaybackFailure.STATION_MISSING;
         }
-
-        VehicleController controller = activePlayback.controller();
         if (!controller.isLoaded(level)) {
-            if (activePlayback.tickRestoreGrace()) {
-                return null;
-            }
             return PlaybackFailure.VEHICLE_UNLOADED;
         }
         if (!controller.isAssembled()) {
@@ -255,7 +392,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                     catchPosition,
                     activePlayback.guidanceRotation(),
                     AutomatedLogisticsConfig.MAX_SPEED_MULTIPLIER.get(),
-                    0.0D
+                    RESTORE_CATCH_SPEED
             );
             activePlayback.tickRestoreGrace();
             if (motionResult.successful()) {
@@ -285,6 +422,22 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         double distanceToTarget = controller.position().distanceTo(targetPosition);
         double arrivalDistance = activePlayback.arrivalDistance();
         boolean rotationAligned = activePlayback.isRotationAligned(targetRotation, controller);
+        if (AutomatedLogisticsConfig.STOP_ON_COLLISION.get() && activePlayback.shouldWatchProgress()) {
+            Optional<PlaybackFailure> stalled = activePlayback.checkStalled(distanceToTarget);
+            if (stalled.isPresent()) {
+                CreateAeronauticsAutomatedLogistics.LOGGER.warn(
+                        "Playback {} is stuck toward point {}. distance={}, bestOverdueDistance={}, stalledTicks={}, segmentElapsedTicks={}, segmentDurationTicks={}",
+                        activePlayback.route().id().value(),
+                        activePlayback.targetIndex(),
+                        distanceToTarget,
+                        activePlayback.previousDistance(),
+                        activePlayback.stalledTicks(),
+                        activePlayback.segmentElapsedTicks(),
+                        activePlayback.segmentDurationTicks()
+                );
+                return stalled.get();
+            }
+        }
         if (activePlayback.shouldHoldAtTarget(distanceToTarget)) {
             controller.moveToward(
                     level,
@@ -352,17 +505,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             }
         } else {
             activePlayback.resetEndpointSettle();
-            if (AutomatedLogisticsConfig.STOP_ON_COLLISION.get() && activePlayback.isStalled(distanceToTarget)) {
-                CreateAeronauticsAutomatedLogistics.LOGGER.warn(
-                        "Playback {} stalled toward point {}. distance={}, previousDistance={}, stalledTicks={}",
-                        activePlayback.route().id().value(),
-                        activePlayback.targetIndex(),
-                        distanceToTarget,
-                        activePlayback.previousDistance(),
-                        activePlayback.stalledTicks()
-                );
-                return PlaybackFailure.COLLISION_OR_OBSTRUCTION;
-            }
         }
 
         Vec3 collisionTargetPosition = guidancePosition;
@@ -396,6 +538,38 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         return motionResult.failureReason()
                 .map(this::toPlaybackFailure)
                 .orElse(null);
+    }
+
+    private PlaybackFailure tickPaused(
+            ServerLevel level,
+            Optional<AirshipStationBlockEntity> station,
+            ActivePlayback activePlayback,
+            VehicleController controller
+    ) {
+        if (activePlayback.isTransientHold()) {
+            if (!controller.isLoaded(level)) {
+                return null;
+            }
+            if (!controller.isAssembled()) {
+                return PlaybackFailure.VEHICLE_MISSING;
+            }
+            activePlayback.resumeFromPause();
+            activePlayback.beginRestoreCatch();
+            station.ifPresent(value -> resumeStationState(value, activePlayback));
+            setVisualsActive(level, activePlayback, true);
+            return null;
+        }
+
+        if (activePlayback.isHoldLocked()) {
+            if (!controller.isLoaded(level)) {
+                return null;
+            }
+            if (!controller.isAssembled()) {
+                return PlaybackFailure.VEHICLE_MISSING;
+            }
+            controller.hold(level, activePlayback.holdPosition(), activePlayback.holdRotation());
+        }
+        return null;
     }
 
     private PlaybackFailure tickWaiting(
@@ -449,7 +623,12 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                     return finishWaiting(level, station, activePlayback, controller);
                 }
             } else if (!activePlayback.dockLocked() && activePlayback.tickDockTimeout()) {
-                return PlaybackFailure.DOCK_LOCK_FAILED;
+                CreateAeronauticsAutomatedLogistics.LOGGER.warn(
+                        "Playback {} dock wait timed out at stop {}; continuing without dock lock",
+                        activePlayback.route().id().value(),
+                        activePlayback.waitingStop().map(RouteStop::name).orElse("unknown")
+                );
+                return finishWaiting(level, station, activePlayback, controller);
             }
         }
 
@@ -675,6 +854,45 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         };
     }
 
+    private void holdTransient(ServerLevel level, ActivePlayback activePlayback, PlaybackFailure failure) {
+        CreateAeronauticsAutomatedLogistics.LOGGER.warn(
+                "Route playback {} paused in transient hold because {}",
+                activePlayback.route().id().value(),
+                failure
+        );
+        setVisualsActive(level, activePlayback, false);
+        activePlayback.pauseTransient(failure);
+        stationAt(level, activePlayback.stationPos()).ifPresent(station -> {
+            clearDockOutputs(level, station, activePlayback);
+            station.holdPlayback(activePlayback.route(), false, Optional.of(failure.failureReason()));
+        });
+    }
+
+    private void holdFault(ServerLevel level, ActivePlayback activePlayback, PlaybackFailure failure) {
+        CreateAeronauticsAutomatedLogistics.LOGGER.warn(
+                "Route playback {} paused in fault hold because {} at point {} after {} tick(s)",
+                activePlayback.route().id().value(),
+                failure,
+                activePlayback.targetIndex(),
+                activePlayback.playbackTicks()
+        );
+        setVisualsActive(level, activePlayback, false);
+        activePlayback.pauseFault(failure);
+        activePlayback.controller(level).hold(level, activePlayback.holdPosition(), activePlayback.holdRotation());
+        stationAt(level, activePlayback.stationPos()).ifPresent(station -> {
+            clearDockOutputs(level, station, activePlayback);
+            station.holdPlayback(activePlayback.route(), true, Optional.of(failure.failureReason()));
+        });
+    }
+
+    private void resumeStationState(AirshipStationBlockEntity station, ActivePlayback activePlayback) {
+        if (activePlayback.isWaiting()) {
+            station.waitPlayback(activePlayback.route());
+            return;
+        }
+        station.startPlayback(activePlayback.route());
+    }
+
     private void fail(ServerLevel level, ActivePlayback activePlayback, PlaybackFailure failure) {
         CreateAeronauticsAutomatedLogistics.LOGGER.warn(
                 "Route playback {} failed with {} at point {} after {} tick(s)",
@@ -684,7 +902,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 activePlayback.playbackTicks()
         );
         setVisualsActive(level, activePlayback, false);
-        activePlayback.controller().stop(level);
+        activePlayback.controller(level).stop(level);
         stationAt(level, activePlayback.stationPos()).ifPresent(station -> {
             clearDockOutputs(level, station, activePlayback);
             station.failPlayback(failure.failureReason());
@@ -693,7 +911,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
 
     private void complete(ServerLevel level, ActivePlayback activePlayback) {
         setVisualsActive(level, activePlayback, false);
-        activePlayback.controller().stop(level);
+        activePlayback.controller(level).stop(level);
         activePlayback.completed(true);
         stationAt(level, activePlayback.stationPos()).ifPresent(station -> {
             clearDockOutputs(level, station, activePlayback);
@@ -784,9 +1002,19 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 continue;
             }
             restored.beginRestoreCatch();
-            restored.controller().stop(level);
+            if (restored.isPaused()) {
+                restored.controller(level).hold(level, restored.holdPosition(), restored.holdRotation());
+            } else {
+                restored.controller(level).stop(level);
+            }
             stationAt(level, restored.stationPos()).ifPresent(station -> {
-                if (restored.isWaiting()) {
+                if (restored.isPaused()) {
+                    station.holdPlayback(
+                            restored.route(),
+                            restored.isFaultHold(),
+                            restored.heldFailure().map(PlaybackFailure::failureReason)
+                    );
+                } else if (restored.isWaiting()) {
                     station.waitPlayback(restored.route());
                     if (restored.isDockingWait()) {
                         Optional<AirshipStationBlockEntity> dockingStation = dockingStation(level, station, restored);
@@ -796,7 +1024,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                     station.startPlayback(restored.route());
                 }
             });
-            setVisualsActive(level, restored, true);
+            setVisualsActive(level, restored, !restored.isPaused());
             CreateAeronauticsAutomatedLogistics.debugLog(
                     "Restored active route playback {} after server reload",
                     restored.route().id().value()
@@ -828,6 +1056,10 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         tag.putInt(DOCK_CARGO_TIMEOUT_TICKS_REMAINING, activePlayback.dockCargoTimeoutTicksRemaining());
         tag.putBoolean(DOCK_LOCKED, activePlayback.dockLocked());
         tag.putInt(RESTORE_CATCH_TICKS_REMAINING, activePlayback.restoreCatchTicksRemaining());
+        tag.putString(PAUSE_STATE, activePlayback.pauseState().name());
+        activePlayback.heldFailure().ifPresent(failure -> tag.putString(HELD_FAILURE, failure.name()));
+        tag.put(HOLD_POSITION, writeVec3(activePlayback.holdPosition()));
+        activePlayback.holdRotation().ifPresent(rotation -> tag.put(HOLD_ROTATION, writeRotation(rotation)));
         tag.putBoolean(COMPLETED, activePlayback.completed());
         return tag;
     }
@@ -872,6 +1104,14 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         Optional<BlockPos> activeDockStationPos = tag.contains(ACTIVE_DOCK_STATION_POS)
                 ? NbtUtils.readBlockPos(tag, ACTIVE_DOCK_STATION_POS).map(BlockPos::immutable)
                 : Optional.empty();
+        PauseState pauseState = readPauseState(tag);
+        Optional<PlaybackFailure> heldFailure = readHeldFailure(tag);
+        Vec3 holdPosition = tag.contains(HOLD_POSITION, Tag.TAG_COMPOUND)
+                ? readVec3(tag.getCompound(HOLD_POSITION))
+                : controller.get().position();
+        Optional<RouteRotation> holdRotation = tag.contains(HOLD_ROTATION, Tag.TAG_COMPOUND)
+                ? readRotation(tag.getCompound(HOLD_ROTATION))
+                : controller.get().routeRotation();
 
         return Optional.of(ActivePlayback.restore(
                 route.get(),
@@ -897,8 +1137,34 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 Math.max(0, tag.getInt(DOCK_CARGO_TIMEOUT_TICKS_REMAINING)),
                 tag.getBoolean(DOCK_LOCKED),
                 Math.max(0, tag.getInt(RESTORE_CATCH_TICKS_REMAINING)),
+                pauseState,
+                heldFailure,
+                holdPosition,
+                holdRotation,
                 tag.getBoolean(COMPLETED)
         ));
+    }
+
+    private PauseState readPauseState(CompoundTag tag) {
+        if (!tag.contains(PAUSE_STATE, Tag.TAG_STRING)) {
+            return PauseState.NONE;
+        }
+        try {
+            return PauseState.valueOf(tag.getString(PAUSE_STATE));
+        } catch (IllegalArgumentException ignored) {
+            return PauseState.NONE;
+        }
+    }
+
+    private Optional<PlaybackFailure> readHeldFailure(CompoundTag tag) {
+        if (!tag.contains(HELD_FAILURE, Tag.TAG_STRING)) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(PlaybackFailure.valueOf(tag.getString(HELD_FAILURE)));
+        } catch (IllegalArgumentException ignored) {
+            return Optional.empty();
+        }
     }
 
     private Optional<RouteId> routeIdFromRuntimeTag(CompoundTag tag) {
@@ -942,10 +1208,17 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         }
     }
 
+    private enum PauseState {
+        NONE,
+        HELD_TRANSIENT,
+        HELD_FAULTED,
+        RELEASED
+    }
+
     private static final class ActivePlayback {
         private final Route route;
         private final BlockPos stationPos;
-        private final VehicleController controller;
+        private VehicleController controller;
         private final Vec3 joinOffset;
         private final Optional<RouteRotation> joinStartRotation;
         private int targetIndex;
@@ -967,6 +1240,10 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         private boolean dockLocked;
         private int restoreCatchTicksRemaining;
         private Optional<DockTransferSnapshot> dockTransferSnapshot = Optional.empty();
+        private PauseState pauseState = PauseState.NONE;
+        private Optional<PlaybackFailure> heldFailure = Optional.empty();
+        private Vec3 holdPosition;
+        private Optional<RouteRotation> holdRotation;
         private boolean completed;
 
         private ActivePlayback(
@@ -985,6 +1262,8 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             this.joinStartRotation = joinStartRotation;
             this.targetIndex = targetIndex;
             this.direction = direction;
+            this.holdPosition = controller.position();
+            this.holdRotation = controller.routeRotation();
             resetSegmentTiming();
         }
 
@@ -1032,6 +1311,10 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 int dockCargoTimeoutTicksRemaining,
                 boolean dockLocked,
                 int restoreCatchTicksRemaining,
+                PauseState pauseState,
+                Optional<PlaybackFailure> heldFailure,
+                Vec3 holdPosition,
+                Optional<RouteRotation> holdRotation,
                 boolean completed
         ) {
             ActivePlayback activePlayback = new ActivePlayback(
@@ -1059,6 +1342,10 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             activePlayback.dockCargoTimeoutTicksRemaining = Math.max(0, dockCargoTimeoutTicksRemaining);
             activePlayback.dockLocked = dockLocked;
             activePlayback.restoreCatchTicksRemaining = Math.max(0, restoreCatchTicksRemaining);
+            activePlayback.pauseState = pauseState;
+            activePlayback.heldFailure = heldFailure;
+            activePlayback.holdPosition = holdPosition;
+            activePlayback.holdRotation = holdRotation;
             activePlayback.completed = completed;
             activePlayback.dockTransferSnapshot = Optional.empty();
             return activePlayback;
@@ -1080,6 +1367,13 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         }
 
         private VehicleController controller() {
+            return controller;
+        }
+
+        private VehicleController controller(ServerLevel level) {
+            if (!controller.isLoaded(level) || !controller.isAssembled()) {
+                VehicleControllerResolver.resolve(level, route.linkedController()).ifPresent(resolved -> controller = resolved);
+            }
             return controller;
         }
 
@@ -1114,14 +1408,17 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         private double adjacentSegmentSpeedBlocksPerTick() {
             int previousIndex = targetIndex - direction;
             if (previousIndex < 0 || previousIndex >= route.points().size()) {
-                return MIN_REPLAY_SPEED;
+                return 0.0D;
+            }
+            if (isStationarySegment()) {
+                return 0.0D;
             }
 
             RoutePoint previous = route.points().get(previousIndex);
             RoutePoint target = targetPoint();
             long ticks = Math.max(1L, Math.abs(target.tickOffset() - previous.tickOffset()));
             double speed = previous.position().distanceTo(target.position()) / ticks;
-            return Math.max(MIN_REPLAY_SPEED, Math.min(MAX_REPLAY_SPEED, speed));
+            return Math.min(MAX_REPLAY_SPEED, Math.max(MIN_EFFECTIVE_REPLAY_SPEED, speed));
         }
 
         private void advanceTarget() {
@@ -1195,6 +1492,63 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
 
         private void completed(boolean completed) {
             this.completed = completed;
+        }
+
+        private PauseState pauseState() {
+            return pauseState;
+        }
+
+        private boolean isPaused() {
+            return pauseState != PauseState.NONE;
+        }
+
+        private boolean isTransientHold() {
+            return pauseState == PauseState.HELD_TRANSIENT;
+        }
+
+        private boolean isFaultHold() {
+            return pauseState == PauseState.HELD_FAULTED;
+        }
+
+        private boolean isHoldLocked() {
+            return pauseState == PauseState.HELD_FAULTED;
+        }
+
+        private Optional<PlaybackFailure> heldFailure() {
+            return heldFailure;
+        }
+
+        private Vec3 holdPosition() {
+            return holdPosition;
+        }
+
+        private Optional<RouteRotation> holdRotation() {
+            return holdRotation;
+        }
+
+        private void pauseTransient(PlaybackFailure failure) {
+            pauseState = PauseState.HELD_TRANSIENT;
+            heldFailure = Optional.of(failure);
+            restoreCatchTicksRemaining = 0;
+        }
+
+        private void pauseFault(PlaybackFailure failure) {
+            pauseState = PauseState.HELD_FAULTED;
+            heldFailure = Optional.of(failure);
+            holdPosition = controller.position();
+            holdRotation = controller.routeRotation();
+            restoreCatchTicksRemaining = 0;
+        }
+
+        private void resumeFromPause() {
+            pauseState = PauseState.NONE;
+            heldFailure = Optional.empty();
+            holdPosition = controller.position();
+            holdRotation = controller.routeRotation();
+        }
+
+        private void releaseFromHold() {
+            pauseState = PauseState.RELEASED;
         }
 
         private boolean isWaiting() {
@@ -1460,6 +1814,10 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                     && distanceToTarget <= ENDPOINT_SETTLE_DISTANCE;
         }
 
+        private boolean shouldWatchProgress() {
+            return !isStationarySegment();
+        }
+
         private boolean tickEndpointSettle() {
             endpointSettleTicks++;
             return endpointSettleTicks >= ENDPOINT_SETTLE_TICKS;
@@ -1484,21 +1842,23 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             return Math.toDegrees(2.0D * Math.acos(dot));
         }
 
-        private boolean isStalled(double currentDistance) {
+        private Optional<PlaybackFailure> checkStalled(double currentDistance) {
             playbackTicks++;
-            if (playbackTicks <= INITIAL_STALL_GRACE_TICKS) {
+            if (segmentElapsedTicks <= overdueSegmentThresholdTicks()) {
                 resetProgress(currentDistance);
-                return false;
+                return Optional.empty();
             }
 
-            if (currentDistance < previousDistance - MIN_PROGRESS_PER_TICK) {
+            if (currentDistance < previousDistance - AutomatedLogisticsConfig.MIN_MEANINGFUL_PROGRESS_DISTANCE.get()) {
                 resetProgress(currentDistance);
-                return false;
+                return Optional.empty();
             }
 
-            previousDistance = currentDistance;
             stalledTicks++;
-            return stalledTicks >= MAX_STALLED_TICKS;
+            if (stalledTicks >= AutomatedLogisticsConfig.STUCK_TIMEOUT_TICKS.get()) {
+                return Optional.of(PlaybackFailure.STUCK);
+            }
+            return Optional.empty();
         }
 
         private void resetProgress(double currentDistance) {
@@ -1506,9 +1866,18 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             stalledTicks = 0;
         }
 
+        private double currentDistanceToTarget(Vec3 currentPosition) {
+            return currentPosition.distanceTo(targetPosition());
+        }
+
         private void resetSegmentTiming() {
             segmentDurationTicks = computeSegmentDurationTicks();
             segmentElapsedTicks = 0;
+        }
+
+        private long overdueSegmentThresholdTicks() {
+            long scaledDuration = (long) Math.ceil(segmentDurationTicks * AutomatedLogisticsConfig.SEGMENT_OVERRUN_MULTIPLIER.get());
+            return Math.max(scaledDuration, AutomatedLogisticsConfig.STUCK_TIMEOUT_TICKS.get());
         }
 
         private long segmentDurationTicks() {

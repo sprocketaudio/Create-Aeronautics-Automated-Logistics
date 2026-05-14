@@ -43,6 +43,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.identity.Airship
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderSnapshot;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipScheduleMenu;
+import net.sprocketgames.create_aeronautics_automated_logistics.network.ReopenShipTransponderPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.UpdateAirshipSchedulePayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModItems;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
@@ -130,10 +131,12 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     private int routeChoiceScroll;
     private boolean noRoutePopupOpen;
     private final List<Component> noRoutePopupLines = new ArrayList<>();
+    private Integer pendingDeleteStopIndex;
     private boolean leftMouseDown;
     private final Map<Integer, Integer> conditionScrollColumns = new HashMap<>();
     private final List<Slot> playerInventorySlots = new ArrayList<>();
     private boolean showPlayerInventorySlots;
+    private boolean reopenSourceScreenOnClose;
 
     public AirshipScheduleScreen(AirshipScheduleMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
@@ -141,6 +144,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         this.imageHeight = LEGACY_SCHEDULE_HEIGHT;
         this.inventoryLabelY = 10000;
         this.titleLabelY = 10000;
+        this.reopenSourceScreenOnClose = menu.openedFromTransponder();
     }
 
     @Override
@@ -190,6 +194,8 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                 this.assignedShipSuggestions.updateCommandInfo();
             }
         });
+        this.assignedShipBox.setEditable(!isAssignedShipLocked());
+        this.assignedShipBox.active = !isAssignedShipLocked();
         populateAssignedShipBox();
         addRenderableWidget(this.assignedShipBox);
         this.assignedShipSuggestions = createAssignedShipSuggestions(this.assignedShipBox);
@@ -236,7 +242,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         );
         Component title = Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.title");
         guiGraphics.drawString(this.font, title.getVisualOrderText(), this.leftPos + 124 - this.font.width(title) / 2, this.topPos - 26, DARK_TEXT_COLOR, false);
-        Component assignedShip = Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.assigned_ship");
+        Component assignedShip = Component.literal("Editing for:");
         guiGraphics.drawString(this.font, assignedShip, this.leftPos + ASSIGNED_SHIP_LABEL_X, this.topPos + ASSIGNED_SHIP_LABEL_Y, TEXT_COLOR, false);
         renderSchedule(guiGraphics, mouseX, mouseY);
         if (this.editorMode == EditorMode.NONE) {
@@ -259,7 +265,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             this.stationSuggestions.render(guiGraphics, mouseX, mouseY);
             pose.popPose();
         }
-        if (!usesRouteEditorBacking() && this.assignedShipSuggestions != null) {
+        if (!usesRouteEditorBacking() && !isAssignedShipLocked() && this.assignedShipSuggestions != null) {
             var pose = guiGraphics.pose();
             pose.pushPose();
             pose.translate(0, 0, 500);
@@ -267,6 +273,9 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             pose.popPose();
         }
         renderHover(guiGraphics, mouseX, mouseY);
+        if (pendingDeleteStopIndex != null) {
+            renderDeleteStopConfirm(guiGraphics, mouseX, mouseY);
+        }
     }
 
     @Override
@@ -279,7 +288,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         if (this.stationSuggestions != null) {
             this.stationSuggestions.tick();
         }
-        if (this.assignedShipSuggestions != null) {
+        if (!isAssignedShipLocked() && this.assignedShipSuggestions != null) {
             this.assignedShipSuggestions.tick();
         }
     }
@@ -389,8 +398,10 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                 if (i > 0) {
                     y += 9;
                 }
-                blit(guiGraphics, CREATE_SCHEDULE_SHEET, absoluteLeft + 29, absoluteTop + y, 34, 239, 11, 16);
-                renderAddCard(guiGraphics, absoluteLeft + 43, absoluteTop + y);
+                if (!isTransponderManagedPlan()) {
+                    blit(guiGraphics, CREATE_SCHEDULE_SHEET, absoluteLeft + 29, absoluteTop + y, 34, 239, 11, 16);
+                    renderAddCard(guiGraphics, absoluteLeft + 43, absoluteTop + y);
+                }
                 break;
             }
 
@@ -461,7 +472,9 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         renderScheduleInput(guiGraphics, x + 26, y + 5, actionFieldWidth, false, actionText, ModItems.AIRSHIP_STATION.get().getDefaultInstance());
 
         blit(guiGraphics, CREATE_SCHEDULE_SHEET, x + CARD_WIDTH - 14, y + 2, 51, 243, 12, 12);
-        blit(guiGraphics, CREATE_SCHEDULE_SHEET, x + CARD_WIDTH - 14, y + height - 14, 65, 243, 12, 12);
+        if (!isTransponderManagedPlan()) {
+            blit(guiGraphics, CREATE_SCHEDULE_SHEET, x + CARD_WIDTH - 14, y + height - 14, 65, 243, 12, 12);
+        }
         if (index > 0) {
             blit(guiGraphics, CREATE_SCHEDULE_SHEET, x + CARD_WIDTH, y + CARD_HEADER - 14, 51, 230, 12, 12);
         }
@@ -555,8 +568,6 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
 
     private void renderFooterButtons(GuiGraphics guiGraphics, int mouseX, int mouseY) {
         AirshipSchedule schedule = currentSchedule();
-        boolean resetActive = selectedIndex() > 0 && !schedule.entries().isEmpty();
-        boolean skipActive = schedule.entries().size() > 1;
         renderIconButton(
                 guiGraphics,
                 this.leftPos + 21,
@@ -567,28 +578,6 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                 isHoveringButton(mouseX, mouseY, this.leftPos + 21, this.topPos + 196),
                 isPressedButton(mouseX, mouseY, this.leftPos + 21, this.topPos + 196),
                 true
-        );
-        renderIconButton(
-                guiGraphics,
-                this.leftPos + 45,
-                this.topPos + 196,
-                112,
-                0,
-                false,
-                isHoveringButton(mouseX, mouseY, this.leftPos + 45, this.topPos + 196),
-                isPressedButton(mouseX, mouseY, this.leftPos + 45, this.topPos + 196),
-                resetActive
-        );
-        renderIconButton(
-                guiGraphics,
-                this.leftPos + 63,
-                this.topPos + 196,
-                80,
-                0,
-                false,
-                isHoveringButton(mouseX, mouseY, this.leftPos + 63, this.topPos + 196),
-                isPressedButton(mouseX, mouseY, this.leftPos + 63, this.topPos + 196),
-                skipActive
         );
         renderIconButton(
                 guiGraphics,
@@ -814,26 +803,60 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
 
         int lineY = listY;
         for (Component line : this.noRoutePopupLines) {
-            String remaining = line.getString();
-            if (remaining.isBlank()) {
+            if (line.getString().isBlank()) {
                 lineY += 12;
                 continue;
             }
-            while (!remaining.isEmpty()) {
-                String wrapped = this.font.plainSubstrByWidth(remaining, rowWidth - 12);
-                if (wrapped.isEmpty()) {
-                    break;
-                }
+            for (var wrapped : this.font.split(line, rowWidth - 12)) {
                 guiGraphics.drawString(this.font, wrapped, listX + 6, lineY, 0xFFD8DDE6, false);
                 lineY += 12;
-                if (wrapped.length() >= remaining.length()) {
-                    break;
-                }
-                remaining = remaining.substring(wrapped.length()).stripLeading();
             }
         }
 
         pose.popPose();
+    }
+
+    private void renderDeleteStopConfirm(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        var pose = guiGraphics.pose();
+        pose.pushPose();
+        pose.translate(0, 0, 560);
+        guiGraphics.fill(0, 0, this.width, this.height, 0xAA111316);
+        int boxW = 176;
+        int boxH = 136;
+        int x = this.leftPos + (this.imageWidth - boxW) / 2;
+        int y = this.topPos + 58;
+        guiGraphics.fill(x - 1, y - 1, x + boxW + 1, y + boxH + 1, 0xFF111111);
+        guiGraphics.fill(x, y, x + boxW, y + boxH, 0xF0292A2E);
+        guiGraphics.drawCenteredString(this.font, "Delete stop?", x + boxW / 2, y + 6, 0xFFFFC66E);
+        int lineY = y + 18;
+        for (Component line : deleteStopConfirmLines()) {
+            for (var wrapped : this.font.split(line, boxW - 12)) {
+                guiGraphics.drawString(this.font, wrapped, x + 6, lineY, 0xFFD8DDE6, false);
+                lineY += 10;
+            }
+        }
+        boolean yesHovered = inside(mouseX, mouseY, x + 20, y + boxH - 19, 52, 14);
+        boolean noHovered = inside(mouseX, mouseY, x + boxW - 72, y + boxH - 19, 52, 14);
+        guiGraphics.fill(x + 20, y + boxH - 19, x + 72, y + boxH - 5, yesHovered ? 0xFF9E5A5A : 0xFF7A4444);
+        guiGraphics.fill(x + boxW - 72, y + boxH - 19, x + boxW - 20, y + boxH - 5, noHovered ? 0xFF6A6A6A : 0xFF525252);
+        guiGraphics.drawCenteredString(this.font, "Delete", x + 46, y + boxH - 15, 0xFFFFFFFF);
+        guiGraphics.drawCenteredString(this.font, "Cancel", x + boxW - 46, y + boxH - 15, 0xFFFFFFFF);
+        pose.popPose();
+    }
+
+    private List<Component> deleteStopConfirmLines() {
+        if (pendingDeleteStopIndex == null || pendingDeleteStopIndex < 0 || pendingDeleteStopIndex >= currentSchedule().entries().size()) {
+            return List.of();
+        }
+        AirshipScheduleEntry entry = currentSchedule().entries().get(pendingDeleteStopIndex);
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.literal(entry.displayStationName()));
+        lines.add(Component.translatable(
+                "gui.create_aeronautics_automated_logistics.airship_schedule.delete_stop.routes",
+                deletedRouteCountForStop(currentSchedule(), pendingDeleteStopIndex)
+        ));
+        lines.add(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.delete_stop.rerecord"));
+        return lines;
     }
 
     private void renderRouteChoiceEditor(GuiGraphics guiGraphics, int mouseX, int mouseY) {
@@ -906,6 +929,9 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     }
 
     private void renderHover(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        if (pendingDeleteStopIndex != null) {
+            return;
+        }
         List<Component> tooltip = tooltipAt(mouseX, mouseY);
         if (!tooltip.isEmpty()) {
             guiGraphics.renderTooltip(this.font, tooltip.stream().map(Component::getVisualOrderText).toList(), mouseX, mouseY);
@@ -921,19 +947,16 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         int mx = mouseX - this.leftPos;
         int my = mouseY - this.topPos;
         if (inside(mx, my, ASSIGNED_SHIP_BOX_X, ASSIGNED_SHIP_BOX_Y - 2, ASSIGNED_SHIP_BOX_WIDTH, ASSIGNED_SHIP_BOX_HEIGHT + 6)) {
-            return List.of(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.assigned_ship.tooltip"));
+            if (this.assignedShipBox != null && !this.assignedShipBox.getValue().isBlank()) {
+                return List.of(Component.literal(this.assignedShipBox.getValue()));
+            }
+            return List.of();
         }
         if (!hasSelectedShip() && mx >= 11 && mx < 241 && my >= 14 && my < 191) {
             return List.of();
         }
         if (inside(mx, my, 21, 196, 18, 18)) {
             return loopTooltip();
-        }
-        if (inside(mx, my, 45, 196, 18, 18)) {
-            return List.of(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.reset"));
-        }
-        if (inside(mx, my, 63, 196, 18, 18)) {
-            return List.of(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.skip"));
         }
         if (inside(mx, my, 214, 196, 18, 18)) {
             return List.of(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.confirm"));
@@ -942,7 +965,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         return switch (hit.type) {
             case ADD_ENTRY -> List.of(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.add_entry"));
             case STATION -> stopTooltip(hit.index);
-            case REMOVE -> List.of(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.remove_entry"));
+            case REMOVE -> deleteStopTooltip(hit.index);
             case DUPLICATE -> List.of(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.duplicate"));
             case MOVE_UP -> List.of(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.move_up"));
             case MOVE_DOWN -> List.of(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.move_down"));
@@ -981,7 +1004,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         }
         if (this.editorMode == EditorMode.STATION) {
             if (inside(mx, my, 11, 87, 18, 18)) {
-                return List.of(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.remove_entry"));
+                return deleteStopTooltip(this.editorEntryIndex);
             }
             if (inside(mx, my, 56, 65, 143, 16)) {
                 return List.of(
@@ -1049,9 +1072,20 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         AirshipScheduleEntry entry = currentSchedule().entries().get(entryIndex);
         return List.of(
                 Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.next_stop").withStyle(ChatFormatting.GOLD),
-                Component.literal("\"" + entry.displayStationName() + "\""),
-                Component.empty(),
-                Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.left_click_edit").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC)
+                Component.literal("\"" + entry.displayStationName() + "\"")
+        );
+    }
+
+    private List<Component> deleteStopTooltip(int entryIndex) {
+        if (!isTransponderManagedPlan()) {
+            return List.of(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.remove_entry"));
+        }
+        return List.of(
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.delete_stop.tooltip"),
+                Component.translatable(
+                        "gui.create_aeronautics_automated_logistics.airship_schedule.delete_stop.routes",
+                        deletedRouteCountForStop(currentSchedule(), entryIndex)
+                ).withStyle(ChatFormatting.GRAY)
         );
     }
 
@@ -1112,6 +1146,9 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             this.leftMouseDown = true;
         }
+        if (pendingDeleteStopIndex != null) {
+            return handleDeleteStopConfirmClick(mouseX, mouseY);
+        }
         if (this.noRoutePopupOpen) {
             int mx = (int) mouseX - this.leftPos;
             int my = (int) mouseY - this.topPos;
@@ -1127,14 +1164,16 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             return mouseClickedEditor(mouseX, mouseY, button) || super.mouseClicked(mouseX, mouseY, button);
         }
 
-        if (this.assignedShipSuggestions != null
+        if (!isAssignedShipLocked()
+                && this.assignedShipSuggestions != null
                 && this.assignedShipSuggestions.mouseClicked((int) mouseX, (int) mouseY, button)) {
             return true;
         }
 
         int mx = (int) mouseX - this.leftPos;
         int my = (int) mouseY - this.topPos;
-        if (this.assignedShipBox != null
+        if (!isAssignedShipLocked()
+                && this.assignedShipBox != null
                 && inside(mx, my, ASSIGNED_SHIP_BOX_X, ASSIGNED_SHIP_BOX_Y - 2, ASSIGNED_SHIP_BOX_WIDTH, ASSIGNED_SHIP_BOX_HEIGHT + 6)) {
             this.assignedShipBox.mouseClicked(mouseX, mouseY, button);
             this.assignedShipBox.setFocused(true);
@@ -1149,14 +1188,6 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         }
         if (inside(mx, my, 21, 196, 18, 18)) {
             pressAction(AirshipScheduleMenu.ACTION_TOGGLE_LOOP);
-            return true;
-        }
-        if (inside(mx, my, 45, 196, 18, 18)) {
-            pressAction(AirshipScheduleMenu.ACTION_SELECT_ENTRY_BASE);
-            return true;
-        }
-        if (inside(mx, my, 63, 196, 18, 18)) {
-            pressAction(AirshipScheduleMenu.ACTION_SELECT_NEXT);
             return true;
         }
         if (inside(mx, my, 214, 196, 18, 18)) {
@@ -1177,12 +1208,29 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
 
         switch (hit.type) {
             case ADD_ENTRY -> {
+                if (isTransponderManagedPlan()) {
+                    return true;
+                }
                 pressAction(AirshipScheduleMenu.ACTION_ADD_TRAVEL);
                 openStationEditor(this.selectedIndex);
             }
-            case STATION -> openStationEditor(hit.index);
-            case REMOVE -> pressAction(AirshipScheduleMenu.ACTION_REMOVE);
-            case DUPLICATE -> pressAction(AirshipScheduleMenu.ACTION_DUPLICATE);
+            case STATION -> {
+                if (!isTransponderManagedPlan()) {
+                    openStationEditor(hit.index);
+                }
+            }
+            case REMOVE -> {
+                if (isTransponderManagedPlan()) {
+                    openDeleteStopConfirm(hit.index);
+                } else {
+                    pressAction(AirshipScheduleMenu.ACTION_REMOVE);
+                }
+            }
+            case DUPLICATE -> {
+                if (!isTransponderManagedPlan()) {
+                    pressAction(AirshipScheduleMenu.ACTION_DUPLICATE);
+                }
+            }
             case MOVE_UP -> pressAction(AirshipScheduleMenu.ACTION_MOVE_UP);
             case MOVE_DOWN -> pressAction(AirshipScheduleMenu.ACTION_MOVE_DOWN);
             case CONDITION_SCROLL_LEFT -> scrollConditionColumns(hit.index, -1);
@@ -1244,9 +1292,13 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         }
         if (this.editorMode == EditorMode.STATION) {
             if (inside(mx, my, 11, 87, 18, 18)) {
-                removeSelectedLocally(currentSchedule());
-                syncSchedule();
-                closeEditor();
+                if (isTransponderManagedPlan()) {
+                    openDeleteStopConfirm(this.editorEntryIndex);
+                } else {
+                    removeSelectedLocally(currentSchedule());
+                    syncSchedule();
+                    closeEditor();
+                }
                 return true;
             }
             if (this.editorStationBox != null && inside(mx, my, 77, 88, 121, 18)) {
@@ -1288,13 +1340,17 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (pendingDeleteStopIndex != null) {
+            return true;
+        }
         if (this.noRoutePopupOpen) {
             return true;
         }
         if (super.mouseScrolled(mouseX, mouseY, scrollX, scrollY)) {
             return true;
         }
-        if (this.assignedShipBox != null
+        if (!isAssignedShipLocked()
+                && this.assignedShipBox != null
                 && this.assignedShipBox.isFocused()
                 && this.assignedShipSuggestions != null
                 && this.assignedShipSuggestions.mouseScrolled(Mth.clamp(scrollY, -1.0D, 1.0D))) {
@@ -1355,13 +1411,25 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (pendingDeleteStopIndex != null) {
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                closeDeleteStopConfirm();
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                confirmDeleteStop();
+                return true;
+            }
+            return true;
+        }
         if (this.noRoutePopupOpen) {
             if (keyCode == GLFW.GLFW_KEY_ESCAPE || keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
                 closeNoRoutePopup();
             }
             return true;
         }
-        if (this.assignedShipBox != null
+        if (!isAssignedShipLocked()
+                && this.assignedShipBox != null
                 && this.assignedShipBox.isFocused()
                 && this.assignedShipSuggestions != null
                 && this.assignedShipSuggestions.keyPressed(keyCode, scanCode, modifiers)) {
@@ -1389,7 +1457,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             if (this.titleBox != null && this.titleBox.isFocused()) {
                 return this.titleBox.keyPressed(keyCode, scanCode, modifiers) || this.titleBox.canConsumeInput();
             }
-            if (this.assignedShipBox != null && this.assignedShipBox.isFocused()) {
+            if (!isAssignedShipLocked() && this.assignedShipBox != null && this.assignedShipBox.isFocused()) {
                 return this.assignedShipBox.keyPressed(keyCode, scanCode, modifiers) || this.assignedShipBox.canConsumeInput();
             }
             if (this.stationFilterBox != null && this.stationFilterBox.isFocused()) {
@@ -1404,13 +1472,16 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         if (this.noRoutePopupOpen) {
             return true;
         }
+        if (pendingDeleteStopIndex != null) {
+            return true;
+        }
         if (super.charTyped(codePoint, modifiers)) {
             return true;
         }
         if (this.titleBox != null && this.titleBox.isFocused() && this.titleBox.charTyped(codePoint, modifiers)) {
             return true;
         }
-        if (this.assignedShipBox != null && this.assignedShipBox.isFocused() && this.assignedShipBox.charTyped(codePoint, modifiers)) {
+        if (!isAssignedShipLocked() && this.assignedShipBox != null && this.assignedShipBox.isFocused() && this.assignedShipBox.charTyped(codePoint, modifiers)) {
             return true;
         }
         if (this.stationFilterBox != null && this.stationFilterBox.isFocused() && this.stationFilterBox.charTyped(codePoint, modifiers)) {
@@ -1419,11 +1490,29 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         return super.charTyped(codePoint, modifiers);
     }
 
+    private boolean isAssignedShipLocked() {
+        return this.menu.openedFromTransponder();
+    }
+
+    private boolean isTransponderManagedPlan() {
+        return this.menu.openedFromTransponder();
+    }
+
     @Override
     public void removed() {
         this.leftMouseDown = false;
         this.showPlayerInventorySlots = true;
         saveTitle();
+        if (this.reopenSourceScreenOnClose
+                && this.minecraft != null
+                && this.minecraft.player != null
+                && this.menu.originTransponderPos().isPresent()) {
+            PacketDistributor.sendToServer(new ReopenShipTransponderPayload(
+                    this.menu.originTransponderPos().get(),
+                    this.menu.returnToRecordingMode()
+            ));
+            this.reopenSourceScreenOnClose = false;
+        }
         super.removed();
     }
 
@@ -1476,7 +1565,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                 if (y > 0 && y <= 15) {
                     return new Hit(HitType.REMOVE, i);
                 }
-                if (y > cardHeight - 15) {
+                if (!isTransponderManagedPlan() && y > cardHeight - 15) {
                     return new Hit(HitType.DUPLICATE, i);
                 }
             }
@@ -1775,6 +1864,12 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     private void applyLocalAction(int actionId) {
         if (actionId >= AirshipScheduleMenu.ACTION_SELECT_ENTRY_BASE) {
             this.selectedIndex = Math.max(0, Math.min(actionId - AirshipScheduleMenu.ACTION_SELECT_ENTRY_BASE, Math.max(0, currentSchedule().entries().size() - 1)));
+            return;
+        }
+        if (isTransponderManagedPlan()
+                && (actionId == AirshipScheduleMenu.ACTION_ADD_TRAVEL
+                || actionId == AirshipScheduleMenu.ACTION_DUPLICATE
+                || actionId == AirshipScheduleMenu.ACTION_CYCLE_TARGET_STATION)) {
             return;
         }
 
@@ -2235,18 +2330,84 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             this.noRoutePopupLines.add(Component.literal("No recorded route from"));
             this.noRoutePopupLines.add(Component.literal(start + " -> " + target + " exists."));
             this.noRoutePopupLines.add(Component.empty());
-            this.noRoutePopupLines.add(Component.literal("Use an Airship Station to record an inbound route first."));
+            this.noRoutePopupLines.add(Component.literal("Use the Ship Transponder"));
+            this.noRoutePopupLines.add(Component.literal("in Recording Mode to record"));
+            this.noRoutePopupLines.add(Component.literal("that route first."));
         } else {
             this.noRoutePopupLines.add(Component.literal("No recorded route ends at"));
             this.noRoutePopupLines.add(Component.literal(target + "."));
             this.noRoutePopupLines.add(Component.empty());
-            this.noRoutePopupLines.add(Component.literal("Use an Airship Station to record an inbound route first."));
+            this.noRoutePopupLines.add(Component.literal("Use the Ship Transponder"));
+            this.noRoutePopupLines.add(Component.literal("in Recording Mode to record"));
+            this.noRoutePopupLines.add(Component.literal("an inbound route first."));
         }
     }
 
     private void closeNoRoutePopup() {
         this.noRoutePopupOpen = false;
         this.noRoutePopupLines.clear();
+    }
+
+    private void openDeleteStopConfirm(int entryIndex) {
+        if (!isTransponderManagedPlan() || entryIndex < 0 || entryIndex >= currentSchedule().entries().size()) {
+            return;
+        }
+        this.pendingDeleteStopIndex = entryIndex;
+    }
+
+    private void closeDeleteStopConfirm() {
+        this.pendingDeleteStopIndex = null;
+    }
+
+    private boolean handleDeleteStopConfirmClick(double mouseX, double mouseY) {
+        int boxW = 176;
+        int boxH = 136;
+        int x = this.leftPos + (this.imageWidth - boxW) / 2;
+        int y = this.topPos + 58;
+        if (inside((int) mouseX, (int) mouseY, x + 20, y + boxH - 19, 52, 14)) {
+            confirmDeleteStop();
+            return true;
+        }
+        if (inside((int) mouseX, (int) mouseY, x + boxW - 72, y + boxH - 19, 52, 14)
+                || !inside((int) mouseX, (int) mouseY, x, y, boxW, boxH)) {
+            closeDeleteStopConfirm();
+            return true;
+        }
+        return true;
+    }
+
+    private void confirmDeleteStop() {
+        if (pendingDeleteStopIndex == null) {
+            return;
+        }
+        int entryIndex = pendingDeleteStopIndex;
+        closeDeleteStopConfirm();
+        if (entryIndex < 0 || entryIndex >= currentSchedule().entries().size()) {
+            return;
+        }
+        this.selectedIndex = entryIndex;
+        removeSelectedLocally(currentSchedule());
+        pressAction(AirshipScheduleMenu.ACTION_REMOVE);
+        if (this.editorMode == EditorMode.STATION && this.editorEntryIndex == entryIndex) {
+            closeEditor();
+        }
+    }
+
+    private int deletedRouteCountForStop(AirshipSchedule schedule, int removedIndex) {
+        if (removedIndex < 0 || removedIndex >= schedule.entries().size()) {
+            return 0;
+        }
+        if (schedule.entries().size() == 1) {
+            return 1;
+        }
+        int count = 0;
+        if (removedIndex == schedule.entries().size() - 1) {
+            count++;
+        }
+        if (removedIndex < schedule.entries().size() - 1) {
+            count++;
+        }
+        return count;
     }
 
     private StationSuggestions createStationSuggestions(EditBox targetBox) {

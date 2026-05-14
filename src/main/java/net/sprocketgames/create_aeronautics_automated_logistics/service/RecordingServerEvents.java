@@ -1,5 +1,7 @@
 package net.sprocketgames.create_aeronautics_automated_logistics.service;
 
+import dev.ryanhcode.sable.neoforge.event.ForgeSablePostPhysicsTickEvent;
+import dev.ryanhcode.sable.neoforge.event.ForgeSablePrePhysicsTickEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
@@ -16,6 +18,16 @@ public final class RecordingServerEvents {
         if (event.getServer().getTickCount() % 20 == 0) {
             AutomationRuntimeSavedData.capture(event.getServer());
         }
+    }
+
+    public static void onSablePrePhysicsTick(ForgeSablePrePhysicsTickEvent event) {
+        AutomatedLogisticsServices.ensureRuntimeLoaded(event.getPhysicsSystem().getLevel().getServer());
+        AutomatedLogisticsServices.PLAYBACK.holdPausedVehicles(event.getPhysicsSystem().getLevel());
+    }
+
+    public static void onSablePostPhysicsTick(ForgeSablePostPhysicsTickEvent event) {
+        AutomatedLogisticsServices.ensureRuntimeLoaded(event.getPhysicsSystem().getLevel().getServer());
+        AutomatedLogisticsServices.PLAYBACK.holdPausedVehicles(event.getPhysicsSystem().getLevel());
     }
 
     public static void onServerStopping(ServerStoppingEvent event) {

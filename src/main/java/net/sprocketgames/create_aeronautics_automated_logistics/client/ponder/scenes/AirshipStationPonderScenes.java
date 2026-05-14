@@ -15,6 +15,7 @@ import net.createmod.ponder.api.scene.Selection;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.client.resources.language.I18n;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
@@ -32,7 +33,7 @@ public final class AirshipStationPonderScenes {
 
     public static void recordingBetweenStations(SceneBuilder builder, SceneBuildingUtil util) {
         CreateSceneBuilder scene = new CreateSceneBuilder(builder);
-        scene.title("recording_between_stations", "Recording routes between Airship Stations");
+        scene.title("recording_between_stations", ponder("recording_between_stations.header"));
         scene.configureBasePlate(0, 0, 10);
         scene.scaleSceneView(.72f);
         scene.setSceneOffsetY(-1);
@@ -54,7 +55,7 @@ public final class AirshipStationPonderScenes {
         scene.world().showSection(stationASelection, Direction.EAST);
         scene.idle(12);
         scene.overlay().showText(45)
-                .text("Station A")
+                .text(ponder("recording_between_stations.text_1"))
                 .pointAt(stationATop)
                 .placeNearTarget()
                 .colored(PonderPalette.BLUE);
@@ -63,7 +64,7 @@ public final class AirshipStationPonderScenes {
         scene.world().showSection(stationBSelection, Direction.WEST);
         scene.idle(12);
         scene.overlay().showText(45)
-                .text("Station B")
+                .text(ponder("recording_between_stations.text_2"))
                 .pointAt(stationBTop)
                 .placeNearTarget()
                 .colored(PonderPalette.BLUE);
@@ -72,7 +73,7 @@ public final class AirshipStationPonderScenes {
         ElementLink<WorldSectionElement> ship = scene.world().showIndependentSection(shipSelection, Direction.DOWN);
         scene.idle(20);
         scene.overlay().showText(55)
-                .text("The ship carries a Ship Transponder")
+                .text(ponder("recording_between_stations.text_3"))
                 .pointAt(transponderTop)
                 .placeNearTarget()
                 .colored(PonderPalette.GREEN);
@@ -83,7 +84,7 @@ public final class AirshipStationPonderScenes {
                 .withItem(ModBlocks.AIRSHIP_STATION.asItem().getDefaultInstance());
         scene.idle(10);
         scene.overlay().showText(80)
-                .text("At Station A, select the airship by name, then start recording")
+                .text(ponder("recording_between_stations.text_4"))
                 .pointAt(stationATop)
                 .placeNearTarget()
                 .attachKeyFrame();
@@ -91,7 +92,7 @@ public final class AirshipStationPonderScenes {
         scene.idle(86);
 
         scene.overlay().showText(55)
-                .text("Fly the ship manually to Station B")
+                .text(ponder("recording_between_stations.text_5"))
                 .pointAt(transponderTop)
                 .placeNearTarget();
         scene.world().moveSection(ship, routeVector, 80);
@@ -102,7 +103,7 @@ public final class AirshipStationPonderScenes {
                 .withItem(ModItems.AIRSHIP_STATION.get().getDefaultInstance());
         scene.idle(10);
         scene.overlay().showText(75)
-                .text("Finish recording at Station B to save Station A -> Station B")
+                .text(ponder("recording_between_stations.text_6"))
                 .pointAt(stationBTop)
                 .placeNearTarget()
                 .attachKeyFrame()
@@ -111,7 +112,7 @@ public final class AirshipStationPonderScenes {
         scene.idle(82);
 
         scene.overlay().showText(70)
-                .text("Routes are directional, so record the return leg separately")
+                .text(ponder("recording_between_stations.text_7"))
                 .pointAt(stationBTop)
                 .placeNearTarget()
                 .attachKeyFrame();
@@ -119,7 +120,7 @@ public final class AirshipStationPonderScenes {
         scene.idle(76);
 
         scene.overlay().showText(55)
-                .text("Fly back to Station A")
+                .text(ponder("recording_between_stations.text_8"))
                 .pointAt(transponderTop.add(routeVector))
                 .placeNearTarget();
         scene.world().moveSection(ship, routeVector.scale(-1), 80);
@@ -130,7 +131,7 @@ public final class AirshipStationPonderScenes {
                 .withItem(ModItems.AIRSHIP_STATION.get().getDefaultInstance());
         scene.idle(10);
         scene.overlay().showText(75)
-                .text("Finish at Station A to save Station B -> Station A")
+                .text(ponder("recording_between_stations.text_9"))
                 .pointAt(stationATop)
                 .placeNearTarget()
                 .colored(PonderPalette.GREEN);
@@ -138,7 +139,7 @@ public final class AirshipStationPonderScenes {
         scene.idle(82);
 
         scene.overlay().showText(80)
-                .text("With both segments saved, schedules can repeat the trip")
+                .text(ponder("recording_between_stations.text_10"))
                 .pointAt(util.vector().of(4.5, 2.1, 6.5))
                 .placeNearTarget()
                 .attachKeyFrame()
@@ -151,7 +152,7 @@ public final class AirshipStationPonderScenes {
 
     public static void installingAndRunningASchedule(SceneBuilder builder, SceneBuildingUtil util) {
         CreateSceneBuilder scene = new CreateSceneBuilder(builder);
-        scene.title("installing_and_running_a_schedule", "Installing and running an Airship Schedule");
+        scene.title("recording_and_running_routes", ponder("recording_and_running_routes.header"));
         scene.configureBasePlate(0, 0, 10);
         scene.scaleSceneView(.72f);
         scene.setSceneOffsetY(-1);
@@ -166,6 +167,7 @@ public final class AirshipStationPonderScenes {
         Vec3 stationBTop = util.vector().topOf(stationB);
         Vec3 transponderTop = util.vector().topOf(transponder);
         Vec3 routeVector = util.vector().of(5, 0, 0);
+        BlockPos destinationTransponder = transponder.east(5);
 
         scene.world().showIndependentSection(util.select().layer(0), Direction.UP);
         scene.idle(10);
@@ -173,7 +175,7 @@ public final class AirshipStationPonderScenes {
         scene.world().showSection(stationASelection, Direction.EAST);
         scene.idle(10);
         scene.overlay().showText(40)
-                .text("Station A")
+                .text(ponder("recording_and_running_routes.text_1"))
                 .pointAt(stationATop)
                 .placeNearTarget()
                 .colored(PonderPalette.BLUE);
@@ -181,85 +183,123 @@ public final class AirshipStationPonderScenes {
 
         scene.world().showSection(stationBSelection, Direction.WEST);
         scene.idle(10);
-        scene.overlay().showText(40)
-                .text("Station B")
+        scene.overlay().showText(55)
+                .text(ponder("recording_and_running_routes.text_2"))
                 .pointAt(stationBTop)
                 .placeNearTarget()
                 .colored(PonderPalette.BLUE);
-        scene.idle(30);
+        scene.idle(60);
+
+        scene.overlay().showText(55)
+                .text(ponder("recording_and_running_routes.text_3"))
+                .pointAt(stationBTop)
+                .placeNearTarget()
+                .attachKeyFrame();
+        scene.idle(62);
 
         ElementLink<WorldSectionElement> ship = scene.world().showIndependentSection(shipSelection, Direction.DOWN);
         scene.idle(20);
 
-        scene.overlay().showText(85)
-                .text("Make sure you have recorded your routes first using the Airship Stations")
-                .pointAt(stationATop)
-                .placeNearTarget()
-                .attachKeyFrame();
-        scene.idle(92);
-
-        scene.overlay().showControls(transponderTop, Pointing.DOWN, 45)
-                .rightClick()
-                .withItem(ModItems.AIRSHIP_SCHEDULE.get().getDefaultInstance());
-        scene.idle(10);
-        scene.overlay().showText(95)
-                .text("Create a schedule to specify which stations, routes and wait conditions your ship should use")
+        scene.overlay().showText(65)
+                .text(ponder("recording_and_running_routes.text_4"))
                 .pointAt(transponderTop)
                 .placeNearTarget()
+                .colored(PonderPalette.GREEN)
                 .attachKeyFrame();
-        scene.idle(102);
-
-        scene.overlay().showText(75)
-                .text("Put your completed schedule into the Ship Transponder")
-                .pointAt(transponderTop)
-                .placeNearTarget()
-                .colored(PonderPalette.GREEN);
-        scene.effects().indicateSuccess(transponder);
-        scene.idle(82);
-
-        scene.overlay().showControls(stationATop, Pointing.DOWN, 45)
-                .rightClick()
-                .withItem(ModBlocks.AIRSHIP_STATION.asItem().getDefaultInstance());
-        scene.idle(10);
-        scene.overlay().showText(95)
-                .text("Make sure your ship is at the start station, then you can start the journey from the station")
-                .pointAt(stationATop)
-                .placeNearTarget()
-                .attachKeyFrame();
-        scene.effects().indicateSuccess(stationA);
-        scene.idle(102);
+        scene.idle(72);
 
         scene.overlay().showControls(transponderTop, Pointing.DOWN, 45)
                 .rightClick()
                 .withItem(ModBlocks.SHIP_TRANSPONDER.asItem().getDefaultInstance());
         scene.idle(10);
         scene.overlay().showText(70)
-                .text("You can also start it from the transponder")
+                .text(ponder("recording_and_running_routes.text_5"))
                 .pointAt(transponderTop)
                 .placeNearTarget()
-                .colored(PonderPalette.GREEN);
+                .attachKeyFrame();
+        scene.idle(78);
+
+        scene.overlay().showText(70)
+                .text(ponder("recording_and_running_routes.text_6"))
+                .pointAt(transponderTop)
+                .placeNearTarget()
+                .colored(PonderPalette.BLUE);
         scene.effects().indicateSuccess(transponder);
         scene.idle(78);
 
         scene.overlay().showText(60)
-                .text("Once started, the ship follows its recorded route automatically")
+                .text(ponder("recording_and_running_routes.text_7"))
                 .pointAt(transponderTop)
                 .placeNearTarget();
+        scene.idle(68);
         scene.world().moveSection(ship, routeVector, 80);
         scene.idle(88);
 
+        scene.overlay().showText(70)
+                .text(ponder("recording_and_running_routes.text_8"))
+                .pointAt(transponderTop.add(routeVector))
+                .placeNearTarget()
+                .attachKeyFrame()
+                .colored(PonderPalette.GREEN);
+        scene.effects().indicateSuccess(destinationTransponder);
+        scene.idle(78);
+
+        scene.overlay().showControls(transponderTop.add(routeVector), Pointing.DOWN, 45)
+                .rightClick()
+                .withItem(ModBlocks.SHIP_TRANSPONDER.asItem().getDefaultInstance());
+        scene.idle(10);
         scene.overlay().showText(65)
-                .text("The schedule continues from station to station using the installed route plan")
+                .text(ponder("recording_and_running_routes.text_9"))
+                .pointAt(transponderTop.add(routeVector))
+                .placeNearTarget()
+                .colored(PonderPalette.BLUE);
+        scene.effects().indicateSuccess(destinationTransponder);
+        scene.idle(72);
+        scene.world().moveSection(ship, routeVector.scale(-1), 80);
+        scene.idle(88);
+
+        scene.overlay().showText(85)
+                .text(ponder("recording_and_running_routes.text_10"))
+                .pointAt(transponderTop)
+                .placeNearTarget()
+                .attachKeyFrame();
+        scene.effects().indicateSuccess(transponder);
+        scene.idle(92);
+
+        scene.overlay().showControls(transponderTop, Pointing.DOWN, 45)
+                .rightClick()
+                .withItem(ModBlocks.SHIP_TRANSPONDER.asItem().getDefaultInstance());
+        scene.idle(10);
+        scene.overlay().showText(70)
+                .text(ponder("recording_and_running_routes.text_11"))
+                .pointAt(transponderTop)
+                .placeNearTarget()
+                .colored(PonderPalette.GREEN);
+        scene.idle(78);
+
+        scene.overlay().showText(60)
+                .text(ponder("recording_and_running_routes.text_12"))
+                .pointAt(transponderTop)
+                .placeNearTarget();
+        scene.idle(68);
+        scene.world().moveSection(ship, routeVector, 80);
+        scene.idle(88);
+
+        scene.overlay().showText(75)
+                .text(ponder("recording_and_running_routes.text_13"))
                 .pointAt(stationBTop)
                 .placeNearTarget()
                 .attachKeyFrame()
                 .colored(PonderPalette.BLUE);
-        scene.idle(70);
+        scene.idle(82);
+
+        scene.world().moveSection(ship, routeVector.scale(-1), 80);
+        scene.idle(88);
     }
 
     public static void dockingWaits(SceneBuilder builder, SceneBuildingUtil util) {
         CreateSceneBuilder scene = new CreateSceneBuilder(builder);
-        scene.title("docking_waits", "Docking waits");
+        scene.title("docking_waits", ponder("docking_waits.header"));
         scene.configureBasePlate(0, 0, 10);
         scene.scaleSceneView(.72f);
         scene.setSceneOffsetY(-1);
@@ -299,27 +339,27 @@ public final class AirshipStationPonderScenes {
         scene.idle(20);
 
         scene.overlay().showText(60)
-                .text("The nearest dock to the assigned station is used")
+                .text(ponder("docking_waits.text_1"))
                 .pointAt(stationDockTop)
                 .placeNearTarget()
                 .attachKeyFrame();
         scene.idle(68);
 
         scene.overlay().showText(60)
-                .text("The nearest dock to the Ship Transponder is used")
+                .text(ponder("docking_waits.text_2"))
                 .pointAt(shipDockTop)
                 .placeNearTarget();
         scene.idle(68);
 
         scene.overlay().showText(70)
-                .text("A docking wait in the schedule prepares both sides for docking")
+                .text(ponder("docking_waits.text_3"))
                 .pointAt(transponderTop)
                 .placeNearTarget()
                 .colored(PonderPalette.BLUE);
         scene.idle(78);
 
         scene.overlay().showText(55)
-                .text("The ship follows its recorded route to the destination station")
+                .text(ponder("docking_waits.text_4"))
                 .pointAt(stationBTop)
                 .placeNearTarget();
         scene.world().moveSection(ship, routeVector, 80);
@@ -336,7 +376,7 @@ public final class AirshipStationPonderScenes {
         scene.idle(15);
 
         scene.overlay().showText(90)
-                .text("During docking stages, the station and transponder emit redstone so your wiring can power the connectors")
+                .text(ponder("docking_waits.text_5"))
                 .pointAt(stationBTop)
                 .placeNearTarget()
                 .attachKeyFrame();
@@ -347,7 +387,7 @@ public final class AirshipStationPonderScenes {
         scene.addInstruction(new LinkDockingConnectorsInstruction(shipDock, stationDock));
         scene.idle(20);
         scene.overlay().showText(65)
-                .text("Once the connectors lock, the ship waits at the station")
+                .text(ponder("docking_waits.text_6"))
                 .pointAt(stationDockTop)
                 .placeNearTarget()
                 .attachKeyFrame()
@@ -355,7 +395,7 @@ public final class AirshipStationPonderScenes {
         scene.idle(76);
 
         scene.overlay().showText(70)
-                .text("After the wait condition completes, the dock output turns off and the ship departs")
+                .text(ponder("docking_waits.text_7"))
                 .pointAt(stationBTop)
                 .placeNearTarget()
                 .colored(PonderPalette.BLUE);
@@ -422,5 +462,9 @@ public final class AirshipStationPonderScenes {
                 .setValue(RedstoneLinkBlock.FACING, Direction.NORTH)
                 .setValue(RedstoneLinkBlock.RECEIVER, false)
                 .setValue(RedstoneLinkBlock.POWERED, false);
+    }
+
+    private static String ponder(String key) {
+        return I18n.get("create_aeronautics_automated_logistics.ponder." + key);
     }
 }

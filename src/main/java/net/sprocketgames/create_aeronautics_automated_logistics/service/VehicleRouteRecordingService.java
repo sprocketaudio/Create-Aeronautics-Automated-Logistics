@@ -119,6 +119,10 @@ public class VehicleRouteRecordingService implements RouteRecordingService {
             station.get().failRecording(RecordingFailure.ROUTE_TOO_SHORT.failureReason());
             return RouteOperationResult.failure(RecordingFailure.ROUTE_TOO_SHORT);
         }
+        if (!hasMeaningfulTravel(activeRecording.points())) {
+            station.get().failRecording(RecordingFailure.ROUTE_TOO_SHORT.failureReason());
+            return RouteOperationResult.failure(RecordingFailure.ROUTE_TOO_SHORT);
+        }
 
         Route route = new Route(
                 activeRecording.session().routeId(),
@@ -137,6 +141,11 @@ public class VehicleRouteRecordingService implements RouteRecordingService {
 
     @Override
     public RouteOperationResult<RouteSegment> finishSegmentRecording(ServerPlayer player, BlockPos endStationPos) {
+        return finishSegmentRecording(player, endStationPos, true);
+    }
+
+    @Override
+    public RouteOperationResult<RouteSegment> finishSegmentRecording(ServerPlayer player, BlockPos endStationPos, boolean continueRecording) {
         Objects.requireNonNull(player, "player");
         Objects.requireNonNull(endStationPos, "endStationPos");
 
@@ -183,6 +192,11 @@ public class VehicleRouteRecordingService implements RouteRecordingService {
             startStation.get().failRecording(RecordingFailure.ROUTE_TOO_SHORT.failureReason());
             return RouteOperationResult.failure(RecordingFailure.ROUTE_TOO_SHORT);
         }
+        if (!hasMeaningfulTravel(recording.points())) {
+            activeRecordings.remove(recording.session().routeId());
+            startStation.get().failRecording(RecordingFailure.ROUTE_TOO_SHORT.failureReason());
+            return RouteOperationResult.failure(RecordingFailure.ROUTE_TOO_SHORT);
+        }
 
         Optional<ShipTransponderSnapshot> ship = ShipTransponderRegistry.snapshot(selectedTransponderId.get());
         String shipName = ship.map(ShipTransponderSnapshot::shipName).orElseGet(startStation.get()::selectedShipName);
@@ -222,8 +236,51 @@ public class VehicleRouteRecordingService implements RouteRecordingService {
         if (!startStation.get().stationId().equals(endStation.get().stationId())) {
             endStation.get().addRouteSegment(segment);
         }
-        continueRecordingFromStation(player, level, recording, endStation.get(), ship);
+        if (continueRecording) {
+            continueRecordingFromStation(player, level, recording, endStation.get(), ship);
+        } else {
+            activeRecordings.remove(recording.session().routeId());
+        }
         return RouteOperationResult.success(segment);
+    }
+
+    @Override
+    public RouteOperationResult<Boolean> cancelRecording(ServerPlayer player) {
+        Objects.requireNonNull(player, "player");
+
+        Optional<ActiveRecording> activeRecording = activeRecordingFor(player.getUUID());
+        if (activeRecording.isEmpty()) {
+            return RouteOperationResult.failure(RecordingFailure.UNKNOWN_ROUTE);
+        }
+
+        ActiveRecording recording = activeRecording.get();
+        activeRecordings.remove(recording.session().routeId());
+        ServerLevel level = player.serverLevel();
+        if (!recording.dimension().equals(level.dimension())) {
+            return RouteOperationResult.failure(RecordingFailure.DIMENSION_MISMATCH);
+        }
+        stationAt(level, recording.session().stationPos()).ifPresent(AirshipStationBlockEntity::cancelRecording);
+        return RouteOperationResult.success(Boolean.TRUE);
+    }
+
+    public boolean cancelRecordingForController(ServerLevel level, net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerRef controllerRef) {
+        Objects.requireNonNull(level, "level");
+        Objects.requireNonNull(controllerRef, "controllerRef");
+
+        boolean cancelled = false;
+        Iterator<Map.Entry<RouteId, ActiveRecording>> iterator = activeRecordings.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<RouteId, ActiveRecording> entry = iterator.next();
+            ActiveRecording recording = entry.getValue();
+            if (!recording.dimension().equals(level.dimension())
+                    || !recording.session().controllerRef().matches(controllerRef)) {
+                continue;
+            }
+            iterator.remove();
+            stationAt(level, recording.session().stationPos()).ifPresent(AirshipStationBlockEntity::cancelRecording);
+            cancelled = true;
+        }
+        return cancelled;
     }
 
     private void continueRecordingFromStation(
@@ -396,6 +453,24 @@ public class VehicleRouteRecordingService implements RouteRecordingService {
         }
 
         tickOne(player.serverLevel(), activeRecording);
+    }
+
+    private boolean hasMeaningfulTravel(List<net.sprocketgames.create_aeronautics_automated_logistics.route.RoutePoint> points) {
+        if (points.size() < 2) {
+            return false;
+        }
+        double threshold = Math.max(0.5D, AutomatedLogisticsConfig.MIN_DISTANCE_BETWEEN_POINTS.get());
+        Vec3 origin = points.getFirst().position();
+        double maxDisplacement = 0.0D;
+        double totalTravel = 0.0D;
+        Vec3 previous = origin;
+        for (int i = 1; i < points.size(); i++) {
+            Vec3 current = points.get(i).position();
+            maxDisplacement = Math.max(maxDisplacement, current.distanceTo(origin));
+            totalTravel += current.distanceTo(previous);
+            previous = current;
+        }
+        return maxDisplacement >= threshold || totalTravel >= threshold;
     }
 
     public void tickAll(MinecraftServer server) {

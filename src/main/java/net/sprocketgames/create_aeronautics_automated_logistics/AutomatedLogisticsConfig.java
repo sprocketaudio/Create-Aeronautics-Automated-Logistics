@@ -15,6 +15,9 @@ public class AutomatedLogisticsConfig {
     public static final ModConfigSpec.DoubleValue MAX_START_JOIN_DISTANCE;
     public static final ModConfigSpec.BooleanValue STOP_ON_COLLISION;
     public static final ModConfigSpec.BooleanValue STOP_ON_ERROR;
+    public static final ModConfigSpec.DoubleValue SEGMENT_OVERRUN_MULTIPLIER;
+    public static final ModConfigSpec.DoubleValue MIN_MEANINGFUL_PROGRESS_DISTANCE;
+    public static final ModConfigSpec.IntValue STUCK_TIMEOUT_TICKS;
 
     public static final ModConfigSpec.BooleanValue SHOW_ROUTE_PREVIEW;
     public static final ModConfigSpec.IntValue PREVIEW_RANGE;
@@ -26,6 +29,7 @@ public class AutomatedLogisticsConfig {
     public static final ModConfigSpec.IntValue DOCK_CARGO_TIMEOUT_TICKS;
 
     public static final ModConfigSpec.IntValue MAX_ACTIVE_VEHICLES_PER_PLAYER;
+    public static final ModConfigSpec.BooleanValue RESTRICT_TRANSPONDER_CONTROL_TO_OWNER;
     public static final ModConfigSpec.BooleanValue DEBUG_LOGGING;
 
     static final ModConfigSpec SPEC;
@@ -59,6 +63,15 @@ public class AutomatedLogisticsConfig {
         STOP_ON_ERROR = BUILDER
                 .comment("Stop automated playback when an unrecoverable error is detected.")
                 .define("stopOnError", true);
+        SEGMENT_OVERRUN_MULTIPLIER = BUILDER
+                .comment("How many times longer than the recorded segment duration playback may take before overdue stuck monitoring begins.")
+                .defineInRange("segmentOverrunMultiplier", 3.0D, 1.0D, 20.0D);
+        MIN_MEANINGFUL_PROGRESS_DISTANCE = BUILDER
+                .comment("Minimum net distance in blocks an overdue segment must gain toward its target before the overdue stuck timer is reset.")
+                .defineInRange("minMeaningfulProgressDistance", 0.25D, 0.01D, 32.0D);
+        STUCK_TIMEOUT_TICKS = BUILDER
+                .comment("Maximum ticks an overdue segment may continue without meaningful net progress before playback pauses in a fault hold.")
+                .defineInRange("stuckTimeoutTicks", 200, 20, 20 * 60 * 30);
         BUILDER.pop();
 
         BUILDER.push("visuals");
@@ -92,6 +105,9 @@ public class AutomatedLogisticsConfig {
         MAX_ACTIVE_VEHICLES_PER_PLAYER = BUILDER
                 .comment("Maximum number of simultaneously active automated vehicles per player.")
                 .defineInRange("maxActiveVehiclesPerPlayer", 8, 0, 1024);
+        RESTRICT_TRANSPONDER_CONTROL_TO_OWNER = BUILDER
+                .comment("Restrict Ship Transponder and Airship Station control actions to the owner and server operators.")
+                .define("restrictTransponderControlToOwner", true);
         BUILDER.pop();
 
         BUILDER.push("debug");

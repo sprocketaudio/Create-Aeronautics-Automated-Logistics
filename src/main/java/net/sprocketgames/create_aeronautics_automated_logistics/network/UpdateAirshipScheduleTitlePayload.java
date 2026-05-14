@@ -5,11 +5,9 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
-import net.sprocketgames.create_aeronautics_automated_logistics.item.AirshipScheduleItem;
-import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModItems;
+import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipScheduleMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
 
 public record UpdateAirshipScheduleTitlePayload(String title) implements CustomPacketPayload {
@@ -36,14 +34,10 @@ public record UpdateAirshipScheduleTitlePayload(String title) implements CustomP
         if (!(context.player() instanceof ServerPlayer player)) {
             return;
         }
-        ItemStack stack = player.getMainHandItem().is(ModItems.AIRSHIP_SCHEDULE.get())
-                ? player.getMainHandItem()
-                : player.getOffhandItem();
-        if (!stack.is(ModItems.AIRSHIP_SCHEDULE.get())) {
+        if (!(player.containerMenu instanceof AirshipScheduleMenu menu)) {
             return;
         }
-
-        AirshipSchedule schedule = AirshipScheduleItem.readSchedule(stack);
-        AirshipScheduleItem.writeSchedule(stack, schedule.withTitle(payload.title()));
+        AirshipSchedule schedule = menu.schedule(player);
+        menu.writeSchedule(player, schedule.withTitle(payload.title()));
     }
 }

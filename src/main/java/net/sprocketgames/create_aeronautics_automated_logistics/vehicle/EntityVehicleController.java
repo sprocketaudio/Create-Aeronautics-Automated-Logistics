@@ -108,7 +108,7 @@ public class EntityVehicleController implements VehicleController {
             return VehicleMotionResult.moved();
         }
 
-        double maxSpeed = Math.max(0.02D, desiredSpeedBlocksPerTick * maxSpeedMultiplier);
+        double maxSpeed = Math.max(0.0D, desiredSpeedBlocksPerTick * maxSpeedMultiplier);
         Vec3 velocity = delta.normalize().scale(Math.min(distance, maxSpeed));
         entity.setDeltaMovement(velocity);
         entity.hasImpulse = true;
@@ -120,5 +120,21 @@ public class EntityVehicleController implements VehicleController {
     public void stop(ServerLevel level) {
         entity.setDeltaMovement(Vec3.ZERO);
         entity.hurtMarked = true;
+    }
+
+    @Override
+    public void hold(ServerLevel level, Vec3 holdPosition, Optional<RouteRotation> holdRotation) {
+        if (!isLoaded(level) || !entity.isAlive()) {
+            return;
+        }
+        stop(level);
+    }
+
+    @Override
+    public void relocate(ServerLevel level, Vec3 targetPosition, Optional<RouteRotation> targetRotation) {
+        if (!isLoaded(level) || !entity.isAlive()) {
+            return;
+        }
+        stop(level);
     }
 }

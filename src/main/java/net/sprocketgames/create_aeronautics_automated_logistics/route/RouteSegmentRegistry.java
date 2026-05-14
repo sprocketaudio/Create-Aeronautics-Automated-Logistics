@@ -34,6 +34,10 @@ public final class RouteSegmentRegistry {
         return Optional.ofNullable(SEGMENTS.get(segmentId));
     }
 
+    public static void unregister(RouteSegmentId segmentId) {
+        SEGMENTS.remove(segmentId);
+    }
+
     public static List<RouteSegment> endingAt(
             UUID endStationId,
             ResourceKey<Level> dimension,

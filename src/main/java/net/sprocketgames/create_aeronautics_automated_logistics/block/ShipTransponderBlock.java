@@ -31,7 +31,13 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.Containers;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
+import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityDirectorySavedData;
+import net.sprocketgames.create_aeronautics_automated_logistics.menu.ShipTransponderMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.FailureReason;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
 import org.jetbrains.annotations.NotNull;
 
 public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock {
@@ -95,6 +101,9 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
             return;
         }
         if (level instanceof ServerLevel serverLevel) {
+            if (placer instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
+                transponder.setOwner(serverPlayer);
+            }
             transponder.refreshRuntimeShip(serverLevel);
         }
     }
@@ -106,8 +115,20 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
         }
         if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer
                 && level.getBlockEntity(pos) instanceof ShipTransponderBlockEntity transponder) {
+            if (DockLinkInteractionService.cancelPendingIfSource(serverPlayer, pos)) {
+                return InteractionResult.CONSUME;
+            }
             transponder.refreshRuntimeShip((ServerLevel) level);
-            serverPlayer.openMenu(transponder, buffer -> buffer.writeBlockPos(pos));
+            ShipTransponderMenu.InitialRecordingState recordingState =
+                    ShipTransponderMenu.resolveInitialRecordingState(serverPlayer, transponder, false);
+            serverPlayer.openMenu(transponder, buffer -> {
+                buffer.writeBlockPos(pos);
+                buffer.writeBoolean(recordingState.recordingMode());
+                buffer.writeBoolean(recordingState.recordingSessionActive());
+                buffer.writeBoolean(recordingState.appendToSchedule());
+                buffer.writeBoolean(transponder.recordingDestinationStationId().isPresent());
+                transponder.recordingDestinationStationId().ifPresent(buffer::writeUUID);
+            });
         }
         return InteractionResult.CONSUME;
     }
@@ -160,16 +181,29 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
     @Override
     protected void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (!state.is(newState.getBlock())
-                && level.getBlockEntity(pos) instanceof ShipTransponderBlockEntity transponder
-                && !transponder.installedScheduleStack().isEmpty()) {
-            Containers.dropItemStack(
-                    level,
-                    pos.getX() + 0.5D,
-                    pos.getY() + 0.5D,
-                    pos.getZ() + 0.5D,
-                    transponder.installedScheduleStack().copy()
-            );
-            transponder.clearContent();
+                && level.getBlockEntity(pos) instanceof ShipTransponderBlockEntity transponder) {
+            if (!transponder.installedScheduleStack().isEmpty()) {
+                Containers.dropItemStack(
+                        level,
+                        pos.getX() + 0.5D,
+                        pos.getY() + 0.5D,
+                        pos.getZ() + 0.5D,
+                        transponder.installedScheduleStack().copy()
+                );
+                transponder.clearContent();
+            }
+            if (level instanceof ServerLevel serverLevel) {
+                transponder.refreshRuntimeShip(serverLevel);
+                AutomatedLogisticsServices.SCHEDULES.stop(serverLevel, transponder.transponderId());
+                transponder.controllerRef(serverLevel).ifPresent(controllerRef -> {
+                    AutomatedLogisticsServices.PLAYBACK.stopLinkedPlaybacks(serverLevel, controllerRef, FailureReason.NONE);
+                    AutomatedLogisticsServices.RECORDING.cancelRecordingForController(serverLevel, controllerRef);
+                });
+                transponder.setRecordingDestinationStationId(java.util.Optional.empty());
+                transponder.setDockOutputActive(false);
+                transponder.setRuntimeStatus(RouteStatus.IDLE);
+                IdentityDirectorySavedData.removeShip(serverLevel.getServer(), transponder.transponderId());
+            }
         }
         super.onRemove(state, level, pos, newState, isMoving);
     }

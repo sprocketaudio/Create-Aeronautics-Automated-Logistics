@@ -7,13 +7,11 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationSnapshot;
-import net.sprocketgames.create_aeronautics_automated_logistics.item.AirshipScheduleItem;
-import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModItems;
+import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipScheduleMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleEntry;
 
@@ -42,14 +40,14 @@ public record SelectAirshipScheduleStationPayload(int entryIndex, String filter)
         if (!(context.player() instanceof ServerPlayer player)) {
             return;
         }
-        ItemStack stack = player.getMainHandItem().is(ModItems.AIRSHIP_SCHEDULE.get())
-                ? player.getMainHandItem()
-                : player.getOffhandItem();
-        if (!stack.is(ModItems.AIRSHIP_SCHEDULE.get())) {
+        if (!(player.containerMenu instanceof AirshipScheduleMenu menu)) {
+            return;
+        }
+        if (menu.openedFromTransponder()) {
             return;
         }
 
-        AirshipSchedule schedule = AirshipScheduleItem.readSchedule(stack);
+        AirshipSchedule schedule = menu.schedule(player);
         if (payload.entryIndex < 0 || payload.entryIndex >= schedule.entries().size()) {
             return;
         }
@@ -62,7 +60,6 @@ public record SelectAirshipScheduleStationPayload(int entryIndex, String filter)
             net.minecraft.network.chat.Component message = net.minecraft.network.chat.Component.translatable(
                     "message.create_aeronautics_automated_logistics.airship_schedule.no_matching_stations"
             );
-            player.displayClientMessage(message, true);
             SetMenuActionBarMessagePayload.send(player, message);
             return;
         }
@@ -73,6 +70,6 @@ public record SelectAirshipScheduleStationPayload(int entryIndex, String filter)
                 .orElseGet(stations::getFirst);
         List<AirshipScheduleEntry> entries = new ArrayList<>(schedule.entries());
         entries.set(payload.entryIndex, entries.get(payload.entryIndex).withTargetStation(station.stationId(), station.stationName()));
-        AirshipScheduleItem.writeSchedule(stack, schedule.withEntries(entries));
+        menu.writeSchedule(player, schedule.withEntries(entries));
     }
 }

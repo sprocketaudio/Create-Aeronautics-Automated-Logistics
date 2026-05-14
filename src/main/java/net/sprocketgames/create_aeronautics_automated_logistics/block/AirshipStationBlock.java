@@ -6,6 +6,8 @@ import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseEntityBlock;
 import net.minecraft.world.level.block.Block;
@@ -27,7 +29,10 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.level.BlockGetter;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity;
+import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityDirectorySavedData;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
+import org.jetbrains.annotations.Nullable;
 
 public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock {
     public static final MapCodec<AirshipStationBlock> CODEC = simpleCodec(AirshipStationBlock::new);
@@ -91,11 +96,23 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
         if (!(player instanceof ServerPlayer serverPlayer)) {
             return InteractionResult.CONSUME;
         }
+        if (DockLinkInteractionService.cancelPendingIfSource(serverPlayer, pos)) {
+            return InteractionResult.CONSUME;
+        }
         if (!(level.getBlockEntity(pos) instanceof AirshipStationBlockEntity station)) {
             return InteractionResult.CONSUME;
         }
         serverPlayer.openMenu(station, buffer -> buffer.writeBlockPos(pos));
         return InteractionResult.CONSUME;
+    }
+
+    @Override
+    public void setPlacedBy(Level level, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack stack) {
+        super.setPlacedBy(level, pos, state, placer, stack);
+        if (placer instanceof ServerPlayer serverPlayer
+                && level.getBlockEntity(pos) instanceof AirshipStationBlockEntity station) {
+            station.setOwner(serverPlayer);
+        }
     }
 
     @Override
@@ -140,6 +157,16 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
     @Override
     protected int getDirectSignal(BlockState state, net.minecraft.world.level.BlockGetter level, BlockPos pos, net.minecraft.core.Direction direction) {
         return getSignal(state, level, pos, direction);
+    }
+
+    @Override
+    protected void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+        if (!state.is(newState.getBlock())
+                && level.getBlockEntity(pos) instanceof AirshipStationBlockEntity station
+                && level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            IdentityDirectorySavedData.removeStation(serverLevel.getServer(), station.stationId());
+        }
+        super.onRemove(state, level, pos, newState, isMoving);
     }
 
     private static VoxelShape rotateShape(VoxelShape shape, net.minecraft.core.Direction facing) {

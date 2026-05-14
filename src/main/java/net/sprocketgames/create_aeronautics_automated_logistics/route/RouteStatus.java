@@ -6,6 +6,8 @@ public enum RouteStatus {
     RECORDED,
     RUNNING,
     WAITING,
+    HELD,
+    HELD_FAULTED,
     FAILED,
     BLOCKED,
     MISSING_VEHICLE,

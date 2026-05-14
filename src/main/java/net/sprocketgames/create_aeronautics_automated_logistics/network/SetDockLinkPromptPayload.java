@@ -1,5 +1,6 @@
 package net.sprocketgames.create_aeronautics_automated_logistics.network;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -8,7 +9,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.DockLinkPromptClientState;
 
-public record SetDockLinkPromptPayload(boolean active, boolean shipPrompt) implements CustomPacketPayload {
+public record SetDockLinkPromptPayload(boolean active, boolean shipPrompt, BlockPos sourcePos) implements CustomPacketPayload {
     public static final Type<SetDockLinkPromptPayload> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath(CreateAeronauticsAutomatedLogistics.MOD_ID, "set_dock_link_prompt")
     );
@@ -16,12 +17,13 @@ public record SetDockLinkPromptPayload(boolean active, boolean shipPrompt) imple
             StreamCodec.ofMember(SetDockLinkPromptPayload::write, SetDockLinkPromptPayload::read);
 
     private static SetDockLinkPromptPayload read(RegistryFriendlyByteBuf buffer) {
-        return new SetDockLinkPromptPayload(buffer.readBoolean(), buffer.readBoolean());
+        return new SetDockLinkPromptPayload(buffer.readBoolean(), buffer.readBoolean(), buffer.readBlockPos());
     }
 
     private void write(RegistryFriendlyByteBuf buffer) {
         buffer.writeBoolean(active);
         buffer.writeBoolean(shipPrompt);
+        buffer.writeBlockPos(sourcePos);
     }
 
     @Override
@@ -32,7 +34,7 @@ public record SetDockLinkPromptPayload(boolean active, boolean shipPrompt) imple
     public static void handle(SetDockLinkPromptPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (payload.active()) {
-                DockLinkPromptClientState.show(payload.shipPrompt());
+                DockLinkPromptClientState.show(payload.shipPrompt(), payload.sourcePos());
             } else {
                 DockLinkPromptClientState.clear();
             }

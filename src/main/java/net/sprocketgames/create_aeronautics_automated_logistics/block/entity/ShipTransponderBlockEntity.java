@@ -12,6 +12,7 @@ import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Clearable;
 import net.minecraft.world.Container;
 import net.minecraft.world.ContainerHelper;
@@ -31,6 +32,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.AutomatedLogisti
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockDiscoveryResult;
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockLinkStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockingConnectorDiscovery;
+import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityDirectorySavedData;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderSnapshot;
 import net.sprocketgames.create_aeronautics_automated_logistics.item.AirshipScheduleItem;
@@ -39,6 +41,8 @@ import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBloc
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlocks;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModItems;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.SableSubLevelVehicleController;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerRef;
 
@@ -46,6 +50,8 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     private static final String DATA_VERSION = "dataVersion";
     private static final String TRANSPONDER_ID = "transponderId";
     private static final String SHIP_NAME = "shipName";
+    private static final String OWNER_ID = "ownerId";
+    private static final String OWNER_NAME = "ownerName";
     private static final String RUNTIME_SHIP_ID = "runtimeShipId";
     private static final String LAST_X = "lastKnownX";
     private static final String LAST_Y = "lastKnownY";
@@ -54,6 +60,10 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     private static final String SHIP_DOCK_POS = "shipDockPos";
     private static final String SHIP_DOCK_STATUS = "shipDockStatus";
     private static final String DOCK_OUTPUT_ACTIVE = "dockOutputActive";
+    private static final String APPEND_TO_SCHEDULE = "appendToSchedule";
+    private static final String OWNED_SCHEDULE = "ownedSchedule";
+    private static final String RECORDING_DESTINATION_STATION_ID = "recordingDestinationStationId";
+    private static final String RUNTIME_STATUS = "runtimeStatus";
     private static final String SCHEDULE_SLOT = "scheduleSlot";
     private static final int CURRENT_DATA_VERSION = 1;
     private static final int REFRESH_INTERVAL_TICKS = 40;
@@ -61,11 +71,17 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
 
     private UUID transponderId = UUID.randomUUID();
     private String shipName = "";
+    private Optional<UUID> ownerId = Optional.empty();
+    private String ownerName = "";
     private Optional<UUID> runtimeShipId = Optional.empty();
     private Optional<Vec3> lastKnownPosition = Optional.empty();
     private Optional<BlockPos> shipDockPos = Optional.empty();
     private DockLinkStatus shipDockStatus = DockLinkStatus.UNKNOWN;
     private boolean dockOutputActive;
+    private boolean appendToSchedule;
+    private AirshipSchedule ownedSchedule = AirshipSchedule.empty();
+    private Optional<UUID> recordingDestinationStationId = Optional.empty();
+    private RouteStatus runtimeStatus = RouteStatus.IDLE;
     private long lastSeenGameTime = -1L;
     private final NonNullList<ItemStack> items = NonNullList.withSize(1, ItemStack.EMPTY);
 
@@ -114,6 +130,29 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         return runtimeShipId;
     }
 
+    public Optional<UUID> ownerId() {
+        return ownerId;
+    }
+
+    public String ownerName() {
+        return ownerName;
+    }
+
+    public void setOwner(ServerPlayer player) {
+        setOwner(player.getUUID(), player.getGameProfile().getName());
+    }
+
+    public void setOwner(UUID ownerId, String ownerName) {
+        Optional<UUID> normalizedId = Optional.of(ownerId);
+        String normalizedName = IdentityNames.sanitize(ownerName);
+        if (this.ownerId.equals(normalizedId) && this.ownerName.equals(normalizedName)) {
+            return;
+        }
+        this.ownerId = normalizedId;
+        this.ownerName = normalizedName;
+        setChanged();
+    }
+
     public Optional<Vec3> lastKnownPosition() {
         return lastKnownPosition;
     }
@@ -137,6 +176,29 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         return dockOutputActive;
     }
 
+    public boolean appendToSchedule() {
+        return appendToSchedule;
+    }
+
+    public Optional<UUID> recordingDestinationStationId() {
+        return recordingDestinationStationId;
+    }
+
+    public RouteStatus runtimeStatus() {
+        return runtimeStatus;
+    }
+
+    public boolean scheduleActive() {
+        return runtimeStatus == RouteStatus.RUNNING
+                || runtimeStatus == RouteStatus.WAITING
+                || runtimeStatus == RouteStatus.HELD
+                || runtimeStatus == RouteStatus.HELD_FAULTED;
+    }
+
+    public boolean scheduleHeld() {
+        return runtimeStatus == RouteStatus.HELD || runtimeStatus == RouteStatus.HELD_FAULTED;
+    }
+
     public void setDockOutputActive(boolean active) {
         if (dockOutputActive == active) {
             return;
@@ -147,20 +209,50 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         notifyRedstoneNeighbors();
     }
 
+    public void setAppendToSchedule(boolean appendToSchedule) {
+        if (this.appendToSchedule == appendToSchedule) {
+            return;
+        }
+        this.appendToSchedule = appendToSchedule;
+        setChanged();
+    }
+
+    public void setRecordingDestinationStationId(Optional<UUID> recordingDestinationStationId) {
+        Optional<UUID> normalized = recordingDestinationStationId == null ? Optional.empty() : recordingDestinationStationId;
+        if (this.recordingDestinationStationId.equals(normalized)) {
+            return;
+        }
+        this.recordingDestinationStationId = normalized;
+        setChanged();
+    }
+
+    public void setRuntimeStatus(RouteStatus runtimeStatus) {
+        RouteStatus normalized = runtimeStatus == null ? RouteStatus.IDLE : runtimeStatus;
+        if (this.runtimeStatus == normalized) {
+            return;
+        }
+        this.runtimeStatus = normalized;
+        setChanged();
+    }
+
     public void setShipName(String shipName) {
         String sanitized = IdentityNames.sanitize(shipName);
         this.shipName = sanitized.isBlank() ? IdentityNames.defaultShipName(transponderId) : sanitized;
         setChanged();
+        if (level instanceof ServerLevel serverLevel) {
+            ShipTransponderSnapshot snapshot = snapshot(serverLevel);
+            ShipTransponderRegistry.register(snapshot);
+            IdentityDirectorySavedData.upsertShip(serverLevel.getServer(), snapshot);
+        }
     }
 
     public Optional<VehicleControllerRef> controllerRef(ServerLevel level) {
         refreshRuntimeShip(level);
-        return runtimeShipId.map(shipId -> new VehicleControllerRef(
-                SableSubLevelVehicleController.TYPE,
-                level.dimension(),
-                Optional.of(shipId),
-                Optional.of(worldPosition)
-        ));
+        return runtimeShipId.flatMap(shipId -> SableSubLevelVehicleController.resolveControllerBlock(
+                level,
+                worldPosition,
+                ModBlocks.SHIP_TRANSPONDER.get()
+        ).map(SableSubLevelVehicleController::ref));
     }
 
     public void refreshRuntimeShip(ServerLevel level) {
@@ -186,7 +278,9 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                 || previousSeen != lastSeenGameTime) {
             setChanged();
         }
-        ShipTransponderRegistry.register(snapshot(level));
+        ShipTransponderSnapshot snapshot = snapshot(level);
+        ShipTransponderRegistry.register(snapshot);
+        IdentityDirectorySavedData.upsertShip(level.getServer(), snapshot);
     }
 
     public DockDiscoveryResult refreshShipDockLink(ServerLevel level) {
@@ -254,12 +348,11 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     }
 
     private ShipTransponderSnapshot snapshot(ServerLevel level) {
-        Optional<VehicleControllerRef> controllerRef = runtimeShipId.map(shipId -> new VehicleControllerRef(
-                SableSubLevelVehicleController.TYPE,
-                level.dimension(),
-                Optional.of(shipId),
-                Optional.of(worldPosition)
-        ));
+        Optional<VehicleControllerRef> controllerRef = runtimeShipId.flatMap(shipId -> SableSubLevelVehicleController.resolveControllerBlock(
+                level,
+                worldPosition,
+                ModBlocks.SHIP_TRANSPONDER.get()
+        ).map(SableSubLevelVehicleController::ref));
         return new ShipTransponderSnapshot(
                 transponderId,
                 shipName(),
@@ -289,26 +382,50 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     }
 
     public boolean hasInstalledSchedule() {
-        return installedScheduleStack().is(ModItems.AIRSHIP_SCHEDULE.get()) && !installedScheduleStack().isEmpty();
+        return true;
     }
 
     public AirshipSchedule installedSchedule() {
-        return hasInstalledSchedule() ? AirshipScheduleItem.readSchedule(installedScheduleStack()) : AirshipSchedule.empty();
+        return ownedSchedule();
     }
 
     public Component installedScheduleTitle() {
-        if (!hasInstalledSchedule()) {
-            return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.no_schedule");
+        return Component.literal(ownedSchedule().title());
+    }
+
+    public AirshipSchedule ownedSchedule() {
+        return bindScheduleToThisTransponder(ownedSchedule);
+    }
+
+    public void setOwnedSchedule(AirshipSchedule schedule) {
+        AirshipSchedule normalized = bindScheduleToThisTransponder(schedule);
+        if (ownedSchedule.equals(normalized)) {
+            return;
         }
-        return Component.literal(installedSchedule().title());
+        ownedSchedule = normalized;
+        setChanged();
+    }
+
+    public boolean hasOwnedStops() {
+        return !ownedSchedule().entries().isEmpty();
+    }
+
+    private AirshipSchedule bindScheduleToThisTransponder(AirshipSchedule schedule) {
+        AirshipSchedule source = schedule == null ? AirshipSchedule.empty() : schedule;
+        return source.withAssignedShip(Optional.of(transponderId), shipName());
     }
 
     private void migrateLegacyInstalledSchedule() {
         ItemStack stack = installedScheduleStack();
-        if (stack.isEmpty() || !AirshipScheduleItem.isLegacyUnboundSchedule(stack)) {
+        if (stack.isEmpty() || !stack.is(ModItems.AIRSHIP_SCHEDULE.get())) {
             return;
         }
-        AirshipScheduleItem.bindScheduleToTransponder(stack, transponderId, shipName());
+        if (ownedSchedule.entries().isEmpty()) {
+            ownedSchedule = bindScheduleToThisTransponder(AirshipScheduleItem.readSchedule(stack));
+        }
+        if (AirshipScheduleItem.isLegacyUnboundSchedule(stack)) {
+            AirshipScheduleItem.bindScheduleToTransponder(stack, transponderId, shipName());
+        }
         setChanged();
     }
 
@@ -322,7 +439,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                 .map(transponderId::equals)
                 .orElse(false);
         }
-        return AirshipScheduleItem.isLegacyUnboundSchedule(stack);
+        return true;
     }
 
     @Override
@@ -343,6 +460,8 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         tag.putInt(DATA_VERSION, CURRENT_DATA_VERSION);
         tag.putUUID(TRANSPONDER_ID, transponderId);
         tag.putString(SHIP_NAME, shipName());
+        ownerId.ifPresent(id -> tag.putUUID(OWNER_ID, id));
+        tag.putString(OWNER_NAME, ownerName);
         runtimeShipId.ifPresent(id -> tag.putUUID(RUNTIME_SHIP_ID, id));
         shipDockPos.ifPresent(pos -> tag.put(SHIP_DOCK_POS, NbtUtils.writeBlockPos(pos)));
         DockLinkStatus savedDockStatus = shipDockStatus == DockLinkStatus.LINKED && shipDockPos.isEmpty()
@@ -350,6 +469,10 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                 : shipDockStatus;
         tag.putString(SHIP_DOCK_STATUS, savedDockStatus.name());
         tag.putBoolean(DOCK_OUTPUT_ACTIVE, dockOutputActive);
+        tag.putBoolean(APPEND_TO_SCHEDULE, appendToSchedule);
+        tag.put(OWNED_SCHEDULE, AirshipScheduleNbtSerializer.write(ownedSchedule()));
+        recordingDestinationStationId.ifPresent(id -> tag.putUUID(RECORDING_DESTINATION_STATION_ID, id));
+        tag.putString(RUNTIME_STATUS, runtimeStatus.name());
         if (hasInstalledSchedule()) {
             tag.put(SCHEDULE_SLOT, installedScheduleStack().saveOptional(registries));
         }
@@ -370,6 +493,12 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         shipName = tag.contains(SHIP_NAME, Tag.TAG_STRING)
                 ? IdentityNames.sanitize(tag.getString(SHIP_NAME))
                 : "";
+        ownerId = tag.hasUUID(OWNER_ID)
+                ? Optional.of(tag.getUUID(OWNER_ID))
+                : Optional.empty();
+        ownerName = tag.contains(OWNER_NAME, Tag.TAG_STRING)
+                ? IdentityNames.sanitize(tag.getString(OWNER_NAME))
+                : "";
         runtimeShipId = tag.hasUUID(RUNTIME_SHIP_ID)
                 ? Optional.of(tag.getUUID(RUNTIME_SHIP_ID))
                 : Optional.empty();
@@ -378,9 +507,18 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                 : Optional.empty();
         shipDockStatus = readDockStatus(tag);
         dockOutputActive = tag.getBoolean(DOCK_OUTPUT_ACTIVE);
+        appendToSchedule = tag.getBoolean(APPEND_TO_SCHEDULE);
+        ownedSchedule = tag.contains(OWNED_SCHEDULE, Tag.TAG_COMPOUND)
+                ? bindScheduleToThisTransponder(AirshipScheduleNbtSerializer.read(tag.getCompound(OWNED_SCHEDULE)))
+                : AirshipSchedule.empty();
+        recordingDestinationStationId = tag.hasUUID(RECORDING_DESTINATION_STATION_ID)
+                ? Optional.of(tag.getUUID(RECORDING_DESTINATION_STATION_ID))
+                : Optional.empty();
+        runtimeStatus = readRuntimeStatus(tag);
         setItem(INTERNAL_SCHEDULE_SLOT, tag.contains(SCHEDULE_SLOT, Tag.TAG_COMPOUND)
                 ? ItemStack.parseOptional(registries, tag.getCompound(SCHEDULE_SLOT))
                 : ItemStack.EMPTY);
+        migrateLegacyInstalledSchedule();
         lastKnownPosition = tag.contains(LAST_X, Tag.TAG_ANY_NUMERIC)
                 && tag.contains(LAST_Y, Tag.TAG_ANY_NUMERIC)
                 && tag.contains(LAST_Z, Tag.TAG_ANY_NUMERIC)
@@ -395,6 +533,11 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         if (level != null && !level.isClientSide && dockOutputActive) {
             dockOutputActive = false;
             setChanged();
+        }
+        if (level instanceof ServerLevel serverLevel) {
+            ShipTransponderSnapshot snapshot = snapshot(serverLevel);
+            ShipTransponderRegistry.register(snapshot);
+            IdentityDirectorySavedData.upsertShip(serverLevel.getServer(), snapshot);
         }
         syncPoweredBlockState();
     }
@@ -424,6 +567,17 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
             return loaded;
         } catch (IllegalArgumentException ignored) {
             return DockLinkStatus.INVALID;
+        }
+    }
+
+    private RouteStatus readRuntimeStatus(CompoundTag tag) {
+        if (!tag.contains(RUNTIME_STATUS, Tag.TAG_STRING)) {
+            return RouteStatus.IDLE;
+        }
+        try {
+            return RouteStatus.valueOf(tag.getString(RUNTIME_STATUS));
+        } catch (IllegalArgumentException ignored) {
+            return RouteStatus.IDLE;
         }
     }
 
@@ -498,7 +652,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
             return;
         }
         ItemStack stored = stack.copyWithCount(Math.min(stack.getCount(), getMaxStackSize()));
-        if (!stored.isEmpty() && AirshipScheduleItem.isLegacyUnboundSchedule(stored)) {
+        if (!stored.isEmpty() && AirshipScheduleItem.readSchedule(stored).assignedTransponderId().isEmpty()) {
             AirshipScheduleItem.bindScheduleToTransponder(stored, transponderId, shipName());
         }
         items.set(slot, stored);

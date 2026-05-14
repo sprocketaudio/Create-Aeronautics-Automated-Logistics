@@ -6,6 +6,7 @@ import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.neoforge.common.NeoForge;
+import net.sprocketgames.create_aeronautics_automated_logistics.command.AutomatedLogisticsCommands;
 import net.sprocketgames.create_aeronautics_automated_logistics.compat.CreateAeronauticsCompat;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.ModNetworking;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
@@ -43,7 +44,10 @@ public class CreateAeronauticsAutomatedLogistics {
         ModBlockEntities.BLOCK_ENTITY_TYPES.register(modEventBus);
         ModCreativeTabs.register(modEventBus);
         modContainer.registerConfig(ModConfig.Type.COMMON, AutomatedLogisticsConfig.SPEC);
+        NeoForge.EVENT_BUS.addListener(AutomatedLogisticsCommands::onRegisterCommands);
         NeoForge.EVENT_BUS.addListener(RecordingServerEvents::onServerTick);
+        NeoForge.EVENT_BUS.addListener(RecordingServerEvents::onSablePrePhysicsTick);
+        NeoForge.EVENT_BUS.addListener(RecordingServerEvents::onSablePostPhysicsTick);
         NeoForge.EVENT_BUS.addListener(RecordingServerEvents::onServerStopping);
         NeoForge.EVENT_BUS.addListener(RecordingServerEvents::onServerStopped);
         NeoForge.EVENT_BUS.addListener(AutomationVisualServerEvents::onPlayerLogin);

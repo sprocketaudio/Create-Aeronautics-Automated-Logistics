@@ -12,14 +12,13 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResultHolder;
-import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.Level;
-import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipScheduleMenu;
+import net.sprocketgames.create_aeronautics_automated_logistics.network.SetMenuActionBarMessagePayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
 
@@ -36,11 +35,10 @@ public class AirshipScheduleItem extends Item {
         if (!(player instanceof ServerPlayer serverPlayer)) {
             return InteractionResultHolder.sidedSuccess(stack, level.isClientSide());
         }
-
-        serverPlayer.openMenu(new SimpleMenuProvider(
-                (containerId, inventory, menuPlayer) -> new AirshipScheduleMenu(containerId, inventory),
-                Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.title")
-        ));
+        SetMenuActionBarMessagePayload.send(
+                serverPlayer,
+                Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.edit_installed_hint")
+        );
         return InteractionResultHolder.sidedSuccess(stack, false);
     }
 

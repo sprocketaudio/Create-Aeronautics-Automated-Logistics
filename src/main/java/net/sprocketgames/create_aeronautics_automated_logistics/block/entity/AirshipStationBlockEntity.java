@@ -33,6 +33,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockLinkSta
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockingConnectorDiscovery;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationSnapshot;
+import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityDirectorySavedData;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityNames;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderSnapshot;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.FailureReason;
@@ -56,6 +57,8 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     private static final String STATUS = "status";
     private static final String STATION_ID = "stationId";
     private static final String STATION_NAME = "stationName";
+    private static final String OWNER_ID = "ownerId";
+    private static final String OWNER_NAME = "ownerName";
     private static final String SELECTED_TRANSPONDER_ID = "selectedTransponderId";
     private static final String SELECTED_SHIP_NAME = "selectedShipName";
     private static final String FAILURE_REASON = "failureReason";
@@ -78,6 +81,8 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     private RouteStatus status = RouteStatus.IDLE;
     private UUID stationId = UUID.randomUUID();
     private String stationName = "";
+    private Optional<UUID> ownerId = Optional.empty();
+    private String ownerName = "";
     private Optional<UUID> selectedTransponderId = Optional.empty();
     private String selectedShipName = "";
     private Optional<FailureReason> failureReason = Optional.empty();
@@ -148,6 +153,29 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     public void setStationName(String stationName) {
         String sanitized = IdentityNames.sanitize(stationName);
         this.stationName = sanitized.isBlank() ? IdentityNames.defaultStationName(stationId) : sanitized;
+        setChanged();
+    }
+
+    public Optional<UUID> ownerId() {
+        return ownerId;
+    }
+
+    public String ownerName() {
+        return ownerName;
+    }
+
+    public void setOwner(net.minecraft.server.level.ServerPlayer player) {
+        setOwner(player.getUUID(), player.getGameProfile().getName());
+    }
+
+    public void setOwner(UUID ownerId, String ownerName) {
+        Optional<UUID> normalizedId = Optional.of(ownerId);
+        String normalizedName = IdentityNames.sanitize(ownerName);
+        if (this.ownerId.equals(normalizedId) && this.ownerName.equals(normalizedName)) {
+            return;
+        }
+        this.ownerId = normalizedId;
+        this.ownerName = normalizedName;
         setChanged();
     }
 
@@ -308,7 +336,10 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     }
 
     public boolean isPlaybackRunning() {
-        return status == RouteStatus.RUNNING || status == RouteStatus.WAITING;
+        return status == RouteStatus.RUNNING
+                || status == RouteStatus.WAITING
+                || status == RouteStatus.HELD
+                || status == RouteStatus.HELD_FAULTED;
     }
 
     public void linkController(VehicleControllerRef controllerRef) {
@@ -371,6 +402,15 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         setChanged();
     }
 
+    public void cancelRecording() {
+        activeRecording = Optional.empty();
+        recordingPoints.clear();
+        recordingStops.clear();
+        status = recordedRoute.isPresent() ? RouteStatus.RECORDED : RouteStatus.IDLE;
+        failureReason = Optional.empty();
+        setChanged();
+    }
+
     public void startPlayback(Route route) {
         recordedRoute = Optional.of(route.withStatus(RouteStatus.RUNNING));
         status = RouteStatus.RUNNING;
@@ -382,6 +422,13 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         recordedRoute = Optional.of(route.withStatus(RouteStatus.WAITING));
         status = RouteStatus.WAITING;
         failureReason = Optional.empty();
+        setChanged();
+    }
+
+    public void holdPlayback(Route route, boolean faulted, Optional<FailureReason> reason) {
+        recordedRoute = Optional.of(route.withStatus(faulted ? RouteStatus.HELD_FAULTED : RouteStatus.HELD));
+        status = faulted ? RouteStatus.HELD_FAULTED : RouteStatus.HELD;
+        failureReason = reason;
         setChanged();
     }
 
@@ -436,12 +483,16 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         if (level == null || level.isClientSide) {
             return;
         }
-        AirshipStationRegistry.register(new AirshipStationSnapshot(
+        AirshipStationSnapshot snapshot = new AirshipStationSnapshot(
                 stationId,
                 stationName(),
                 level.dimension(),
-                worldPosition
-        ));
+                worldPosition,
+                ownerId,
+                ownerName
+        );
+        AirshipStationRegistry.register(snapshot);
+        IdentityDirectorySavedData.upsertStation(((ServerLevel) level).getServer(), snapshot);
     }
 
     private RouteStatus statusForFailure(FailureReason reason) {
@@ -466,6 +517,8 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         tag.putInt(DATA_VERSION, CURRENT_DATA_VERSION);
         tag.putUUID(STATION_ID, stationId);
         tag.putString(STATION_NAME, stationName());
+        ownerId.ifPresent(id -> tag.putUUID(OWNER_ID, id));
+        tag.putString(OWNER_NAME, ownerName);
         selectedTransponderId.ifPresent(id -> tag.putUUID(SELECTED_TRANSPONDER_ID, id));
         groundDockPos.ifPresent(pos -> tag.put(GROUND_DOCK_POS, NbtUtils.writeBlockPos(pos)));
         DockLinkStatus savedDockStatus = groundDockStatus == DockLinkStatus.LINKED && groundDockPos.isEmpty()
@@ -524,6 +577,12 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         stationName = tag.contains(STATION_NAME, Tag.TAG_STRING)
                 ? IdentityNames.sanitize(tag.getString(STATION_NAME))
                 : "";
+        ownerId = tag.hasUUID(OWNER_ID)
+                ? Optional.of(tag.getUUID(OWNER_ID))
+                : Optional.empty();
+        ownerName = tag.contains(OWNER_NAME, Tag.TAG_STRING)
+                ? IdentityNames.sanitize(tag.getString(OWNER_NAME))
+                : "";
         selectedTransponderId = tag.hasUUID(SELECTED_TRANSPONDER_ID)
                 ? Optional.of(tag.getUUID(SELECTED_TRANSPONDER_ID))
                 : Optional.empty();
@@ -554,12 +613,18 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         if (level == null) {
             return;
         }
-        AirshipStationRegistry.register(new AirshipStationSnapshot(
+        AirshipStationSnapshot snapshot = new AirshipStationSnapshot(
                 stationId,
                 stationName(),
                 level.dimension(),
-                worldPosition
-        ));
+                worldPosition,
+                ownerId,
+                ownerName
+        );
+        AirshipStationRegistry.register(snapshot);
+        if (level instanceof ServerLevel serverLevel) {
+            IdentityDirectorySavedData.upsertStation(serverLevel.getServer(), snapshot);
+        }
         RouteSegmentRegistry.replaceForStartStation(stationId, routeSegments);
     }
 
