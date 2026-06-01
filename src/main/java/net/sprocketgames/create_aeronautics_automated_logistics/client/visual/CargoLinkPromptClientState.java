@@ -1,18 +1,18 @@
 package net.sprocketgames.create_aeronautics_automated_logistics.client.visual;
 
 import java.util.Optional;
-import net.minecraft.core.BlockPos;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 
-public final class DockLinkPromptClientState {
+public final class CargoLinkPromptClientState {
     private static long expiresAtGameTime = -1L;
     private static boolean shipPrompt;
     private static Optional<BlockPos> sourcePos = Optional.empty();
 
-    private DockLinkPromptClientState() {
+    private CargoLinkPromptClientState() {
     }
 
     public static void show(boolean forShip, BlockPos pendingSourcePos) {
@@ -63,8 +63,8 @@ public final class DockLinkPromptClientState {
         ChatFormatting color = bright ? ChatFormatting.YELLOW : ChatFormatting.GOLD;
         Component prompt = Component.translatable(
                         shipPrompt
-                                ? "gui.create_aeronautics_automated_logistics.dock_link.prompt.ship"
-                                : "gui.create_aeronautics_automated_logistics.dock_link.prompt.station"
+                                ? "gui.create_aeronautics_automated_logistics.cargo_link.prompt.ship"
+                                : "gui.create_aeronautics_automated_logistics.cargo_link.prompt.station"
                 )
                 .withStyle(color);
         LinkPromptOverlayRenderer.render(guiGraphics, prompt);

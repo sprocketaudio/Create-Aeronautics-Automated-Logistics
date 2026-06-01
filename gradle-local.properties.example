@@ -1,0 +1,17 @@
+# Optional local dev/runtime jars.
+# Copy this file to `gradle-local.properties` and point each entry at a local jar if you
+# want that mod available in IDE runs and local Gradle testing without publishing it as a dependency.
+
+aeronautics_bundled_jar=
+sable_jar=
+create_jar=
+ponder_jar=
+
+refined_storage_2_jar=
+ae2_jar=
+iron_chests_jar=
+storage_drawers_jar=
+mekanism_jar=
+sophisticated_storage_jar=
+functional_storage_jar=
+sophisticated_backpacks_jar=

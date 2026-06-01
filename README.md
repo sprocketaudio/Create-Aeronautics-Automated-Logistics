@@ -1,98 +1,69 @@
-## Create Aeronautics: Automated Logistics
+# Create Aeronautics: Logistics
 
-**Early development mod. Expect rough edges and possible breaking changes.**
+Create Aeronautics: Logistics is add-on for recording and replaying airship routes.
 
-Automated Logistics is an unofficial Create Aeronautics add-on for recording and replaying ship routes.
+Fly a route once, save it, then let the ship repeat it from its **Ship Transponder**. The transponder owns the route workflow: recording route legs, storing stops, running the ship's route plan, and coordinating waits, docking, and cargo-aware logic at each stop.
 
-Fly a route once, save it, then let the ship repeat it from its **Ship Transponder**. The transponder now owns the full route workflow: recording routes, storing stops, and running the ship’s route plan.
+Ships follow recorded route data and still obey the physical limits of the craft, the route, and the world around them.
 
-This is **not a full autopilot**. Ships currently follow recorded route data rather than dynamically piloting around obstacles.
+Primarily designed for Create Aeronautics airships. Other Sable-based vehicles may work experimentally, but ground vehicles are not an official target.
 
-Primarily designed for Create Aeronautics airships. Other Sable-based vehicles may work experimentally. Ground vehicles are not officially supported and may behave unpredictably.
+## What The Mod Does
 
-Feedback is welcome in the mod page comments or by opening an Issue on GitHub.
+- Lets you name **Airship Stations** and **Ship Transponders**.
+- Lets you record real station-to-station route legs by flying them manually.
+- Lets each ship build its own stop list and automation plan from those recorded legs.
+- Adds schedule-style waits, docking logic, redstone integration, and cargo-aware stop conditions.
+- Keeps the system grounded in physical playback rather than invisible correction or teleporting.
 
- 
+## Core Workflow
 
-## Current Features
+1. Build and assemble an airship.
+2. Place and name Airship Stations at your destinations.
+3. Place and name a Ship Transponder on the ship.
+4. Use the transponder to record route legs between stations.
+5. Build a stop plan on the transponder.
+6. Start automation from a valid station in that route chain.
 
-• Named Airship Stations  
-• Ship Transponders for naming, identifying, and controlling ships  
-• Manual station-to-station route recording  
-• Directional per-ship route segments, such as `Base Dock -> Mining Dock`  
-• Automatic playback of recorded routes  
-• Transponder-owned stop list and route plan  
-• Stop management from the transponder, including: stop order changes, stop removal, and wait/dock logic editing.  
-• Timed waits  
-• Docking-aware waits  
-• Cargo inactivity waits through connected docking systems  
-• Direct linking for station-side and ship-side docking connectors  
-• Redstone outputs from stations and transponders for dock automation  
-• In-world landing area and flight path previews  
-• Ownership and permission support for multiplayer  
-• Ponder/in-game learning support
+## Current Scope
 
- 
+The current release includes:
 
-## Important Limitations
+- Transponder-owned route recording and playback
+- Stop editing and grouped wait-condition logic
+- Dock linking on both ships and stations
+- Item and fluid cargo linking on both ships and stations
+- Cargo-aware waits, redstone waits, and time-of-day waits
+- In-world previews and Create-style UI feedback
+- Basic ownership / permission support for multiplayer
 
-• No pathfinding  
-• No obstacle avoidance  
-• No automatic rerouting  
-• No crash recovery  
-• Routes must still be flown and recorded manually first  
-• The ship must be able to complete the route normally under Sable physics  
-• Routes are tied to the ship/transponder they were recorded with  
-• Ships do not phase through blocks or ignore collisions  
-• Chunk unload handling is improved, but full unloaded route progression is not implemented  
-• Docking still requires player-built redstone wiring  
-• Cargo handling depends on existing Create / Create Simulated docking systems  
-• This is not yet a full live-piloted autopilot system
+## Design Intent
 
- 
+Create Aeronautics: Logistics is meant to feel like a believable logistics layer for airships.
 
-## Basic Setup
+You prove a route by flying it once. The mod then automates the repetition of that route. If the ship, station setup, docking, cargo setup, or recorded route is wrong, the system should fail clearly rather than silently cheating around the problem.
 
-1.  Build and assemble a stable airship.
-2.  Place Airship Stations at each destination and give them clear names.
-3.  Place a Ship Transponder on the ship and name it.
-4.  Open the transponder and use the **top-right toggle** to switch to `Route Recording Mode`.
-5.  Press `+`, then choose the origin and destination stations.
-6.  Fly manually to the destination and save the route segment from the transponder.
-7.  Repeat for each route leg you want to automate.
-8.  Use the transponder’s **Stops** screen to reorder stops or set wait/dock logic if needed.
-9.  Start the route from any valid station already present in the route chain.
+## Important Limits
 
- 
+- No pathfinding
+- No obstacle avoidance
+- No automatic rerouting
+- No teleporting or phasing through terrain
+- No generic cross-ship route reuse
+- No full live-control autopilot
 
-## Optional Docking Setup
+## Dependencies
 
-Docking Connectors still need redstone activation.
+Requires:
 
-For docking-enabled stops:
+- Create
+- Create Aeronautics
+- Sable runtime support
 
-• Place one Docking Connector on the ship  
-• Place one Docking Connector near the station  
-• Link the ship dock from the Ship Transponder  
-• Link the station dock from the Airship Station  
-• Wire the station/transponder redstone outputs into your docks
+Create Simulated docking support is also required where docking features are used.
 
- 
-
-## Design Goal
-
-Automated Logistics is meant to feel like a physics-aware logistics layer for Create Aeronautics.
-
-Instead of placing path markers, you prove the route by flying it once. The automation then replays that recorded route and handles stop order, waits, docking signals, and route flow from the transponder.
-
- 
-
-***
-
- 
+## Notes
 
 This is an unofficial Create Aeronautics addon and is not affiliated with or endorsed by the Create or Create Aeronautics teams.
 
-Some UI elements are styled to match Create’s schedule interface. Create and Create Aeronautics belong to their respective authors.
-
-Requires Create, Create Aeronautics, and Sable runtime support.
+Feedback is welcome through the mod page or GitHub issues.

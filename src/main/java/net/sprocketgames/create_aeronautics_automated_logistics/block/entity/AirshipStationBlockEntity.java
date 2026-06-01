@@ -27,7 +27,12 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.Nullable;
 import net.sprocketgames.create_aeronautics_automated_logistics.AutomatedLogisticsConfig;
+import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.AirshipStationBlock;
+import net.sprocketgames.create_aeronautics_automated_logistics.cargo.CargoLinkDiscovery;
+import net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry;
+import net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoSummary;
+import net.sprocketgames.create_aeronautics_automated_logistics.cargo.StationCargoSavedData;
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockDiscoveryResult;
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockLinkStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockingConnectorDiscovery;
@@ -69,6 +74,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     private static final String GROUND_DOCK_POS = "groundDockPos";
     private static final String GROUND_DOCK_STATUS = "groundDockStatus";
     private static final String DOCK_OUTPUT_ACTIVE = "dockOutputActive";
+    private static final String LINKED_CARGO = "linkedCargo";
     private static final String LIVE_SYNC = "liveSync";
     private static final String DIMENSION = "dimension";
     private static final String CONTROLLER_TYPE = "controllerType";
@@ -95,6 +101,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     private final List<VehicleControllerRef> linkedControllers = new ArrayList<>();
     private final List<RoutePoint> recordingPoints = new ArrayList<>();
     private final List<RouteStop> recordingStops = new ArrayList<>();
+    private final List<LinkedCargoEntry> linkedCargo = new ArrayList<>();
 
     public AirshipStationBlockEntity(BlockPos pos, BlockState blockState) {
         super(ModBlockEntities.AIRSHIP_STATION.get(), pos, blockState);
@@ -112,6 +119,13 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     @Override
     public void onLoad() {
         super.onLoad();
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Station onLoad id={} pos={} linkedCargoCount={} levelClient={}",
+                stationId,
+                worldPosition,
+                linkedCargo.size(),
+                level != null && level.isClientSide
+        );
         if (level != null && !level.isClientSide && dockOutputActive) {
             dockOutputActive = false;
             setChanged();
@@ -222,6 +236,76 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
 
     public boolean dockOutputActive() {
         return dockOutputActive;
+    }
+
+    public List<LinkedCargoEntry> linkedCargo() {
+        return List.copyOf(resolvedLinkedCargo());
+    }
+
+    public LinkedCargoSummary linkedCargoSummary() {
+        return CargoLinkDiscovery.summarize(level, resolvedLinkedCargo());
+    }
+
+    public LinkedCargoSummary relinkCargo(ServerLevel level) {
+        linkedCargo.clear();
+        linkedCargo.addAll(CargoLinkDiscovery.discover(level, worldPosition));
+        setChanged();
+        persistLinkedCargo(level);
+        return linkedCargoSummary();
+    }
+
+    public int addLinkedCargoEntries(List<LinkedCargoEntry> entries) {
+        ensureLinkedCargoLoaded();
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Station addLinkedCargoEntries start id={} pos={} existingCount={} incomingCount={}",
+                stationId,
+                worldPosition,
+                linkedCargo.size(),
+                entries.size()
+        );
+        int added = 0;
+        for (LinkedCargoEntry entry : entries) {
+            boolean exists = linkedCargo.stream().anyMatch(existing -> existing.pos().equals(entry.pos()));
+            if (exists) {
+                continue;
+            }
+            linkedCargo.add(entry);
+            added++;
+        }
+        if (added > 0) {
+            setChanged();
+            persistLinkedCargo();
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Station addLinkedCargoEntries saved id={} pos={} added={} newCount={}",
+                    stationId,
+                    worldPosition,
+                    added,
+                    linkedCargo.size()
+            );
+        }
+        return added;
+    }
+
+    public boolean clearLinkedCargo() {
+        ensureLinkedCargoLoaded();
+        if (linkedCargo.isEmpty()) {
+            persistLinkedCargo();
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Station clearLinkedCargo no-op id={} pos={} count=0",
+                    stationId,
+                    worldPosition
+            );
+            return false;
+        }
+        linkedCargo.clear();
+        setChanged();
+        persistLinkedCargo();
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Station clearLinkedCargo cleared id={} pos={}",
+                stationId,
+                worldPosition
+        );
+        return true;
     }
 
     public void setDockOutputActive(boolean active) {
@@ -503,7 +587,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
             case MISSING_AUTOPILOT_CONTROLLER, MISSING_STATION, INVALID_ROUTE_DATA, DIMENSION_MISMATCH,
                     MISSING_DOCK, AMBIGUOUS_DOCK -> RouteStatus.INVALID_ROUTE;
             case NONE -> recordedRoute.isPresent() ? RouteStatus.RECORDED : RouteStatus.IDLE;
-            case DOCK_LOCK_FAILED, CARGO_CONDITION_TIMEOUT, MOVEMENT_FAILURE -> RouteStatus.FAILED;
+            case DOCK_LOCK_FAILED, REDSTONE_LINK_UNCONFIGURED, CARGO_STORAGE_MISSING, CARGO_CONDITION_TIMEOUT, MOVEMENT_FAILURE -> RouteStatus.FAILED;
         };
     }
 
@@ -526,6 +610,21 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
                 : groundDockStatus;
         tag.putString(GROUND_DOCK_STATUS, savedDockStatus.name());
         tag.putBoolean(DOCK_OUTPUT_ACTIVE, dockOutputActive);
+        if (!linkedCargo.isEmpty()) {
+            ListTag linkedCargoTag = new ListTag();
+            for (LinkedCargoEntry entry : linkedCargo) {
+                linkedCargoTag.add(entry.write());
+            }
+            tag.put(LINKED_CARGO, linkedCargoTag);
+        }
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Station writeStationData id={} pos={} linkedCargoCount={} includeFailure={} liveSync={}",
+                stationId,
+                worldPosition,
+                linkedCargo.size(),
+                includeFailure,
+                tag.getBoolean(LIVE_SYNC)
+        );
         if (!selectedShipName().isBlank()) {
             tag.putString(SELECTED_SHIP_NAME, selectedShipName());
         }
@@ -591,6 +690,21 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
                 : Optional.empty();
         groundDockStatus = readDockStatus(tag);
         dockOutputActive = tag.getBoolean(DOCK_OUTPUT_ACTIVE);
+        linkedCargo.clear();
+        if (tag.contains(LINKED_CARGO, Tag.TAG_LIST)) {
+            ListTag linkedCargoTag = tag.getList(LINKED_CARGO, Tag.TAG_COMPOUND);
+            for (int i = 0; i < linkedCargoTag.size(); i++) {
+                LinkedCargoEntry.read(linkedCargoTag.getCompound(i)).ifPresent(linkedCargo::add);
+            }
+        }
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Station loadAdditional id={} pos={} linkedCargoCount={} hadLinkedCargoTag={} liveSync={}",
+                stationId,
+                worldPosition,
+                linkedCargo.size(),
+                tag.contains(LINKED_CARGO, Tag.TAG_LIST),
+                tag.getBoolean(LIVE_SYNC)
+        );
         selectedShipName = tag.contains(SELECTED_SHIP_NAME, Tag.TAG_STRING)
                 ? IdentityNames.sanitize(tag.getString(SELECTED_SHIP_NAME))
                 : "";
@@ -657,6 +771,73 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
             return Optional.empty();
         }
         return RouteNbtSerializer.read(tag.getCompound(RECORDED_ROUTE));
+    }
+
+    private List<LinkedCargoEntry> resolvedLinkedCargo() {
+        ensureLinkedCargoLoaded();
+        return linkedCargo;
+    }
+
+    private void ensureLinkedCargoLoaded() {
+        if (!linkedCargo.isEmpty() || !(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Station ensureLinkedCargoLoaded attempting restore id={} pos={}",
+                stationId,
+                worldPosition
+        );
+        loadLinkedCargoFromSavedData(serverLevel);
+    }
+
+    private boolean loadLinkedCargoFromSavedData(ServerLevel level) {
+        if (!linkedCargo.isEmpty()) {
+            return false;
+        }
+        List<LinkedCargoEntry> restored = StationCargoSavedData.entries(level.getServer(), stationId, worldPosition);
+        if (restored.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Station loadLinkedCargoFromSavedData miss id={} pos={}",
+                    stationId,
+                    worldPosition
+            );
+            return false;
+        }
+        linkedCargo.clear();
+        linkedCargo.addAll(restored);
+        StationCargoSavedData.put(level.getServer(), stationId, worldPosition, linkedCargo);
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Station loadLinkedCargoFromSavedData restored id={} pos={} restoredCount={}",
+                stationId,
+                worldPosition,
+                linkedCargo.size()
+        );
+        return true;
+    }
+
+    private void persistLinkedCargo() {
+        if (level instanceof ServerLevel serverLevel) {
+            persistLinkedCargo(serverLevel);
+        }
+    }
+
+    private void persistLinkedCargo(ServerLevel level) {
+        if (linkedCargo.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Station persistLinkedCargo remove id={} pos={}",
+                    stationId,
+                    worldPosition
+            );
+            StationCargoSavedData.remove(level.getServer(), stationId);
+            return;
+        }
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Station persistLinkedCargo put id={} pos={} count={}",
+                stationId,
+                worldPosition,
+                linkedCargo.size()
+        );
+        StationCargoSavedData.put(level.getServer(), stationId, worldPosition, linkedCargo);
     }
 
     private ListTag writeLinkedControllers() {

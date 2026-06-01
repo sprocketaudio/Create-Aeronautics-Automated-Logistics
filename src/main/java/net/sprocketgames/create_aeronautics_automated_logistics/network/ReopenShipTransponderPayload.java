@@ -49,6 +49,8 @@ public record ReopenShipTransponderPayload(BlockPos transponderPos, boolean reco
             buffer.writeBoolean(recordingState.appendToSchedule());
             buffer.writeBoolean(transponder.recordingDestinationStationId().isPresent());
             transponder.recordingDestinationStationId().ifPresent(buffer::writeUUID);
+            ShipTransponderMenu.writeCargoSummary(buffer, transponder.linkedCargoSummary());
+            ShipTransponderMenu.writeLinkedCargoEntries(buffer, transponder.linkedCargo());
         });
     }
 }

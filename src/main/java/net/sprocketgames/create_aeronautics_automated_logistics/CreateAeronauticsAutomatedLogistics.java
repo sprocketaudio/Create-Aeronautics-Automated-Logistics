@@ -15,6 +15,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModCrea
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModItems;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModMenus;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomationVisualServerEvents;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RecordingServerEvents;
 import org.slf4j.Logger;
@@ -52,6 +53,7 @@ public class CreateAeronauticsAutomatedLogistics {
         NeoForge.EVENT_BUS.addListener(RecordingServerEvents::onServerStopped);
         NeoForge.EVENT_BUS.addListener(AutomationVisualServerEvents::onPlayerLogin);
         NeoForge.EVENT_BUS.addListener(DockLinkInteractionService::onRightClickBlock);
+        NeoForge.EVENT_BUS.addListener(CargoLinkInteractionService::onRightClickBlock);
         LOGGER.info("Create Aeronautics dependency state: {}", CreateAeronauticsCompat.describeLoadedState());
     }
 }

@@ -34,9 +34,12 @@ public class SableSubLevelVehicleController implements VehicleController {
     private static final double ANGULAR_DAMPING = 0.9D;
     private static final double ROTATION_ALIGNMENT_GAIN = 0.18D;
     private static final double MAX_ALIGNMENT_ANGULAR_CHANGE = 0.06D;
-    private static final double HOLD_POSITION_GAIN = 0.45D;
-    private static final double HOLD_VELOCITY_DAMPING = 1.1D;
-    private static final double MAX_HOLD_LINEAR_CHANGE = 0.18D;
+    private static final double HOLD_HORIZONTAL_POSITION_GAIN = 0.45D;
+    private static final double HOLD_HORIZONTAL_VELOCITY_DAMPING = 1.1D;
+    private static final double MAX_HOLD_HORIZONTAL_CHANGE = 0.18D;
+    private static final double HOLD_VERTICAL_POSITION_GAIN = 1.8D;
+    private static final double HOLD_VERTICAL_VELOCITY_DAMPING = 2.1D;
+    private static final double MAX_HOLD_VERTICAL_CHANGE = 0.7D;
     private static final double TICKS_PER_SECOND = 20.0D;
     private static final int MOVEMENT_LOG_INTERVAL_TICKS = 20;
 
@@ -297,12 +300,22 @@ public class SableSubLevelVehicleController implements VehicleController {
         Vector3dc currentVelocity = handle.getLinearVelocity();
         Vector3dc currentAngularVelocity = handle.getAngularVelocity();
 
-        Vector3d linearCorrection = new Vector3d(
-                positionError.x * HOLD_POSITION_GAIN - currentVelocity.x() * HOLD_VELOCITY_DAMPING,
-                positionError.y * HOLD_POSITION_GAIN - currentVelocity.y() * HOLD_VELOCITY_DAMPING,
-                positionError.z * HOLD_POSITION_GAIN - currentVelocity.z() * HOLD_VELOCITY_DAMPING
+        Vector3d horizontalCorrection = new Vector3d(
+                positionError.x * HOLD_HORIZONTAL_POSITION_GAIN - currentVelocity.x() * HOLD_HORIZONTAL_VELOCITY_DAMPING,
+                0.0D,
+                positionError.z * HOLD_HORIZONTAL_POSITION_GAIN - currentVelocity.z() * HOLD_HORIZONTAL_VELOCITY_DAMPING
         );
-        clampMagnitude(linearCorrection, MAX_HOLD_LINEAR_CHANGE);
+        clampMagnitude(horizontalCorrection, MAX_HOLD_HORIZONTAL_CHANGE);
+        double verticalCorrection = clampAbs(
+                positionError.y * HOLD_VERTICAL_POSITION_GAIN - currentVelocity.y() * HOLD_VERTICAL_VELOCITY_DAMPING,
+                MAX_HOLD_VERTICAL_CHANGE
+        );
+
+        Vector3d linearCorrection = new Vector3d(
+                horizontalCorrection.x(),
+                verticalCorrection,
+                horizontalCorrection.z()
+        );
 
         Vector3d angularCorrection = computeAngularCorrection(holdRotation, currentAngularVelocity);
         handle.addLinearAndAngularVelocity(linearCorrection, angularCorrection);
@@ -368,6 +381,10 @@ public class SableSubLevelVehicleController implements VehicleController {
         if (length > maxMagnitude && length > 1.0E-9D) {
             vector.mul(maxMagnitude / length);
         }
+    }
+
+    private static double clampAbs(double value, double maxAbs) {
+        return Math.max(-maxAbs, Math.min(maxAbs, value));
     }
 
     public static Optional<SableSubLevelVehicleController> resolveTrackedPlayer(ServerPlayer player) {

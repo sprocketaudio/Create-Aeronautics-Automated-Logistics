@@ -7,6 +7,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronautic
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderRegistry;
+import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderSnapshot;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.Route;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.PlaybackFailure;
 
@@ -119,6 +120,15 @@ public final class DockingRuntime {
         if (routeControllerPos.isPresent()
                 && level.getBlockEntity(routeControllerPos.get()) instanceof ShipTransponderBlockEntity transponder) {
             return Optional.of(transponder);
+        }
+
+        for (ShipTransponderSnapshot snapshot : ShipTransponderRegistry.knownShips(level.dimension())) {
+            if (snapshot.controllerRef().filter(route.linkedController()::matches).isEmpty()) {
+                continue;
+            }
+            if (level.getBlockEntity(snapshot.transponderPos()) instanceof ShipTransponderBlockEntity transponder) {
+                return Optional.of(transponder);
+            }
         }
 
         return station.selectedTransponderId()

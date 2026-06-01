@@ -2,9 +2,12 @@ package net.sprocketgames.create_aeronautics_automated_logistics.block.entity;
 
 import java.util.Optional;
 import java.util.UUID;
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
@@ -29,9 +32,14 @@ import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityNames;
 import net.sprocketgames.create_aeronautics_automated_logistics.AutomatedLogisticsConfig;
+import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockDiscoveryResult;
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockLinkStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockingConnectorDiscovery;
+import net.sprocketgames.create_aeronautics_automated_logistics.cargo.CargoLinkDiscovery;
+import net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry;
+import net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoSummary;
+import net.sprocketgames.create_aeronautics_automated_logistics.cargo.TransponderCargoSavedData;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityDirectorySavedData;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderSnapshot;
@@ -43,6 +51,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModItem
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.SableSubLevelVehicleController;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerRef;
 
@@ -65,6 +74,12 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     private static final String RECORDING_DESTINATION_STATION_ID = "recordingDestinationStationId";
     private static final String RUNTIME_STATUS = "runtimeStatus";
     private static final String SCHEDULE_SLOT = "scheduleSlot";
+    private static final String LINKED_CARGO = "linkedCargo";
+    private static final String LINKED_CARGO_X = "x";
+    private static final String LINKED_CARGO_Y = "y";
+    private static final String LINKED_CARGO_Z = "z";
+    private static final String LINKED_CARGO_ITEM = "item";
+    private static final String LINKED_CARGO_FLUID = "fluid";
     private static final int CURRENT_DATA_VERSION = 1;
     private static final int REFRESH_INTERVAL_TICKS = 40;
     public static final int INTERNAL_SCHEDULE_SLOT = 0;
@@ -84,6 +99,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     private RouteStatus runtimeStatus = RouteStatus.IDLE;
     private long lastSeenGameTime = -1L;
     private final NonNullList<ItemStack> items = NonNullList.withSize(1, ItemStack.EMPTY);
+    private final List<LinkedCargoEntry> linkedCargo = new ArrayList<>();
 
     public ShipTransponderBlockEntity(BlockPos pos, BlockState blockState) {
         super(ModBlockEntities.SHIP_TRANSPONDER.get(), pos, blockState);
@@ -197,6 +213,75 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
 
     public boolean scheduleHeld() {
         return runtimeStatus == RouteStatus.HELD || runtimeStatus == RouteStatus.HELD_FAULTED;
+    }
+
+    public List<LinkedCargoEntry> linkedCargo() {
+        return List.copyOf(resolvedLinkedCargo());
+    }
+
+    public LinkedCargoSummary linkedCargoSummary() {
+        return CargoLinkDiscovery.summarize(level, resolvedLinkedCargo());
+    }
+
+    public LinkedCargoSummary relinkCargo(ServerLevel level) {
+        linkedCargo.clear();
+        linkedCargo.addAll(CargoLinkDiscovery.discover(level, worldPosition));
+        setChanged();
+        return linkedCargoSummary();
+    }
+
+    public int addLinkedCargoEntries(List<LinkedCargoEntry> entries) {
+        ensureLinkedCargoLoaded();
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Transponder addLinkedCargoEntries start id={} pos={} existingCount={} incomingCount={}",
+                transponderId,
+                worldPosition,
+                linkedCargo.size(),
+                entries.size()
+        );
+        int added = 0;
+        for (LinkedCargoEntry entry : entries) {
+            boolean exists = linkedCargo.stream().anyMatch(existing -> existing.pos().equals(entry.pos()));
+            if (exists) {
+                continue;
+            }
+            linkedCargo.add(entry);
+            added++;
+        }
+        if (added > 0) {
+            setChanged();
+            persistLinkedCargo();
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Transponder addLinkedCargoEntries saved id={} pos={} added={} newCount={}",
+                    transponderId,
+                    worldPosition,
+                    added,
+                    linkedCargo.size()
+            );
+        }
+        return added;
+    }
+
+    public boolean clearLinkedCargo() {
+        ensureLinkedCargoLoaded();
+        if (linkedCargo.isEmpty()) {
+            persistLinkedCargo();
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Transponder clearLinkedCargo no-op id={} pos={} count=0",
+                    transponderId,
+                    worldPosition
+            );
+            return false;
+        }
+        linkedCargo.clear();
+        setChanged();
+        persistLinkedCargo();
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Transponder clearLinkedCargo cleared id={} pos={}",
+                transponderId,
+                worldPosition
+        );
+        return true;
     }
 
     public void setDockOutputActive(boolean active) {
@@ -406,6 +491,10 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         setChanged();
     }
 
+    public int pruneInvalidOwnedSchedule(ServerLevel level) {
+        return ScheduleRouteCleanup.pruneOwnedSchedule(level, this);
+    }
+
     public boolean hasOwnedStops() {
         return !ownedSchedule().entries().isEmpty();
     }
@@ -476,6 +565,19 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         if (hasInstalledSchedule()) {
             tag.put(SCHEDULE_SLOT, installedScheduleStack().saveOptional(registries));
         }
+        if (!linkedCargo.isEmpty()) {
+            ListTag linkedCargoTag = new ListTag();
+            for (LinkedCargoEntry entry : linkedCargo) {
+                CompoundTag entryTag = new CompoundTag();
+                entryTag.putInt(LINKED_CARGO_X, entry.pos().getX() - worldPosition.getX());
+                entryTag.putInt(LINKED_CARGO_Y, entry.pos().getY() - worldPosition.getY());
+                entryTag.putInt(LINKED_CARGO_Z, entry.pos().getZ() - worldPosition.getZ());
+                entryTag.putBoolean(LINKED_CARGO_ITEM, entry.itemStorage());
+                entryTag.putBoolean(LINKED_CARGO_FLUID, entry.fluidStorage());
+                linkedCargoTag.add(entryTag);
+            }
+            tag.put(LINKED_CARGO, linkedCargoTag);
+        }
         lastKnownPosition.ifPresent(pos -> {
             tag.putDouble(LAST_X, pos.x);
             tag.putDouble(LAST_Y, pos.y);
@@ -518,6 +620,13 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         setItem(INTERNAL_SCHEDULE_SLOT, tag.contains(SCHEDULE_SLOT, Tag.TAG_COMPOUND)
                 ? ItemStack.parseOptional(registries, tag.getCompound(SCHEDULE_SLOT))
                 : ItemStack.EMPTY);
+        linkedCargo.clear();
+        if (tag.contains(LINKED_CARGO, Tag.TAG_LIST)) {
+            ListTag linkedCargoTag = tag.getList(LINKED_CARGO, Tag.TAG_COMPOUND);
+            for (int i = 0; i < linkedCargoTag.size(); i++) {
+                readStoredLinkedCargo(linkedCargoTag.getCompound(i)).ifPresent(linkedCargo::add);
+            }
+        }
         migrateLegacyInstalledSchedule();
         lastKnownPosition = tag.contains(LAST_X, Tag.TAG_ANY_NUMERIC)
                 && tag.contains(LAST_Y, Tag.TAG_ANY_NUMERIC)
@@ -530,11 +639,19 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     @Override
     public void onLoad() {
         super.onLoad();
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Transponder onLoad id={} pos={} linkedCargoCount={} levelClient={}",
+                transponderId,
+                worldPosition,
+                linkedCargo.size(),
+                level != null && level.isClientSide
+        );
         if (level != null && !level.isClientSide && dockOutputActive) {
             dockOutputActive = false;
             setChanged();
         }
         if (level instanceof ServerLevel serverLevel) {
+            restoreOrPersistLinkedCargo(serverLevel);
             ShipTransponderSnapshot snapshot = snapshot(serverLevel);
             ShipTransponderRegistry.register(snapshot);
             IdentityDirectorySavedData.upsertShip(serverLevel.getServer(), snapshot);
@@ -606,6 +723,120 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                 current.setValue(net.sprocketgames.create_aeronautics_automated_logistics.block.ShipTransponderBlock.POWERED, dockOutputActive),
                 3
         );
+    }
+
+    private void restoreOrPersistLinkedCargo(ServerLevel level) {
+        if (loadLinkedCargoFromSavedData(level)) {
+            setChanged();
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Transponder restoreOrPersistLinkedCargo restored id={} pos={} count={}",
+                    transponderId,
+                    worldPosition,
+                    linkedCargo.size()
+            );
+            return;
+        }
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Transponder restoreOrPersistLinkedCargo persisting current id={} pos={} count={}",
+                transponderId,
+                worldPosition,
+                linkedCargo.size()
+        );
+        persistLinkedCargo(level);
+    }
+
+    private List<LinkedCargoEntry> resolvedLinkedCargo() {
+        ensureLinkedCargoLoaded();
+        return linkedCargo;
+    }
+
+    private void ensureLinkedCargoLoaded() {
+        if (!linkedCargo.isEmpty() || !(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Transponder ensureLinkedCargoLoaded attempting restore id={} pos={}",
+                transponderId,
+                worldPosition
+        );
+        loadLinkedCargoFromSavedData(serverLevel);
+    }
+
+    private boolean loadLinkedCargoFromSavedData(ServerLevel level) {
+        if (!linkedCargo.isEmpty()) {
+            return false;
+        }
+        List<LinkedCargoEntry> restored = TransponderCargoSavedData.entries(level.getServer(), transponderId, cargoSaveAnchor(level));
+        if (restored.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Transponder loadLinkedCargoFromSavedData miss id={} pos={} anchor={}",
+                    transponderId,
+                    worldPosition,
+                    cargoSaveAnchor(level)
+            );
+            return false;
+        }
+        linkedCargo.addAll(restored);
+        TransponderCargoSavedData.put(level.getServer(), transponderId, cargoSaveAnchor(level), linkedCargo);
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Transponder loadLinkedCargoFromSavedData restored id={} pos={} anchor={} restoredCount={}",
+                transponderId,
+                worldPosition,
+                cargoSaveAnchor(level),
+                linkedCargo.size()
+        );
+        return true;
+    }
+
+    private Optional<LinkedCargoEntry> readStoredLinkedCargo(CompoundTag tag) {
+        if (tag.contains(LINKED_CARGO_X, Tag.TAG_ANY_NUMERIC)
+                && tag.contains(LINKED_CARGO_Y, Tag.TAG_ANY_NUMERIC)
+                && tag.contains(LINKED_CARGO_Z, Tag.TAG_ANY_NUMERIC)) {
+            LinkedCargoEntry entry = new LinkedCargoEntry(
+                    worldPosition.offset(
+                            tag.getInt(LINKED_CARGO_X),
+                            tag.getInt(LINKED_CARGO_Y),
+                            tag.getInt(LINKED_CARGO_Z)
+                    ),
+                    tag.getBoolean(LINKED_CARGO_ITEM),
+                    tag.getBoolean(LINKED_CARGO_FLUID)
+            );
+            return entry.hasAnyStorage() ? Optional.of(entry) : Optional.empty();
+        }
+        return LinkedCargoEntry.read(tag);
+    }
+
+    private void persistLinkedCargo() {
+        if (level instanceof ServerLevel serverLevel) {
+            persistLinkedCargo(serverLevel);
+        }
+    }
+
+    private void persistLinkedCargo(ServerLevel level) {
+        if (linkedCargo.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Transponder persistLinkedCargo remove id={} pos={}",
+                    transponderId,
+                    worldPosition
+            );
+            TransponderCargoSavedData.remove(level.getServer(), transponderId);
+            return;
+        }
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Transponder persistLinkedCargo put id={} pos={} anchor={} count={}",
+                transponderId,
+                worldPosition,
+                cargoSaveAnchor(level),
+                linkedCargo.size()
+        );
+        TransponderCargoSavedData.put(level.getServer(), transponderId, cargoSaveAnchor(level), linkedCargo);
+    }
+
+    private BlockPos cargoSaveAnchor(ServerLevel level) {
+        return controllerRef(level)
+                .flatMap(VehicleControllerRef::controllerPos)
+                .map(BlockPos::immutable)
+                .orElse(worldPosition);
     }
 
     @Override

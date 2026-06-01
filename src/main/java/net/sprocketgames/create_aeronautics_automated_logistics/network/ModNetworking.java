@@ -80,6 +80,11 @@ public final class ModNetworking {
                 SetDockLinkPromptPayload::handle
         );
         registrar.playToClient(
+                SetCargoLinkPromptPayload.TYPE,
+                SetCargoLinkPromptPayload.STREAM_CODEC,
+                SetCargoLinkPromptPayload::handle
+        );
+        registrar.playToClient(
                 SetMenuActionBarMessagePayload.TYPE,
                 SetMenuActionBarMessagePayload.STREAM_CODEC,
                 SetMenuActionBarMessagePayload::handle

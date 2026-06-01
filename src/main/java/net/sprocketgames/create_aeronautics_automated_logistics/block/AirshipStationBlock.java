@@ -28,10 +28,16 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.level.BlockGetter;
+import net.minecraft.network.chat.Component;
+import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityDirectorySavedData;
+import net.sprocketgames.create_aeronautics_automated_logistics.menu.ShipTransponderMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteBlockBreakProtection;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
 import org.jetbrains.annotations.Nullable;
 
 public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock {
@@ -89,6 +95,23 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
     }
 
     @Override
+    public void attack(BlockState state, Level level, BlockPos pos, Player player) {
+        RouteBlockBreakProtection.warnIfBlocked(
+                level,
+                player,
+                Component.translatable("message.create_aeronautics_automated_logistics.station.break_requires_crouch")
+        );
+    }
+
+    @Override
+    public float getDestroyProgress(BlockState state, Player player, BlockGetter level, BlockPos pos) {
+        if (RouteBlockBreakProtection.shouldBlockBreak(player)) {
+            return 0.0F;
+        }
+        return super.getDestroyProgress(state, player, level, pos);
+    }
+
+    @Override
     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hitResult) {
         if (level.isClientSide) {
             return InteractionResult.SUCCESS;
@@ -99,10 +122,24 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
         if (DockLinkInteractionService.cancelPendingIfSource(serverPlayer, pos)) {
             return InteractionResult.CONSUME;
         }
+        if (CargoLinkInteractionService.cancelPendingIfSource(serverPlayer, pos)) {
+            return InteractionResult.CONSUME;
+        }
         if (!(level.getBlockEntity(pos) instanceof AirshipStationBlockEntity station)) {
             return InteractionResult.CONSUME;
         }
-        serverPlayer.openMenu(station, buffer -> buffer.writeBlockPos(pos));
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Station openMenu id={} pos={} linkedCargoCount={} cargoSummary={}",
+                station.stationId(),
+                pos,
+                station.linkedCargo().size(),
+                station.linkedCargoSummary()
+        );
+        serverPlayer.openMenu(station, buffer -> {
+            buffer.writeBlockPos(pos);
+            ShipTransponderMenu.writeCargoSummary(buffer, station.linkedCargoSummary());
+            ShipTransponderMenu.writeLinkedCargoEntries(buffer, station.linkedCargo());
+        });
         return InteractionResult.CONSUME;
     }
 
@@ -164,6 +201,7 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
         if (!state.is(newState.getBlock())
                 && level.getBlockEntity(pos) instanceof AirshipStationBlockEntity station
                 && level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            ScheduleRouteCleanup.removeRoutesForDeletedStation(serverLevel, station.stationId());
             IdentityDirectorySavedData.removeStation(serverLevel.getServer(), station.stationId());
         }
         super.onRemove(state, level, pos, newState, isMoving);

@@ -4,6 +4,7 @@ import com.simibubi.create.AllSoundEvents;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.List;
+import java.util.stream.IntStream;
 import net.minecraft.core.BlockPos;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.FriendlyByteBuf;
@@ -18,6 +19,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
+import net.sprocketgames.create_aeronautics_automated_logistics.cargo.CargoLinkSupport;
+import net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoSummary;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockLinkStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityNames;
@@ -35,6 +38,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegme
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AirshipScheduleExecutionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RecordingSession;
 import java.util.Locale;
 import java.util.ArrayList;
@@ -48,6 +52,9 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
     public static final int ACTION_BEGIN_LINK_DOCK = 3;
     public static final int ACTION_CLEAR_DOCK_LINK = 4;
     public static final int ACTION_EDIT_INSTALLED_SCHEDULE = 5;
+    public static final int ACTION_LINK_CARGO = 6;
+    public static final int ACTION_CLEAR_CARGO = 7;
+    public static final int ACTION_SHOW_CARGO = 8;
     private static final int PLAYER_INVENTORY_START = 0;
     private static final int PLAYER_INVENTORY_END = 28;
     private static final int HOTBAR_START = 28;
@@ -58,6 +65,8 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
     private final boolean initialRecordingSessionActive;
     private final boolean initialAppendToSchedule;
     private final Optional<UUID> initialRecordingDestinationStationId;
+    private final LinkedCargoSummary initialCargoSummary;
+    private final List<net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry> initialLinkedCargoEntries;
 
     public ShipTransponderMenu(int containerId, Inventory playerInventory, FriendlyByteBuf buffer) {
         this(
@@ -67,25 +76,45 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
                 buffer.readableBytes() > 0 && buffer.readBoolean(),
                 buffer.readableBytes() > 0 && buffer.readBoolean(),
                 buffer.readableBytes() > 0 && buffer.readBoolean(),
-                buffer.readableBytes() > 0 && buffer.readBoolean() ? Optional.of(buffer.readUUID()) : Optional.empty()
+                buffer.readableBytes() > 0 && buffer.readBoolean() ? Optional.of(buffer.readUUID()) : Optional.empty(),
+                buffer.readableBytes() >= Integer.BYTES * 5
+                        ? new LinkedCargoSummary(
+                                buffer.readInt(),
+                                buffer.readInt(),
+                                buffer.readInt(),
+                                buffer.readInt(),
+                                buffer.readInt()
+                        )
+                        : new LinkedCargoSummary(0, 0, 0, 0, 0),
+                buffer.readableBytes() >= Integer.BYTES
+                        ? IntStream.range(0, buffer.readInt())
+                                .mapToObj(ignored -> new net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry(
+                                        buffer.readBlockPos(),
+                                        buffer.readBoolean(),
+                                        buffer.readBoolean()
+                                ))
+                                .toList()
+                        : List.of()
         );
     }
 
     public ShipTransponderMenu(int containerId, Inventory playerInventory, BlockPos transponderPos) {
-        this(containerId, playerInventory, transponderPos, false, false, false, Optional.empty());
+        this(containerId, playerInventory, transponderPos, false, false, false, Optional.empty(), new LinkedCargoSummary(0, 0, 0, 0, 0), List.of());
     }
 
     public ShipTransponderMenu(int containerId, Inventory playerInventory, BlockPos transponderPos, boolean initialRecordingMode) {
-        this(containerId, playerInventory, transponderPos, initialRecordingMode, false, false, Optional.empty());
+        this(containerId, playerInventory, transponderPos, initialRecordingMode, false, false, Optional.empty(), new LinkedCargoSummary(0, 0, 0, 0, 0), List.of());
     }
 
-    public ShipTransponderMenu(int containerId, Inventory playerInventory, BlockPos transponderPos, boolean initialRecordingMode, boolean initialRecordingSessionActive, boolean initialAppendToSchedule, Optional<UUID> initialRecordingDestinationStationId) {
+    public ShipTransponderMenu(int containerId, Inventory playerInventory, BlockPos transponderPos, boolean initialRecordingMode, boolean initialRecordingSessionActive, boolean initialAppendToSchedule, Optional<UUID> initialRecordingDestinationStationId, LinkedCargoSummary initialCargoSummary, List<net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry> initialLinkedCargoEntries) {
         super(ModMenus.SHIP_TRANSPONDER.get(), containerId);
         this.transponderPos = transponderPos;
         this.initialRecordingMode = initialRecordingMode;
         this.initialRecordingSessionActive = initialRecordingSessionActive;
         this.initialAppendToSchedule = initialAppendToSchedule;
         this.initialRecordingDestinationStationId = initialRecordingDestinationStationId == null ? Optional.empty() : initialRecordingDestinationStationId;
+        this.initialCargoSummary = initialCargoSummary == null ? new LinkedCargoSummary(0, 0, 0, 0, 0) : initialCargoSummary;
+        this.initialLinkedCargoEntries = initialLinkedCargoEntries == null ? List.of() : List.copyOf(initialLinkedCargoEntries);
         addPlayerInventorySlots(playerInventory, 17, 198);
     }
 
@@ -107,6 +136,23 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
 
     public Optional<UUID> initialRecordingDestinationStationId() {
         return initialRecordingDestinationStationId;
+    }
+
+    public static void writeCargoSummary(FriendlyByteBuf buffer, LinkedCargoSummary summary) {
+        buffer.writeInt(summary.totalLinks());
+        buffer.writeInt(summary.validLinks());
+        buffer.writeInt(summary.staleLinks());
+        buffer.writeInt(summary.itemLinks());
+        buffer.writeInt(summary.fluidLinks());
+    }
+
+    public static void writeLinkedCargoEntries(FriendlyByteBuf buffer, List<net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry> entries) {
+        buffer.writeInt(entries.size());
+        for (net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry entry : entries) {
+            buffer.writeBlockPos(entry.pos());
+            buffer.writeBoolean(entry.itemStorage());
+            buffer.writeBoolean(entry.fluidStorage());
+        }
     }
 
     public static InitialRecordingState resolveInitialRecordingState(ServerPlayer player, ShipTransponderBlockEntity transponder, boolean preferredMode) {
@@ -238,6 +284,76 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         };
     }
 
+    public Component cargoCompactText(Player player) {
+        LinkedCargoSummary summary = resolveCargoSummary(player);
+        if (!summary.hasLinks()) {
+            return Component.translatable("gui.create_aeronautics_automated_logistics.cargo.none");
+        }
+        if (summary.staleLinks() > 0) {
+            return Component.translatable(
+                    "gui.create_aeronautics_automated_logistics.cargo.compact.partial",
+                    summary.validLinks(),
+                    summary.totalLinks()
+            );
+        }
+        return Component.translatable(
+                "gui.create_aeronautics_automated_logistics.cargo.compact.linked",
+                summary.totalLinks()
+        );
+    }
+
+    public List<Component> cargoTooltip(Player player) {
+        LinkedCargoSummary summary = resolveCargoSummary(player);
+        if (!summary.hasLinks()) {
+            return List.of(
+                    Component.translatable("gui.create_aeronautics_automated_logistics.cargo.none").withStyle(ChatFormatting.YELLOW),
+                    Component.translatable("gui.create_aeronautics_automated_logistics.cargo.hover.none").withStyle(ChatFormatting.GRAY)
+            );
+        }
+        String hintKey = summary.staleLinks() > 0
+                ? "gui.create_aeronautics_automated_logistics.cargo.hover.partial"
+                : "gui.create_aeronautics_automated_logistics.cargo.hover.linked";
+        return List.of(
+                Component.translatable("gui.create_aeronautics_automated_logistics.cargo.hover.status", cargoCompactText(player))
+                        .withStyle(summary.staleLinks() > 0 ? ChatFormatting.YELLOW : ChatFormatting.GRAY),
+                Component.translatable(
+                        "gui.create_aeronautics_automated_logistics.cargo.hover.contents",
+                        summary.itemLinks(),
+                        summary.fluidLinks()
+                ).withStyle(ChatFormatting.GRAY),
+                Component.translatable(
+                        "gui.create_aeronautics_automated_logistics.cargo.hover.validity",
+                        summary.validLinks(),
+                        summary.staleLinks()
+                ).withStyle(ChatFormatting.DARK_GRAY),
+                Component.translatable(hintKey).withStyle(ChatFormatting.DARK_GRAY)
+        );
+    }
+
+    public int cargoStatusColor(Player player) {
+        LinkedCargoSummary summary = resolveCargoSummary(player);
+        if (!summary.hasLinks()) {
+            return 0xFFFFD98A;
+        }
+        return summary.staleLinks() > 0 ? 0xFFFFD98A : 0xFFAFC7DE;
+    }
+
+    public boolean hasLinkedCargo(Player player) {
+        return resolveCargoSummary(player).hasLinks();
+    }
+
+    public boolean isCargoLinkPending(Player player) {
+        return player instanceof ServerPlayer serverPlayer
+                && CargoLinkInteractionService.hasPendingTransponderLink(serverPlayer, transponderPos);
+    }
+
+    private LinkedCargoSummary resolveCargoSummary(Player player) {
+        if (!(player.level().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity transponder)) {
+            return initialCargoSummary;
+        }
+        return transponder.linkedCargoSummary();
+    }
+
     public Component installedScheduleText(Player player) {
         if (!(player.level().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity transponder)) {
             return Component.empty();
@@ -252,6 +368,12 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
     public boolean hasOwnedStops(Player player) {
         return player.level().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity transponder
                 && transponder.hasOwnedStops();
+    }
+
+    public boolean canPreviewOwnedRoute(Player player) {
+        return player.level().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity transponder
+                && transponder.hasOwnedStops()
+                && hasResolvableInstalledRouteChain(player);
     }
 
     public boolean isScheduleRunning(Player player) {
@@ -291,6 +413,9 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
             case ACTION_BEGIN_LINK_DOCK -> beginLinkDock(serverPlayer, transponder);
             case ACTION_CLEAR_DOCK_LINK -> clearDockLink(serverPlayer, transponder);
             case ACTION_EDIT_INSTALLED_SCHEDULE -> editInstalledSchedule(serverPlayer, transponder);
+            case ACTION_LINK_CARGO -> linkCargo(serverPlayer, transponder);
+            case ACTION_CLEAR_CARGO -> clearCargo(serverPlayer, transponder);
+            case ACTION_SHOW_CARGO -> true;
             default -> false;
         };
     }
@@ -300,7 +425,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
             return true;
         }
         if (!(player.level().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity transponder)) {
-            return false;
+            return true;
         }
         return transponder.ownerId().isEmpty() || transponder.ownerId().get().equals(player.getUUID());
     }
@@ -415,7 +540,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
 
     private boolean stopSchedule(net.minecraft.server.level.ServerPlayer player, ShipTransponderBlockEntity transponder) {
         UUID transponderId = transponder.transponderId();
-        if (!AutomatedLogisticsServices.SCHEDULES.isRunning(transponderId)) {
+        if (!AutomatedLogisticsServices.SCHEDULES.hasActiveRuntime(player.serverLevel(), transponderId)) {
             return false;
         }
         AutomatedLogisticsServices.SCHEDULES.stop(player.serverLevel(), transponderId);
@@ -563,6 +688,35 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         return transponder.shipDockPos();
     }
 
+    public List<BlockPos> cargoPreviewPositions(Player player) {
+        return cargoPreviewPositionGroups(player).stream()
+                .flatMap(List::stream)
+                .distinct()
+                .toList();
+    }
+
+    public List<List<BlockPos>> cargoPreviewPositionGroups(Player player) {
+        if (!canControlTransponderLocally(player)) {
+            return List.of();
+        }
+        List<net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry> linkedEntries = List.of();
+        if (player.level().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity transponder) {
+            linkedEntries = transponder.linkedCargo();
+        } else if (!initialLinkedCargoEntries.isEmpty()) {
+            linkedEntries = initialLinkedCargoEntries;
+        }
+        if (linkedEntries.isEmpty()) {
+            return List.of();
+        }
+        List<List<BlockPos>> expanded = CargoLinkSupport.expandPreviewPositionGroups(player.level(), transponderPos, 6, linkedEntries);
+        if (!expanded.isEmpty()) {
+            return expanded;
+        }
+        return linkedEntries.stream()
+                .map(entry -> List.of(entry.pos()))
+                .toList();
+    }
+
     public List<Component> runtimeFailureTooltip(Player player) {
         return runtimeStatusTooltip(player);
     }
@@ -654,7 +808,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
             case WRONG_START_STATION -> Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.wrong_station_status");
             case COLLISION_OR_OBSTRUCTION, STUCK -> Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.blocked_status");
             case MISSING_DOCK, AMBIGUOUS_DOCK, DOCK_LOCK_FAILED -> Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.dock_problem_status");
-            case CARGO_CONDITION_TIMEOUT, MOVEMENT_FAILURE, ALREADY_RUNNING -> Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.needs_attention_status");
+            case REDSTONE_LINK_UNCONFIGURED, CARGO_STORAGE_MISSING, CARGO_CONDITION_TIMEOUT, MOVEMENT_FAILURE, ALREADY_RUNNING -> Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.needs_attention_status");
         };
     }
 
@@ -747,10 +901,6 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
     }
 
     private boolean editInstalledSchedule(ServerPlayer player, ShipTransponderBlockEntity transponder) {
-        if (AutomatedLogisticsServices.SCHEDULES.isRunning(transponder.transponderId())) {
-            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.transponder_schedule_locked"));
-            return false;
-        }
         AirshipSchedule schedule = transponder.ownedSchedule();
         player.openMenu(
                 new net.minecraft.world.SimpleMenuProvider(
@@ -763,6 +913,33 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
                     buffer.writeBoolean(false);
                 }
         );
+        return true;
+    }
+
+    private boolean linkCargo(ServerPlayer player, ShipTransponderBlockEntity transponder) {
+        if (AutomatedLogisticsServices.SCHEDULES.isRunning(transponder.transponderId())) {
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.cargo_link.locked_while_running"));
+            AllSoundEvents.DENY.playOnServer(player.level(), transponder.getBlockPos(), 0.5f, 1.0f);
+            return false;
+        }
+        CargoLinkInteractionService.beginTransponderLink(player, transponder.getBlockPos());
+        return true;
+    }
+
+    private boolean clearCargo(ServerPlayer player, ShipTransponderBlockEntity transponder) {
+        if (AutomatedLogisticsServices.SCHEDULES.isRunning(transponder.transponderId())) {
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.cargo_link.locked_while_running"));
+            AllSoundEvents.DENY.playOnServer(player.level(), transponder.getBlockPos(), 0.5f, 1.0f);
+            return false;
+        }
+        if (CargoLinkInteractionService.hasPendingTransponderLink(player, transponder.getBlockPos())) {
+            return CargoLinkInteractionService.cancelPending(player);
+        }
+        if (!transponder.clearLinkedCargo()) {
+            return false;
+        }
+        actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.cargo_link.cleared"));
+        AllSoundEvents.CONFIRM.playOnServer(player.level(), transponder.getBlockPos(), 0.6f, 1.0f);
         return true;
     }
 

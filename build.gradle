@@ -37,22 +37,25 @@ if (localPropertiesFile.exists()) {
     }
 }
 
-def localAeronauticsJarPath = providers.gradleProperty('aeronautics_bundled_jar')
-        .orElse(providers.environmentVariable('AERONAUTICS_BUNDLED_JAR'))
-        .orElse(localProperties.getProperty('aeronautics_bundled_jar', ''))
-        .get()
-def localSableJarPath = providers.gradleProperty('sable_jar')
-        .orElse(providers.environmentVariable('SABLE_JAR'))
-        .orElse(localProperties.getProperty('sable_jar', ''))
-        .get()
-def localCreateJarPath = providers.gradleProperty('create_jar')
-        .orElse(providers.environmentVariable('CREATE_JAR'))
-        .orElse(localProperties.getProperty('create_jar', ''))
-        .get()
-def localPonderJarPath = providers.gradleProperty('ponder_jar')
-        .orElse(providers.environmentVariable('PONDER_JAR'))
-        .orElse(localProperties.getProperty('ponder_jar', ''))
-        .get()
+def resolveLocalJarPath = { String gradlePropertyName, String envVarName ->
+    providers.gradleProperty(gradlePropertyName)
+            .orElse(providers.environmentVariable(envVarName))
+            .orElse(localProperties.getProperty(gradlePropertyName, ''))
+            .get()
+}
+
+def localAeronauticsJarPath = resolveLocalJarPath('aeronautics_bundled_jar', 'AERONAUTICS_BUNDLED_JAR')
+def localSableJarPath = resolveLocalJarPath('sable_jar', 'SABLE_JAR')
+def localCreateJarPath = resolveLocalJarPath('create_jar', 'CREATE_JAR')
+def localPonderJarPath = resolveLocalJarPath('ponder_jar', 'PONDER_JAR')
+def localRefinedStorage2JarPath = resolveLocalJarPath('refined_storage_2_jar', 'REFINED_STORAGE_2_JAR')
+def localAe2JarPath = resolveLocalJarPath('ae2_jar', 'AE2_JAR')
+def localIronChestsJarPath = resolveLocalJarPath('iron_chests_jar', 'IRON_CHESTS_JAR')
+def localStorageDrawersJarPath = resolveLocalJarPath('storage_drawers_jar', 'STORAGE_DRAWERS_JAR')
+def localMekanismJarPath = resolveLocalJarPath('mekanism_jar', 'MEKANISM_JAR')
+def localSophisticatedStorageJarPath = resolveLocalJarPath('sophisticated_storage_jar', 'SOPHISTICATED_STORAGE_JAR')
+def localFunctionalStorageJarPath = resolveLocalJarPath('functional_storage_jar', 'FUNCTIONAL_STORAGE_JAR')
+def localSophisticatedBackpacksJarPath = resolveLocalJarPath('sophisticated_backpacks_jar', 'SOPHISTICATED_BACKPACKS_JAR')
 def localModJarPaths = [localAeronauticsJarPath, localSableJarPath].findAll { !it.isBlank() }
 
 tasks.register('extractLocalModJarJars', Copy) {
@@ -159,6 +162,19 @@ dependencies {
         compileOnly files(localPonderJarPath)
         localRuntime files(localPonderJarPath)
     }
+    [
+            localRefinedStorage2JarPath,
+            localAe2JarPath,
+            localIronChestsJarPath,
+            localStorageDrawersJarPath,
+            localMekanismJarPath,
+            localSophisticatedStorageJarPath,
+            localFunctionalStorageJarPath,
+            localSophisticatedBackpacksJarPath
+    ].findAll { !it.isBlank() }.each { jarPath ->
+        compileOnly files(jarPath)
+        localRuntime files(jarPath)
+    }
     compileOnly fileTree(dir: layout.buildDirectory.dir('local-mod-deps'), include: '*.jar')
 
     // Example optional mod dependency with JEI
@@ -208,6 +224,23 @@ tasks.withType(ProcessResources).configureEach {
     filesMatching(['META-INF/neoforge.mods.toml']) {
         expand replaceProperties
     }
+}
+
+def ideaResourceOutputDir = layout.projectDirectory.dir('resources/main')
+
+tasks.register('syncIdeaResources', Sync) {
+    group = 'ide'
+    description = 'Copies processed resources into the IDE resource output directory for dev runs.'
+    dependsOn tasks.named('processResources')
+    from(tasks.named('processResources'))
+    into(ideaResourceOutputDir)
+}
+
+tasks.register('ideBeforeRun') {
+    group = 'ide'
+    description = 'Prepares local IDE run outputs expected by generated NeoGradle run configurations.'
+    dependsOn tasks.named('classes')
+    dependsOn tasks.named('syncIdeaResources')
 }
 
 // Example configuration to allow publishing using the maven-publish plugin

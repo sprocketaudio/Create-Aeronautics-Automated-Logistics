@@ -14,6 +14,7 @@ import net.createmod.catnip.gui.element.ScreenElement;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
@@ -21,6 +22,7 @@ import net.minecraft.world.level.Level;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.sprocketgames.create_aeronautics_automated_logistics.AutomatedLogisticsConfig;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
+import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.CargoLinkPromptClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.DockLinkPromptClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.LogisticsClientOverlays;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationRegistry;
@@ -40,6 +42,13 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     private static final int SHIP_BOX_Y = 65;
     private static final int SHIP_BOX_WIDTH = 120;
     private static final int SHIP_BOX_HEIGHT = 20;
+    private static final int STATUS_FOOTER_X = 82;
+    private static final int STATUS_FOOTER_Y = 216;
+    private static final int STATUS_FOOTER_WIDTH = 74;
+    private static final int DIVIDER_Y = 143;
+    private static final int STATION_LABEL_Y = 150;
+    private static final int DOCK_ROW_Y = 164;
+    private static final int CARGO_ROW_Y = 178;
     private static final int ROUTES_VISIBLE_ROWS = 3;
     private static final int ROUTES_POPUP_X = 8;
     private static final int ROUTES_POPUP_Y = 42;
@@ -59,6 +68,8 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
             ResourceLocation.fromNamespaceAndPath(CreateAeronauticsAutomatedLogistics.MOD_ID, "textures/gui/airship_station.png");
     private static final ScreenElement SHOW_DOCK_ICON =
             new AtlasIcon(ResourceLocation.fromNamespaceAndPath("create", "textures/gui/icons.png"), 64, 192, 16, 16, 256);
+    private static final ScreenElement SHOW_CARGO_ICON =
+            new AtlasIcon(ResourceLocation.fromNamespaceAndPath("create", "textures/gui/icons.png"), -1, 176, 15, 15, 256, 1.0F, 16);
 
     private final List<ButtonTooltip> buttonTooltips = new ArrayList<>();
     private EditBox nameBox;
@@ -67,8 +78,11 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     private IconButton landingAreaButton;
     private IconButton routesButton;
     private IconButton dockPreviewButton;
+    private IconButton cargoPreviewButton;
     private MiniIconButton dockLinkButton;
     private MiniIconButton dockClearButton;
+    private MiniIconButton cargoLinkButton;
+    private MiniIconButton cargoClearButton;
     private boolean shipDropdownOpen;
     private boolean routesOpen;
     private int routeScroll;
@@ -82,6 +96,10 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     private int dockValueY;
     private int dockValueWidth;
     private int dockValueHeight;
+    private int cargoValueX;
+    private int cargoValueY;
+    private int cargoValueWidth;
+    private int cargoValueHeight;
     private List<Component> statusTooltipLines = List.of();
 
     public AirshipStationScreen(AirshipStationMenu menu, Inventory playerInventory, Component title) {
@@ -126,8 +144,8 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
                 Component.translatable("tooltip.create_aeronautics_automated_logistics.schedule_stop.warning_2")
         );
         routesButton = addIconButton(
-                controlsStartX,
-                controlsY + 31,
+                controlsStartX + 26,
+                controlsY + 27,
                 AllIcons.I_VIEW_SCHEDULE,
                 () -> {
                     routesOpen = !routesOpen;
@@ -145,11 +163,18 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
                 landingAreaTooltip()
         );
         dockPreviewButton = addIconButton(
-                x + 41,
+                x + 36,
                 bottomButtonsY,
                 SHOW_DOCK_ICON,
                 this::toggleDockPreview,
                 dockPreviewTooltip()
+        );
+        cargoPreviewButton = addIconButton(
+                x + 56,
+                bottomButtonsY,
+                SHOW_CARGO_ICON,
+                this::toggleCargoPreview,
+                cargoPreviewTooltip()
         );
         addIconButton(
                 x + PANEL_WIDTH - 33,
@@ -158,7 +183,7 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
                 this::onClose,
                 Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.close.tooltip")
         );
-        int dockButtonsY = y + 182;
+        int dockButtonsY = y + DOCK_ROW_Y + 1;
         dockLinkButton = addMiniIconButton(
                 x + 127,
                 dockButtonsY,
@@ -172,6 +197,20 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
                 AllIcons.I_MTD_CLOSE,
                 () -> pressAction(AirshipStationMenu.ACTION_CLEAR_DOCK_LINK),
                 Component.translatable("gui.create_aeronautics_automated_logistics.dock.clear")
+        );
+        cargoLinkButton = addMiniIconButton(
+                x + 127,
+                dockButtonsY + 14,
+                AllIcons.I_ADD,
+                () -> pressAction(AirshipStationMenu.ACTION_LINK_CARGO),
+                Component.translatable("gui.create_aeronautics_automated_logistics.cargo.link")
+        );
+        cargoClearButton = addMiniIconButton(
+                x + 141,
+                dockButtonsY + 14,
+                AllIcons.I_MTD_CLOSE,
+                () -> pressAction(AirshipStationMenu.ACTION_CLEAR_CARGO),
+                Component.translatable("gui.create_aeronautics_automated_logistics.cargo.clear")
         );
 
         if (this.minecraft != null && this.minecraft.player != null) {
@@ -228,6 +267,19 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
             boolean pendingDockLink = DockLinkPromptClientState.isPendingForStation(this.menu.stationPos());
             dockClearButton.active = pendingDockLink || menu.dockPreviewPos(this.minecraft.player).isPresent();
             dockClearButton.green = pendingDockLink;
+        }
+        if (cargoPreviewButton != null && this.minecraft != null && this.minecraft.player != null) {
+            List<List<BlockPos>> cargoPreview = menu.cargoPreviewPositionGroups(this.minecraft.player);
+            if (cargoPreview.isEmpty()) {
+                LogisticsClientOverlays.clearCargo();
+            }
+            cargoPreviewButton.active = !cargoPreview.isEmpty();
+            cargoPreviewButton.green = LogisticsClientOverlays.isCargoVisibleGroups(cargoPreview);
+        }
+        if (cargoClearButton != null && this.minecraft != null && this.minecraft.player != null) {
+            boolean pendingCargoLink = CargoLinkPromptClientState.isPendingForStation(this.menu.stationPos());
+            cargoClearButton.active = pendingCargoLink || menu.hasLinkedCargo(this.minecraft.player);
+            cargoClearButton.green = pendingCargoLink;
         }
         previewedRouteId = LogisticsClientOverlays.previewedRouteId().orElse(null);
         if (this.minecraft != null && this.minecraft.player != null) {
@@ -368,25 +420,21 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         statusValueWidth = 0;
         statusValueHeight = 0;
         int x = this.leftPos + SHIP_BOX_X;
-        int dividerY = this.topPos + 176;
+        int dividerY = this.topPos + DIVIDER_Y;
         guiGraphics.hLine(this.leftPos + INNER_X + 11, this.leftPos + INNER_X + INNER_WIDTH - 21, dividerY, 0xFF515151);
 
         Component status = menu.panelStatusText(this.minecraft.player);
-        String statusText = status.getString();
         int runY = this.topPos + SHIP_BOX_Y + SHIP_BOX_HEIGHT + 17;
         guiGraphics.drawString(this.font, "Run:", x, runY, 0xFFB9C4D0, false);
 
-        int routesY = runY + 31;
+        int routesY = runY + 27;
         guiGraphics.drawString(this.font, "Routes:", x, routesY, 0xFFB9C4D0, false);
 
-        int statusY = runY + 61;
-        guiGraphics.drawString(this.font, "Status:", x, statusY, 0xFFB9C4D0, false);
-        int statusValueAreaLeft = x + this.font.width("Status: ") + 10;
-        int statusValueAreaRight = this.leftPos + INNER_X + INNER_WIDTH - 29;
-        int statusValueAreaWidth = Math.max(1, statusValueAreaRight - statusValueAreaLeft);
+        int statusY = this.topPos + STATUS_FOOTER_Y;
+        int statusValueAreaLeft = this.leftPos + STATUS_FOOTER_X;
+        int statusValueAreaWidth = STATUS_FOOTER_WIDTH;
         String statusValue = shortText(status, statusValueAreaWidth);
         int statusValueDrawX = statusValueAreaLeft + Math.max(0, (statusValueAreaWidth - this.font.width(statusValue)) / 2);
-        statusValueDrawX = Math.max(statusValueAreaLeft, statusValueDrawX);
         guiGraphics.drawString(
                 this.font,
                 statusValue,
@@ -395,23 +443,37 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
                 menu.panelStatusColor(this.minecraft.player),
                 false
         );
-        statusValueX = statusValueDrawX;
+        statusValueX = statusValueAreaLeft;
         statusValueY = statusY;
-        statusValueWidth = this.font.width(statusValue);
+        statusValueWidth = statusValueAreaWidth;
         statusValueHeight = this.font.lineHeight;
 
-        int dockRowY = this.topPos + 181;
+        int stationLabelY = this.topPos + STATION_LABEL_Y;
+        guiGraphics.drawString(this.font, "Station:", x, stationLabelY, 0xFFB9C4D0, false);
+
+        int dockRowY = this.topPos + DOCK_ROW_Y;
         guiGraphics.drawString(this.font, "Dock:", x, dockRowY + 3, 0xFFB9C4D0, false);
-        int dockValueAreaLeft = x + this.font.width("Dock: ") + 2;
+        int linkValueAreaLeft = x + Math.max(this.font.width("Dock: "), this.font.width("Cargo: ")) + 2;
         int dockButtonsLeft = this.leftPos + INNER_X + INNER_WIDTH - 65;
-        int dockValueAreaWidth = Math.max(1, (dockButtonsLeft - 4) - dockValueAreaLeft);
-        String dockValue = shortText(menu.dockCompactText(this.minecraft.player), dockValueAreaWidth);
-        int dockValueDrawX = dockValueAreaLeft + Math.max(0, (dockValueAreaWidth - this.font.width(dockValue)) / 2);
-        dockValueX = Math.max(dockValueAreaLeft, dockValueDrawX);
+        int linkValueAreaWidth = Math.max(1, (dockButtonsLeft - 4) - linkValueAreaLeft);
+        String dockValue = shortText(menu.dockCompactText(this.minecraft.player), linkValueAreaWidth);
+        int dockValueDrawX = linkValueAreaLeft + Math.max(0, (linkValueAreaWidth - this.font.width(dockValue)) / 2);
+        dockValueX = Math.max(linkValueAreaLeft, dockValueDrawX);
         dockValueY = dockRowY + 3;
         dockValueWidth = this.font.width(dockValue);
         dockValueHeight = this.font.lineHeight;
         guiGraphics.drawString(this.font, dockValue, dockValueX, dockValueY, menu.dockStatusColor(this.minecraft.player), false);
+
+        int cargoRowY = this.topPos + CARGO_ROW_Y;
+        guiGraphics.drawString(this.font, "Cargo:", x, cargoRowY + 3, 0xFFB9C4D0, false);
+        int cargoButtonsLeft = this.leftPos + INNER_X + INNER_WIDTH - 65;
+        String cargoValue = shortText(menu.cargoCompactText(this.minecraft.player), linkValueAreaWidth);
+        int cargoValueDrawX = linkValueAreaLeft + Math.max(0, (linkValueAreaWidth - this.font.width(cargoValue)) / 2);
+        cargoValueX = Math.max(linkValueAreaLeft, cargoValueDrawX);
+        cargoValueY = cargoRowY + 3;
+        cargoValueWidth = this.font.width(cargoValue);
+        cargoValueHeight = this.font.lineHeight;
+        guiGraphics.drawString(this.font, cargoValue, cargoValueX, cargoValueY, menu.cargoStatusColor(this.minecraft.player), false);
 
         statusTooltipLines = menu.statusTooltipLines(this.minecraft.player);
     }
@@ -539,6 +601,11 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
             guiGraphics.renderTooltip(this.font, menu.dockTooltip(this.minecraft.player), java.util.Optional.empty(), mouseX, mouseY);
             return;
         }
+        if (this.minecraft != null && this.minecraft.player != null
+                && isInside(mouseX, mouseY, cargoValueX, cargoValueY, Math.max(1, cargoValueWidth), Math.max(1, cargoValueHeight))) {
+            guiGraphics.renderTooltip(this.font, menu.cargoTooltip(this.minecraft.player), java.util.Optional.empty(), mouseX, mouseY);
+            return;
+        }
         if (landingAreaButton != null && landingAreaButton.isHovered()) {
             guiGraphics.renderTooltip(this.font, List.of(landingAreaTooltip()), java.util.Optional.empty(), mouseX, mouseY);
             return;
@@ -547,8 +614,22 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
             guiGraphics.renderTooltip(this.font, List.of(dockPreviewTooltip()), java.util.Optional.empty(), mouseX, mouseY);
             return;
         }
+        if (cargoPreviewButton != null && cargoPreviewButton.isHovered()) {
+            guiGraphics.renderTooltip(this.font, List.of(cargoPreviewTooltip()), java.util.Optional.empty(), mouseX, mouseY);
+            return;
+        }
         if (dockClearButton != null && dockClearButton.isHovered()) {
             guiGraphics.renderTooltip(this.font, List.of(dockClearTooltip()), java.util.Optional.empty(), mouseX, mouseY);
+            return;
+        }
+        if (cargoClearButton != null && cargoClearButton.isHovered()) {
+            guiGraphics.renderTooltip(
+                    this.font,
+                    List.of(cargoClearTooltip()),
+                    java.util.Optional.empty(),
+                    mouseX,
+                    mouseY
+            );
             return;
         }
         for (ButtonTooltip tooltip : buttonTooltips) {
@@ -778,6 +859,18 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         );
     }
 
+    private void toggleCargoPreview() {
+        if (this.minecraft == null || this.minecraft.player == null) {
+            return;
+        }
+        List<List<BlockPos>> cargoPreview = this.menu.cargoPreviewPositionGroups(this.minecraft.player);
+        if (cargoPreview.isEmpty()) {
+            LogisticsClientOverlays.clearCargo();
+            return;
+        }
+        LogisticsClientOverlays.toggleCargoGroups(cargoPreview);
+    }
+
     private Component landingAreaTooltip() {
         return Component.translatable(
                 LogisticsClientOverlays.isLandingAreaVisible(this.menu.stationPos())
@@ -805,6 +898,25 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         );
     }
 
+    private Component cargoPreviewTooltip() {
+        boolean visible = this.minecraft != null
+                && this.minecraft.player != null
+                && LogisticsClientOverlays.isCargoVisibleGroups(this.menu.cargoPreviewPositionGroups(this.minecraft.player));
+        return Component.translatable(
+                visible
+                        ? "gui.create_aeronautics_automated_logistics.cargo.hide"
+                        : "gui.create_aeronautics_automated_logistics.cargo.show"
+        );
+    }
+
+    private Component cargoClearTooltip() {
+        return Component.translatable(
+                CargoLinkPromptClientState.isPendingForStation(this.menu.stationPos())
+                        ? "gui.create_aeronautics_automated_logistics.cargo.cancel"
+                        : "gui.create_aeronautics_automated_logistics.cargo.clear"
+        );
+    }
+
     private String stationName() {
         return this.minecraft != null && this.minecraft.player != null
                 ? menu.stationName(this.minecraft.player)
@@ -822,7 +934,7 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     }
 
     private int statusColor(String status) {
-        if (status.equalsIgnoreCase("Needs Attention") || status.equalsIgnoreCase("Blocked") || status.equalsIgnoreCase("Route Problem")
+        if (status.equalsIgnoreCase("Cargo Check") || status.equalsIgnoreCase("Blocked") || status.equalsIgnoreCase("Route Problem")
                 || status.equalsIgnoreCase("No Route") || status.equalsIgnoreCase("Ship Missing")) {
             return 0xFFFFB4B4;
         }

@@ -19,6 +19,10 @@ public final class ShipTransponderRegistry {
         SHIPS.put(snapshot.transponderId(), snapshot);
     }
 
+    public static void unregister(UUID transponderId) {
+        SHIPS.remove(transponderId);
+    }
+
     public static Optional<ShipTransponderSnapshot> snapshot(UUID transponderId) {
         return Optional.ofNullable(SHIPS.get(transponderId));
     }

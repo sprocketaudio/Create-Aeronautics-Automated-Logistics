@@ -30,6 +30,7 @@ public class AutomatedLogisticsConfig {
 
     public static final ModConfigSpec.IntValue MAX_ACTIVE_VEHICLES_PER_PLAYER;
     public static final ModConfigSpec.BooleanValue RESTRICT_TRANSPONDER_CONTROL_TO_OWNER;
+    public static final ModConfigSpec.BooleanValue REQUIRE_CROUCH_TO_BREAK_ROUTE_BLOCKS;
     public static final ModConfigSpec.BooleanValue DEBUG_LOGGING;
 
     static final ModConfigSpec SPEC;
@@ -92,7 +93,7 @@ public class AutomatedLogisticsConfig {
                 .defineInRange("shipDockSearchRadius", 24, 1, 128);
         DOCK_LOCK_TIMEOUT_TICKS = BUILDER
                 .comment("Maximum ticks to wait for station and ship Docking Connectors to lock after a docking stop starts.")
-                .defineInRange("dockLockTimeoutTicks", 20 * 30, 20, 20 * 60 * 10);
+                .defineInRange("dockLockTimeoutTicks", 20 * 10, 20, 20 * 60 * 10);
         DOCK_IDLE_TIMEOUT_TICKS = BUILDER
                 .comment("Maximum ticks to wait for dock transfer activity to become idle before continuing.")
                 .defineInRange("dockIdleTimeoutTicks", 20 * 120, 20, 20 * 60 * 30);
@@ -108,6 +109,9 @@ public class AutomatedLogisticsConfig {
         RESTRICT_TRANSPONDER_CONTROL_TO_OWNER = BUILDER
                 .comment("Restrict Ship Transponder and Airship Station control actions to the owner and server operators.")
                 .define("restrictTransponderControlToOwner", true);
+        REQUIRE_CROUCH_TO_BREAK_ROUTE_BLOCKS = BUILDER
+                .comment("Require players to crouch while mining Airship Stations and Ship Transponders, because breaking them removes related routes.")
+                .define("requireCrouchToBreakRouteBlocks", true);
         BUILDER.pop();
 
         BUILDER.push("debug");
@@ -121,6 +125,10 @@ public class AutomatedLogisticsConfig {
 
     public static boolean debugLogging() {
         return DEBUG_LOGGING.get();
+    }
+
+    public static boolean requireCrouchToBreakRouteBlocks() {
+        return REQUIRE_CROUCH_TO_BREAK_ROUTE_BLOCKS.get();
     }
 
 }

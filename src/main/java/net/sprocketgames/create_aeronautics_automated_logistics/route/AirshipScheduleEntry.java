@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 public record AirshipScheduleEntry(
         AirshipScheduleEntryType type,
@@ -22,7 +23,8 @@ public record AirshipScheduleEntry(
         Objects.requireNonNull(waitCondition, "waitCondition");
         Objects.requireNonNull(waitUnit, "waitUnit");
         pinnedSegmentId = Objects.requireNonNull(pinnedSegmentId, "pinnedSegmentId");
-        conditionGroups = copyConditionGroups(conditionGroups);
+        conditionGroups = normalizeConditionGroups(waitCondition, conditionGroups);
+        waitCondition = primaryWaitCondition(waitCondition, conditionGroups);
     }
 
     public static AirshipScheduleEntry blankTravel() {
@@ -64,6 +66,22 @@ public record AirshipScheduleEntry(
         return new AirshipScheduleEntry(type, targetStationId, targetStationName, waitCondition, waitUnit, pinnedSegmentId, conditionGroups);
     }
 
+    public List<List<AirshipScheduleCondition>> effectiveConditionGroups() {
+        return conditionGroups;
+    }
+
+    public WaitCondition primaryEffectiveWaitCondition() {
+        return waitCondition;
+    }
+
+    public boolean hasEffectiveWaitCondition(Predicate<WaitCondition> predicate) {
+        Objects.requireNonNull(predicate, "predicate");
+        return conditionGroups.stream()
+                .flatMap(List::stream)
+                .map(AirshipScheduleCondition::waitCondition)
+                .anyMatch(predicate);
+    }
+
     public AirshipScheduleEntry withAddedCondition() {
         List<List<AirshipScheduleCondition>> groups = mutableConditionGroups();
         if (groups.isEmpty()) {
@@ -101,12 +119,37 @@ public record AirshipScheduleEntry(
         return groups;
     }
 
-    private static List<List<AirshipScheduleCondition>> copyConditionGroups(List<List<AirshipScheduleCondition>> conditionGroups) {
+    private static List<List<AirshipScheduleCondition>> normalizeConditionGroups(
+            WaitCondition waitCondition,
+            List<List<AirshipScheduleCondition>> conditionGroups
+    ) {
         Objects.requireNonNull(conditionGroups, "conditionGroups");
-        List<List<AirshipScheduleCondition>> copied = new ArrayList<>();
+        List<List<AirshipScheduleCondition>> normalized = new ArrayList<>();
         for (List<AirshipScheduleCondition> group : conditionGroups) {
-            copied.add(List.copyOf(Objects.requireNonNull(group, "group")));
+            List<AirshipScheduleCondition> normalizedGroup = new ArrayList<>();
+            for (AirshipScheduleCondition condition : Objects.requireNonNull(group, "group")) {
+                if (condition.waitCondition().waits()) {
+                    normalizedGroup.add(condition);
+                }
+            }
+            if (!normalizedGroup.isEmpty()) {
+                normalized.add(List.copyOf(normalizedGroup));
+            }
         }
-        return List.copyOf(copied);
+        if (normalized.isEmpty() && waitCondition.waits()) {
+            normalized.add(List.of(AirshipScheduleCondition.fromWaitCondition(waitCondition)));
+        }
+        return List.copyOf(normalized);
+    }
+
+    private static WaitCondition primaryWaitCondition(
+            WaitCondition fallback,
+            List<List<AirshipScheduleCondition>> conditionGroups
+    ) {
+        return conditionGroups.stream()
+                .flatMap(List::stream)
+                .map(AirshipScheduleCondition::waitCondition)
+                .findFirst()
+                .orElse(fallback);
     }
 }

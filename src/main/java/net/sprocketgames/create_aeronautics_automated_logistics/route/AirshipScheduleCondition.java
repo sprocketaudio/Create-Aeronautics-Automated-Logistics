@@ -21,8 +21,14 @@ public record AirshipScheduleCondition(
 
     public static AirshipScheduleCondition fromWaitCondition(WaitCondition waitCondition) {
         return switch (waitCondition.type()) {
-            case UNTIL_ITEM_THRESHOLD -> new AirshipScheduleCondition(AirshipScheduleConditionType.ITEM_CARGO_CONDITION, waitCondition);
-            case UNTIL_FLUID_THRESHOLD -> new AirshipScheduleCondition(AirshipScheduleConditionType.FLUID_CARGO_CONDITION, waitCondition);
+            case UNTIL_ITEM_THRESHOLD, UNTIL_ITEM_EMPTY, UNTIL_ITEM_FULL, UNTIL_EMPTY, UNTIL_FULL ->
+                    new AirshipScheduleCondition(AirshipScheduleConditionType.ITEM_CARGO_CONDITION, waitCondition);
+            case UNTIL_FLUID_THRESHOLD, UNTIL_FLUID_EMPTY, UNTIL_FLUID_FULL ->
+                    new AirshipScheduleCondition(AirshipScheduleConditionType.FLUID_CARGO_CONDITION, waitCondition);
+            case REDSTONE_LINK ->
+                    new AirshipScheduleCondition(AirshipScheduleConditionType.REDSTONE_LINK, waitCondition);
+            case TIME_OF_DAY ->
+                    new AirshipScheduleCondition(AirshipScheduleConditionType.TIME_OF_DAY, waitCondition);
             default -> scheduledDelay(waitCondition);
         };
     }

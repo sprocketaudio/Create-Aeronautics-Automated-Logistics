@@ -13,8 +13,8 @@ public final class RecordingServerEvents {
     public static void onServerTick(ServerTickEvent.Post event) {
         AutomatedLogisticsServices.ensureRuntimeLoaded(event.getServer());
         AutomatedLogisticsServices.RECORDING.tickAll(event.getServer());
-        AutomatedLogisticsServices.PLAYBACK.tickAll(event.getServer());
         AutomatedLogisticsServices.SCHEDULES.tickAll(event.getServer());
+        AutomatedLogisticsServices.PLAYBACK.tickAll(event.getServer());
         if (event.getServer().getTickCount() % 20 == 0) {
             AutomationRuntimeSavedData.capture(event.getServer());
         }

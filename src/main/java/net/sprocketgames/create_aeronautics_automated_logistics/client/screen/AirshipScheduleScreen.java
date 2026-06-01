@@ -1,9 +1,12 @@
 package net.sprocketgames.create_aeronautics_automated_logistics.client.screen;
 
 import com.mojang.math.Axis;
+import com.simibubi.create.foundation.gui.AllIcons;
+import com.simibubi.create.foundation.gui.AllGuiTextures;
 import com.simibubi.create.foundation.gui.ModularGuiLine;
 import com.simibubi.create.foundation.gui.ModularGuiLineBuilder;
 import com.simibubi.create.foundation.gui.widget.Label;
+import com.simibubi.create.foundation.gui.widget.IconButton;
 import com.simibubi.create.foundation.gui.widget.ScreenOverlay;
 import com.simibubi.create.foundation.gui.widget.ScrollInput;
 import com.simibubi.create.foundation.gui.widget.SelectionScrollInput;
@@ -23,12 +26,15 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import org.apache.commons.lang3.mutable.MutableObject;
 import net.createmod.catnip.data.IntAttached;
+import net.createmod.catnip.gui.UIRenderHelper;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
@@ -38,6 +44,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.network.PacketDistributor;
+import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity;
+import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationSnapshot;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderRegistry;
@@ -50,6 +58,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSch
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleCondition;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleEntry;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.CargoWaitTarget;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentId;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry;
@@ -75,6 +84,8 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             ResourceLocation.fromNamespaceAndPath("create", "textures/gui/display_link.png");
     private static final ResourceLocation ROUTE_SELECTOR =
             ResourceLocation.fromNamespaceAndPath("create_aeronautics_automated_logistics", "textures/gui/route_selector.png");
+    private static final ResourceLocation CARGO_STABILITY_PANEL =
+            ResourceLocation.fromNamespaceAndPath("create_aeronautics_automated_logistics", "textures/gui/cargo_stability_panel.png");
     private static final int CARD_HEADER = 22;
     private static final int CARD_WIDTH = 195;
     private static final int LEGACY_SCHEDULE_HEIGHT = 226;
@@ -107,6 +118,26 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     private static final int ROUTE_SELECTOR_CONFIRM_SIZE = 18;
     private static final int ROUTE_SELECTOR_CONFIRM_MARGIN = 3;
     private static final int ROUTE_SELECTOR_CONFIRM_X_OFFSET = -10;
+    private static final int REDSTONE_SLOT_X = 77;
+    private static final int REDSTONE_SLOT_Y = 88;
+    private static final int REDSTONE_SLOT_SPACING = 18;
+    private static final int REDSTONE_SLOT_SIZE = 16;
+    private static final int CARGO_STABLE_BUTTON_X = 202;
+    private static final int CARGO_STABLE_BUTTON_Y = 96;
+    private static final int CARGO_STABLE_BUTTON_SIZE = 9;
+    private static final int CARGO_STABLE_PANEL_WIDTH = 128;
+    private static final int CARGO_STABLE_PANEL_HEIGHT = 92;
+    private static final int CARGO_STABLE_PANEL_FIELD_X = 29;
+    private static final int CARGO_STABLE_PANEL_FIELD_Y = 30;
+    private static final int CARGO_STABLE_PANEL_FIELD_WIDTH = 62;
+    private static final int CARGO_STABLE_PANEL_CONFIRM_X = 95;
+    private static final int CARGO_STABLE_PANEL_CONFIRM_Y = 68;
+    private static final int CARGO_STABLE_PANEL_CONFIRM_WIDTH = 18;
+    private static final int CARGO_STABLE_PANEL_CONFIRM_HEIGHT = 18;
+    private static final int READ_ONLY_FOOTER_X = 120;
+    private static final int READ_ONLY_FOOTER_Y = 201;
+    private static final int READ_ONLY_FOOTER_WIDTH = 86;
+    private static final int READ_ONLY_FOOTER_HEIGHT = 12;
     private static final DateTimeFormatter ROUTE_TIME_FORMAT =
             DateTimeFormatter.ofPattern("dd MMM HH:mm").withZone(ZoneId.systemDefault());
     private EditBox titleBox;
@@ -115,6 +146,8 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     private EditBox editorStationBox;
     private ScrollInput editorDurationInput;
     private SelectionScrollInput editorUnitInput;
+    private ScrollInput cargoStablePopupInput;
+    private IconButton cargoStablePopupConfirmButton;
     private StationSuggestions stationSuggestions;
     private ShipSuggestions assignedShipSuggestions;
     private final EditorSubWidgets editorSubWidgets = new EditorSubWidgets();
@@ -130,6 +163,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     private int routeChoiceSelected;
     private int routeChoiceScroll;
     private boolean noRoutePopupOpen;
+    private boolean cargoStablePopupOpen;
     private final List<Component> noRoutePopupLines = new ArrayList<>();
     private Integer pendingDeleteStopIndex;
     private boolean leftMouseDown;
@@ -257,15 +291,20 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         this.showPlayerInventorySlots = this.editorMode != EditorMode.NONE && !usesRouteEditorBacking();
         renderBackground(guiGraphics, mouseX, mouseY, partialTick);
-        super.render(guiGraphics, mouseX, mouseY, partialTick);
-        if (!usesRouteEditorBacking() && this.stationSuggestions != null) {
+        int renderMouseX = this.cargoStablePopupOpen ? Integer.MIN_VALUE / 4 : mouseX;
+        int renderMouseY = this.cargoStablePopupOpen ? Integer.MIN_VALUE / 4 : mouseY;
+        super.render(guiGraphics, renderMouseX, renderMouseY, partialTick);
+        if (this.cargoStablePopupOpen) {
+            renderCargoStablePopup(guiGraphics, mouseX, mouseY, partialTick);
+        }
+        if (!this.cargoStablePopupOpen && !usesRouteEditorBacking() && this.stationSuggestions != null) {
             var pose = guiGraphics.pose();
             pose.pushPose();
             pose.translate(0, 0, 500);
             this.stationSuggestions.render(guiGraphics, mouseX, mouseY);
             pose.popPose();
         }
-        if (!usesRouteEditorBacking() && !isAssignedShipLocked() && this.assignedShipSuggestions != null) {
+        if (!this.cargoStablePopupOpen && !usesRouteEditorBacking() && !isAssignedShipLocked() && this.assignedShipSuggestions != null) {
             var pose = guiGraphics.pose();
             pose.pushPose();
             pose.translate(0, 0, 500);
@@ -568,6 +607,9 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
 
     private void renderFooterButtons(GuiGraphics guiGraphics, int mouseX, int mouseY) {
         AirshipSchedule schedule = currentSchedule();
+        boolean editable = !isScheduleReadOnly();
+        boolean loopHovered = editable && isHoveringButton(mouseX, mouseY, this.leftPos + 21, this.topPos + 196);
+        boolean loopPressed = !editable || isPressedButton(mouseX, mouseY, this.leftPos + 21, this.topPos + 196);
         renderIconButton(
                 guiGraphics,
                 this.leftPos + 21,
@@ -575,8 +617,8 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                 48,
                 16,
                 schedule.loop(),
-                isHoveringButton(mouseX, mouseY, this.leftPos + 21, this.topPos + 196),
-                isPressedButton(mouseX, mouseY, this.leftPos + 21, this.topPos + 196),
+                loopHovered,
+                loopPressed,
                 true
         );
         renderIconButton(
@@ -590,6 +632,21 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                 isPressedButton(mouseX, mouseY, this.leftPos + this.imageWidth - 42, this.topPos + LEGACY_SCHEDULE_HEIGHT - 30),
                 true
         );
+        if (!editable) {
+            String text = Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.read_only").getString();
+            String clipped = this.font.plainSubstrByWidth(text, READ_ONLY_FOOTER_WIDTH);
+            int boxX = this.leftPos + READ_ONLY_FOOTER_X + 7;
+            int boxY = this.topPos + READ_ONLY_FOOTER_Y - 5;
+            int boxW = READ_ONLY_FOOTER_WIDTH - 14;
+            int boxH = READ_ONLY_FOOTER_HEIGHT + 6;
+            guiGraphics.fill(boxX, boxY, boxX + boxW, boxY + boxH, 0xFF575757);
+            guiGraphics.fill(boxX, boxY, boxX + boxW, boxY + 1, 0xFF393939);
+            guiGraphics.fill(boxX, boxY + boxH - 1, boxX + boxW, boxY + boxH, 0xFF393939);
+            guiGraphics.fill(boxX, boxY, boxX + 1, boxY + boxH, 0xFF393939);
+            guiGraphics.fill(boxX + boxW - 1, boxY, boxX + boxW, boxY + boxH, 0xFF393939);
+            int textX = this.leftPos + READ_ONLY_FOOTER_X + Math.max(0, (READ_ONLY_FOOTER_WIDTH - this.font.width(clipped)) / 2);
+            guiGraphics.drawString(this.font, clipped, textX, this.topPos + READ_ONLY_FOOTER_Y, 0xFFE7C46E, false);
+        }
     }
 
     private void renderIconButton(GuiGraphics guiGraphics, int x, int y, int iconU, int iconV, boolean green, boolean hovered, boolean pressed, boolean active) {
@@ -613,6 +670,76 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         }
         guiGraphics.blit(CREATE_WIDGETS, x, y, 0, u, v, 18, 18, 256, 256);
         guiGraphics.blit(CREATE_ICONS, x + 1, y + 1, 0, iconU, iconV, 16, 16, 256, 256);
+    }
+
+    private void renderScaledItemButton(GuiGraphics guiGraphics, int x, int y, int size, ItemStack icon, boolean green, boolean hovered, boolean pressed, boolean active) {
+        int u;
+        int v;
+        if (!active) {
+            u = 90;
+            v = 0;
+        } else if (hovered && pressed) {
+            u = 36;
+            v = 0;
+        } else if (hovered) {
+            u = 18;
+            v = 0;
+        } else if (green) {
+            u = 72;
+            v = 0;
+        } else {
+            u = 0;
+            v = 0;
+        }
+        float scale = size / 18f;
+        var pose = guiGraphics.pose();
+        pose.pushPose();
+        pose.scale(scale, scale, 1f);
+        guiGraphics.blit(CREATE_WIDGETS, Math.round(x / scale), Math.round(y / scale), 0, u, v, 18, 18, 256, 256);
+        guiGraphics.renderItem(icon, Math.round(x / scale) + 1, Math.round(y / scale) + 1);
+        pose.popPose();
+    }
+
+    private void renderCargoStablePopup(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+        int x = cargoStablePopupX();
+        int y = cargoStablePopupY();
+        var pose = guiGraphics.pose();
+        pose.pushPose();
+        pose.translate(0, 0, 540);
+        blit(guiGraphics, CARGO_STABILITY_PANEL, x, y, 0, 0, CARGO_STABLE_PANEL_WIDTH, CARGO_STABLE_PANEL_HEIGHT);
+        Component title = Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.cargo_stable_for");
+        guiGraphics.drawString(this.font, title, x + (CARGO_STABLE_PANEL_WIDTH - this.font.width(title)) / 2, y + 4, DARK_TEXT_COLOR, false);
+
+        int seconds = this.cargoStablePopupInput == null
+                ? Mth.clamp(this.editorData.getInt("Stable"), 0, 99)
+                : this.cargoStablePopupInput.getState();
+        Component value = cargoStableSecondsLabel(seconds);
+        renderDataAreaBox(guiGraphics, x + CARGO_STABLE_PANEL_FIELD_X, y + CARGO_STABLE_PANEL_FIELD_Y, CARGO_STABLE_PANEL_FIELD_WIDTH);
+        guiGraphics.drawString(
+                this.font,
+                value,
+                x + CARGO_STABLE_PANEL_FIELD_X + (CARGO_STABLE_PANEL_FIELD_WIDTH - this.font.width(value)) / 2,
+                y + CARGO_STABLE_PANEL_FIELD_Y + 5,
+                TEXT_COLOR,
+                false
+        );
+        if (this.cargoStablePopupInput != null) {
+            this.cargoStablePopupInput.render(guiGraphics, mouseX, mouseY, partialTick);
+        }
+        if (this.cargoStablePopupConfirmButton != null) {
+            this.cargoStablePopupConfirmButton.render(guiGraphics, mouseX, mouseY, partialTick);
+        }
+        pose.popPose();
+    }
+
+    private void renderDataAreaBox(GuiGraphics guiGraphics, int x, int y, int width) {
+        var pose = guiGraphics.pose();
+        pose.pushPose();
+        pose.translate(0, y, 0);
+        UIRenderHelper.drawStretched(guiGraphics, x, 0, width, 18, 0, AllGuiTextures.DATA_AREA);
+        AllGuiTextures.DATA_AREA_START.render(guiGraphics, x, 0);
+        AllGuiTextures.DATA_AREA_END.render(guiGraphics, x + width - 2, 0);
+        pose.popPose();
     }
 
     private boolean isHoveringButton(int mouseX, int mouseY, int x, int y) {
@@ -675,6 +802,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         pose.pushPose();
         pose.translate(0, 0, 200);
         guiGraphics.fillGradient(0, 0, this.width, this.height, -1072689136, -804253680);
+        boolean editable = !isScheduleReadOnly();
         boolean routeEditorBacking = usesRouteEditorBacking();
         int x = this.leftPos - 2;
         int y = this.topPos + 40;
@@ -710,12 +838,12 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                     false,
                     isHoveringButton(mouseX, mouseY, this.leftPos + 11, this.topPos + 87),
                     isPressedButton(mouseX, mouseY, this.leftPos + 11, this.topPos + 87),
-                    true
-            );
+                    editable
+                );
             renderEditorChoiceText(guiGraphics, this.leftPos + 61, this.topPos + 69, 135, Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.travel_to_station"));
             guiGraphics.renderItem(ModItems.AIRSHIP_STATION.get().getDefaultInstance(), this.leftPos + 54, this.topPos + 88);
         } else {
-            if (canRemoveEditedCondition()) {
+            if (editable && canRemoveEditedCondition()) {
                 renderIconButton(
                         guiGraphics,
                         this.leftPos + 11,
@@ -725,13 +853,34 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                         false,
                         isHoveringButton(mouseX, mouseY, this.leftPos + 11, this.topPos + 87),
                         isPressedButton(mouseX, mouseY, this.leftPos + 11, this.topPos + 87),
-                        true
+                        editable
                 );
             }
             AirshipScheduleCondition condition = currentCondition()
                     .orElse(AirshipScheduleCondition.scheduledDelay(WaitCondition.timed(WaitCondition.DEFAULT_TIMED_WAIT_TICKS)));
             renderEditorChoiceText(guiGraphics, this.leftPos + 61, this.topPos + 69, 135, conditionActionText(condition));
-            guiGraphics.renderItem(conditionIcon(condition), this.leftPos + 54, this.topPos + 88);
+            if (isRedstoneLinkWaitType(condition.waitCondition().type())) {
+                guiGraphics.renderItem(conditionIcon(condition), this.leftPos + 54, this.topPos + 88);
+                renderRedstoneFrequencySlot(guiGraphics, this.leftPos + REDSTONE_SLOT_X, this.topPos + REDSTONE_SLOT_Y, condition.waitCondition().redstoneFrequencyFirst());
+                renderRedstoneFrequencySlot(guiGraphics, this.leftPos + REDSTONE_SLOT_X + REDSTONE_SLOT_SPACING, this.topPos + REDSTONE_SLOT_Y, condition.waitCondition().redstoneFrequencySecond());
+            } else if (isTimeOfDayWaitType(condition.waitCondition().type())) {
+                renderTimeOfDayIcon(guiGraphics, this.leftPos + 54, this.topPos + 88, condition.waitCondition());
+            } else {
+                guiGraphics.renderItem(conditionIcon(condition), this.leftPos + 54, this.topPos + 88);
+            }
+            if (editable && isCargoThresholdWaitType(condition.waitCondition().type())) {
+                renderScaledItemButton(
+                        guiGraphics,
+                        this.leftPos + CARGO_STABLE_BUTTON_X,
+                        this.topPos + CARGO_STABLE_BUTTON_Y,
+                        CARGO_STABLE_BUTTON_SIZE,
+                        Items.CLOCK.getDefaultInstance(),
+                        this.editorData.getInt("Stable") > 0,
+                        inside(mouseX, mouseY, this.leftPos + CARGO_STABLE_BUTTON_X, this.topPos + CARGO_STABLE_BUTTON_Y, CARGO_STABLE_BUTTON_SIZE, CARGO_STABLE_BUTTON_SIZE),
+                        this.leftMouseDown && inside(mouseX, mouseY, this.leftPos + CARGO_STABLE_BUTTON_X, this.topPos + CARGO_STABLE_BUTTON_Y, CARGO_STABLE_BUTTON_SIZE, CARGO_STABLE_BUTTON_SIZE),
+                        true
+                );
+            }
         }
 
         if (this.editorMode == EditorMode.STATION || this.editorMode == EditorMode.CONDITION) {
@@ -752,7 +901,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                     false,
                     isHoveringButton(mouseX, mouseY, this.leftPos + 224, this.topPos + 87),
                     isPressedButton(mouseX, mouseY, this.leftPos + 224, this.topPos + 87),
-                    true
+                    editable
             );
         }
         if (usesRouteEditorBacking()) {
@@ -928,13 +1077,35 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         guiGraphics.drawString(this.font, this.font.plainSubstrByWidth(text.getString(), width), x, y, TEXT_COLOR, false);
     }
 
+    private void renderRedstoneFrequencySlot(GuiGraphics guiGraphics, int x, int y, ItemStack stack) {
+        AllGuiTextures.SCHEDULE_EDITOR_ADDITIONAL_SLOT.render(guiGraphics, x - 1, y - 1);
+        if (!stack.isEmpty()) {
+            guiGraphics.renderItem(stack, x, y);
+        }
+    }
+
+    private void renderTimeOfDayIcon(GuiGraphics guiGraphics, int x, int y, WaitCondition waitCondition) {
+        int displayHour = (waitCondition.timeOfDayHour() + 12) % 24;
+        float progress = (displayHour * 60f + waitCondition.timeOfDayMinute()) / (24 * 60);
+        ResourceLocation location = ResourceLocation.withDefaultNamespace(
+                "textures/item/clock_" + twoDigits(Mth.clamp((int) (progress * 64), 0, 63)) + ".png"
+        );
+        guiGraphics.blit(location, x, y, 0, 0, 16, 16, 16, 16);
+    }
+
     private void renderHover(GuiGraphics guiGraphics, int mouseX, int mouseY) {
         if (pendingDeleteStopIndex != null) {
             return;
         }
         List<Component> tooltip = tooltipAt(mouseX, mouseY);
         if (!tooltip.isEmpty()) {
+            var pose = guiGraphics.pose();
+            pose.pushPose();
+            if (this.cargoStablePopupOpen) {
+                pose.translate(0, 0, 640);
+            }
             guiGraphics.renderTooltip(this.font, tooltip.stream().map(Component::getVisualOrderText).toList(), mouseX, mouseY);
+            pose.popPose();
         } else if (this.editorMode != EditorMode.NONE && !this.noRoutePopupOpen) {
             renderTooltip(guiGraphics, mouseX, mouseY);
         }
@@ -961,6 +1132,12 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         if (inside(mx, my, 214, 196, 18, 18)) {
             return List.of(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.confirm"));
         }
+        if (isScheduleReadOnly() && inside(mx, my, READ_ONLY_FOOTER_X, READ_ONLY_FOOTER_Y - 1, READ_ONLY_FOOTER_WIDTH, this.font.lineHeight + 2)) {
+            return List.of(
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.read_only"),
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.read_only.tooltip").withStyle(ChatFormatting.GRAY)
+            );
+        }
         Hit hit = hitAt(mouseX, mouseY);
         return switch (hit.type) {
             case ADD_ENTRY -> List.of(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.add_entry"));
@@ -981,6 +1158,14 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     private List<Component> editorTooltipAt(int mouseX, int mouseY) {
         int mx = mouseX - this.leftPos;
         int my = mouseY - this.topPos;
+        if (this.cargoStablePopupOpen) {
+            int panelX = cargoStablePopupX() - this.leftPos;
+            int panelY = cargoStablePopupY() - this.topPos;
+            if (inside(mx, my, panelX + CARGO_STABLE_PANEL_CONFIRM_X, panelY + CARGO_STABLE_PANEL_CONFIRM_Y, CARGO_STABLE_PANEL_CONFIRM_WIDTH, CARGO_STABLE_PANEL_CONFIRM_HEIGHT)) {
+                return List.of(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.confirm"));
+            }
+            return List.of();
+        }
         if (this.noRoutePopupOpen) {
             return insideRouteSelectorConfirm(mx, my)
                     ? List.of(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.confirm"))
@@ -1027,11 +1212,27 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             if (inside(mx, my, 56, 65, 143, 16)) {
                 return conditionSelectorTooltip();
             }
-            if (inside(mx, my, 53, 87, 18, 18) && currentCondition().map(AirshipScheduleCondition::waitCondition).map(this::isCargoWait).orElse(false)) {
+            if (inside(mx, my, REDSTONE_SLOT_X, REDSTONE_SLOT_Y, REDSTONE_SLOT_SIZE, REDSTONE_SLOT_SIZE)
+                    && currentCondition().map(AirshipScheduleCondition::waitCondition).map(WaitCondition::type).map(this::isRedstoneLinkWaitType).orElse(false)) {
+                return redstoneFrequencyTooltip(0);
+            }
+            if (inside(mx, my, REDSTONE_SLOT_X + REDSTONE_SLOT_SPACING, REDSTONE_SLOT_Y, REDSTONE_SLOT_SIZE, REDSTONE_SLOT_SIZE)
+                    && currentCondition().map(AirshipScheduleCondition::waitCondition).map(WaitCondition::type).map(this::isRedstoneLinkWaitType).orElse(false)) {
+                return redstoneFrequencyTooltip(1);
+            }
+            if (inside(mx, my, 53, 87, 18, 18)
+                    && currentCondition().map(AirshipScheduleCondition::waitCondition).map(WaitCondition::type).map(this::isCargoThresholdWaitType).orElse(false)) {
                 return List.of(
                         Component.translatable("create.schedule.condition.threshold.place_item"),
                         Component.translatable("create.schedule.condition.threshold.place_item_2").withStyle(ChatFormatting.GRAY),
                         Component.translatable("create.schedule.condition.threshold.place_item_3").withStyle(ChatFormatting.GRAY)
+                );
+            }
+            if (inside(mx, my, CARGO_STABLE_BUTTON_X, CARGO_STABLE_BUTTON_Y, CARGO_STABLE_BUTTON_SIZE, CARGO_STABLE_BUTTON_SIZE)
+                    && currentCondition().map(AirshipScheduleCondition::waitCondition).map(WaitCondition::type).map(this::isCargoThresholdWaitType).orElse(false)) {
+                return List.of(
+                        Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.cargo_stable_for"),
+                        cargoStableSecondsLabel(Mth.clamp(this.editorData.getInt("Stable"), 0, 99)).copy().withStyle(ChatFormatting.DARK_AQUA)
                 );
             }
         }
@@ -1054,6 +1255,21 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             tooltip.add(Component.literal((type == current ? "-> " : "> ")).append(option));
         }
         tooltip.add(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.scroll_select").withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC));
+        return tooltip;
+    }
+
+    private List<Component> redstoneFrequencyTooltip(int slot) {
+        WaitCondition wait = currentCondition().map(AirshipScheduleCondition::waitCondition).orElse(WaitCondition.redstoneLink(ItemStack.EMPTY, ItemStack.EMPTY, true));
+        ItemStack stack = slot == 0 ? wait.redstoneFrequencyFirst() : wait.redstoneFrequencySecond();
+        List<Component> tooltip = new ArrayList<>();
+        tooltip.add(Component.translatable(
+                slot == 0
+                        ? "create.logistics.firstFrequency"
+                        : "create.logistics.secondFrequency"
+        ));
+        tooltip.add((stack.isEmpty() ? Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.redstone_link.empty") : stack.getHoverName())
+                .copy().withStyle(ChatFormatting.DARK_AQUA));
+        tooltip.add(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.redstone_link.place_frequency").withStyle(ChatFormatting.GRAY));
         return tooltip;
     }
 
@@ -1103,14 +1319,14 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         tooltip.add(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.continue_if_after"));
         tooltip.add(conditionActionText(condition));
         if (condition.waitCondition().type() == WaitConditionType.UNTIL_DOCKED
-                || condition.waitCondition().type() == WaitConditionType.UNTIL_IDLE
-                || condition.waitCondition().type() == WaitConditionType.UNTIL_ITEM_THRESHOLD
-                || condition.waitCondition().type() == WaitConditionType.UNTIL_FLUID_THRESHOLD) {
+                || condition.waitCondition().type() == WaitConditionType.UNTIL_IDLE) {
             tooltip.add(conditionWaitText(condition).copy()
                     .withStyle(ChatFormatting.DARK_AQUA));
         } else {
             tooltip.add(Component.translatable(
-                    "gui.create_aeronautics_automated_logistics.airship_schedule.for_time",
+                    isCargoWaitType(condition.waitCondition().type())
+                            ? "gui.create_aeronautics_automated_logistics.airship_schedule.detail"
+                            : "gui.create_aeronautics_automated_logistics.airship_schedule.for_time",
                     longConditionTimeText(condition, entry.waitUnit())
             ).withStyle(ChatFormatting.DARK_AQUA));
         }
@@ -1143,6 +1359,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        boolean editable = !isScheduleReadOnly();
         if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             this.leftMouseDown = true;
         }
@@ -1152,9 +1369,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         if (this.noRoutePopupOpen) {
             int mx = (int) mouseX - this.leftPos;
             int my = (int) mouseY - this.topPos;
-            if (insideRouteSelectorConfirm(mx, my)
-                    || button == GLFW.GLFW_MOUSE_BUTTON_LEFT
-                    || button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
+            if (insideRouteSelectorConfirm(mx, my)) {
                 closeNoRoutePopup();
                 return true;
             }
@@ -1187,7 +1402,9 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             return true;
         }
         if (inside(mx, my, 21, 196, 18, 18)) {
-            pressAction(AirshipScheduleMenu.ACTION_TOGGLE_LOOP);
+            if (editable) {
+                pressAction(AirshipScheduleMenu.ACTION_TOGGLE_LOOP);
+            }
             return true;
         }
         if (inside(mx, my, 214, 196, 18, 18)) {
@@ -1208,7 +1425,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
 
         switch (hit.type) {
             case ADD_ENTRY -> {
-                if (isTransponderManagedPlan()) {
+                if (isTransponderManagedPlan() || !editable) {
                     return true;
                 }
                 pressAction(AirshipScheduleMenu.ACTION_ADD_TRAVEL);
@@ -1220,6 +1437,9 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                 }
             }
             case REMOVE -> {
+                if (!editable) {
+                    return true;
+                }
                 if (isTransponderManagedPlan()) {
                     openDeleteStopConfirm(hit.index);
                 } else {
@@ -1227,16 +1447,27 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                 }
             }
             case DUPLICATE -> {
-                if (!isTransponderManagedPlan()) {
+                if (editable && !isTransponderManagedPlan()) {
                     pressAction(AirshipScheduleMenu.ACTION_DUPLICATE);
                 }
             }
-            case MOVE_UP -> pressAction(AirshipScheduleMenu.ACTION_MOVE_UP);
-            case MOVE_DOWN -> pressAction(AirshipScheduleMenu.ACTION_MOVE_DOWN);
+            case MOVE_UP -> {
+                if (editable) {
+                    pressAction(AirshipScheduleMenu.ACTION_MOVE_UP);
+                }
+            }
+            case MOVE_DOWN -> {
+                if (editable) {
+                    pressAction(AirshipScheduleMenu.ACTION_MOVE_DOWN);
+                }
+            }
             case CONDITION_SCROLL_LEFT -> scrollConditionColumns(hit.index, -1);
             case CONDITION_SCROLL_RIGHT -> scrollConditionColumns(hit.index, 1);
             case CONDITION -> {
-                if (button == 1) {
+                if (!editable) {
+                    return true;
+                }
+                if (button == 1 && editable) {
                     removeConditionLocally(hit.index, hit.conditionGroup, hit.conditionIndex);
                     syncSchedule();
                 } else {
@@ -1244,11 +1475,17 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                 }
             }
             case ADD_CONDITION -> {
+                if (!editable) {
+                    return true;
+                }
                 addConditionLocally(hit.index, hit.conditionGroup);
                 syncSchedule();
                 openConditionEditorForLast(hit.index, hit.conditionGroup);
             }
             case ADD_ALTERNATIVE -> {
+                if (!editable) {
+                    return true;
+                }
                 int newGroupIndex = currentSchedule().entries().get(hit.index).conditionGroups().size();
                 addAlternativeConditionLocally(hit.index);
                 syncSchedule();
@@ -1269,12 +1506,26 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     }
 
     private boolean mouseClickedEditor(double mouseX, double mouseY, int button) {
+        boolean editable = !isScheduleReadOnly();
         boolean routeEditorBacking = usesRouteEditorBacking();
         if (this.stationSuggestions != null && this.stationSuggestions.mouseClicked((int) mouseX, (int) mouseY, button)) {
             return true;
         }
         int mx = (int) mouseX - this.leftPos;
         int my = (int) mouseY - this.topPos;
+        if (this.cargoStablePopupOpen) {
+            int panelX = cargoStablePopupX() - this.leftPos;
+            int panelY = cargoStablePopupY() - this.topPos;
+            if (!inside(mx, my, panelX, panelY, CARGO_STABLE_PANEL_WIDTH, CARGO_STABLE_PANEL_HEIGHT))
+                return true;
+            if (this.cargoStablePopupConfirmButton != null && this.cargoStablePopupConfirmButton.mouseClicked(mouseX, mouseY, button)) {
+                return true;
+            }
+            if (this.cargoStablePopupInput != null) {
+                this.cargoStablePopupInput.mouseClicked(mouseX, mouseY, button);
+            }
+            return true;
+        }
         if (this.editorMode == EditorMode.ROUTE) {
             int routeIndex = routeChoiceAt(mx, my);
             if (routeIndex >= 0 && routeIndex < this.routeChoices.size()) {
@@ -1291,7 +1542,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             }
         }
         if (this.editorMode == EditorMode.STATION) {
-            if (inside(mx, my, 11, 87, 18, 18)) {
+            if (editable && inside(mx, my, 11, 87, 18, 18)) {
                 if (isTransponderManagedPlan()) {
                     openDeleteStopConfirm(this.editorEntryIndex);
                 } else {
@@ -1301,7 +1552,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                 }
                 return true;
             }
-            if (this.editorStationBox != null && inside(mx, my, 77, 88, 121, 18)) {
+            if (editable && this.editorStationBox != null && inside(mx, my, 77, 88, 121, 18)) {
                 this.editorStationBox.mouseClicked(mouseX, mouseY, button);
                 this.editorStationBox.setFocused(true);
                 setFocused(this.editorStationBox);
@@ -1311,21 +1562,37 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                 return true;
             }
         }
-        if ((!usesRouteEditorBacking() && inside(mx, my, 224, 87, 18, 18))
-                || (usesRouteEditorBacking() && insideRouteSelectorConfirm(mx, my))) {
+        if (editable && ((!usesRouteEditorBacking() && inside(mx, my, 224, 87, 18, 18))
+                || (usesRouteEditorBacking() && insideRouteSelectorConfirm(mx, my)))) {
             confirmEditor();
             return true;
         }
         if (this.editorMode == EditorMode.CONDITION) {
-            if (inside(mx, my, 56, 65, 143, 16)) {
+            if (editable && inside(mx, my, 56, 65, 143, 16)) {
                 cycleEditedConditionType();
                 return true;
             }
-            if (inside(mx, my, 53, 87, 18, 18) && currentCondition().map(AirshipScheduleCondition::waitCondition).map(this::isCargoWait).orElse(false)) {
+            if (editable && inside(mx, my, REDSTONE_SLOT_X, REDSTONE_SLOT_Y, REDSTONE_SLOT_SIZE, REDSTONE_SLOT_SIZE)
+                    && currentCondition().map(AirshipScheduleCondition::waitCondition).map(WaitCondition::type).map(this::isRedstoneLinkWaitType).orElse(false)) {
+                setEditedRedstoneFrequency(0, this.menu.getCarried());
+                return true;
+            }
+            if (editable && inside(mx, my, REDSTONE_SLOT_X + REDSTONE_SLOT_SPACING, REDSTONE_SLOT_Y, REDSTONE_SLOT_SIZE, REDSTONE_SLOT_SIZE)
+                    && currentCondition().map(AirshipScheduleCondition::waitCondition).map(WaitCondition::type).map(this::isRedstoneLinkWaitType).orElse(false)) {
+                setEditedRedstoneFrequency(1, this.menu.getCarried());
+                return true;
+            }
+            if (editable && inside(mx, my, 53, 87, 18, 18)
+                    && currentCondition().map(AirshipScheduleCondition::waitCondition).map(WaitCondition::type).map(this::isCargoThresholdWaitType).orElse(false)) {
                 setEditedConditionFilter(this.menu.getCarried());
                 return true;
             }
-            if (inside(mx, my, 11, 87, 18, 18) && canRemoveEditedCondition()) {
+            if (editable && inside(mx, my, CARGO_STABLE_BUTTON_X, CARGO_STABLE_BUTTON_Y, CARGO_STABLE_BUTTON_SIZE, CARGO_STABLE_BUTTON_SIZE)
+                    && currentCondition().map(AirshipScheduleCondition::waitCondition).map(WaitCondition::type).map(this::isCargoThresholdWaitType).orElse(false)) {
+                openCargoStablePopup();
+                return true;
+            }
+            if (editable && inside(mx, my, 11, 87, 18, 18) && canRemoveEditedCondition()) {
                 removeConditionLocally(this.editorEntryIndex, this.editorConditionGroup, this.editorConditionIndex);
                 syncSchedule();
                 closeEditor();
@@ -1344,6 +1611,12 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             return true;
         }
         if (this.noRoutePopupOpen) {
+            return true;
+        }
+        if (this.cargoStablePopupOpen) {
+            if (this.cargoStablePopupInput != null && this.cargoStablePopupInput.isMouseOver(mouseX, mouseY)) {
+                this.cargoStablePopupInput.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+            }
             return true;
         }
         if (super.mouseScrolled(mouseX, mouseY, scrollX, scrollY)) {
@@ -1428,6 +1701,12 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             }
             return true;
         }
+        if (this.cargoStablePopupOpen) {
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE || keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                closeCargoStablePopup();
+            }
+            return true;
+        }
         if (!isAssignedShipLocked()
                 && this.assignedShipBox != null
                 && this.assignedShipBox.isFocused()
@@ -1496,6 +1775,12 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
 
     private boolean isTransponderManagedPlan() {
         return this.menu.openedFromTransponder();
+    }
+
+    private boolean isScheduleReadOnly() {
+        return this.minecraft != null
+                && this.minecraft.player != null
+                && this.menu.isReadOnly(this.minecraft.player);
     }
 
     @Override
@@ -1648,6 +1933,9 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     }
 
     private void openConditionEditor(int index, int conditionGroup, int conditionIndex) {
+        if (isScheduleReadOnly()) {
+            return;
+        }
         this.editorMode = EditorMode.CONDITION;
         this.editorEntryIndex = index;
         this.editorConditionGroup = conditionGroup;
@@ -1667,6 +1955,9 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     }
 
     private void openConditionEditorForLast(int entryIndex, int conditionGroup) {
+        if (isScheduleReadOnly()) {
+            return;
+        }
         if (entryIndex < 0 || entryIndex >= currentSchedule().entries().size()) {
             return;
         }
@@ -1707,37 +1998,58 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     }
 
     private void buildConditionEditorWidgets() {
+        closeCargoStablePopup();
         this.editorSubWidgets.reset();
         this.editorData.remove("Text");
         this.editorData.remove("Duration");
         this.editorData.remove("Unit");
         this.editorData.remove("Operator");
         this.editorData.remove("Measure");
+        this.editorData.remove("Target");
+        this.editorData.remove("Stable");
+        this.editorData.remove("Powered");
+        this.editorData.remove("Hour");
+        this.editorData.remove("Minute");
+        this.editorData.remove("Rotation");
         AirshipScheduleCondition condition = currentCondition().orElse(AirshipScheduleCondition.scheduledDelay(WaitCondition.timed(WaitCondition.DEFAULT_TIMED_WAIT_TICKS)));
         WaitDurationUnit waitUnit = currentEntry().map(AirshipScheduleEntry::waitUnit).orElse(WaitDurationUnit.SECONDS);
+        boolean cargoThreshold = isCargoThresholdWaitType(condition.waitCondition().type());
+        boolean cargoWait = isCargoWaitType(condition.waitCondition().type());
+        boolean redstoneLink = isRedstoneLinkWaitType(condition.waitCondition().type());
+        boolean timeOfDay = isTimeOfDayWaitType(condition.waitCondition().type());
         boolean itemThreshold = condition.waitCondition().type() == WaitConditionType.UNTIL_ITEM_THRESHOLD;
         boolean fluidThreshold = condition.waitCondition().type() == WaitConditionType.UNTIL_FLUID_THRESHOLD;
-        if (itemThreshold || fluidThreshold) {
-            this.editorData.putString("Duration", Integer.toString(waitAmount(condition.waitCondition(), waitUnit)));
-        } else {
+        if (cargoThreshold) {
+            this.editorData.putString("Duration", Integer.toString(Mth.clamp(waitAmount(condition.waitCondition(), waitUnit), 0, 99)));
+        } else if (!redstoneLink && !timeOfDay) {
             this.editorData.putInt("Duration", waitAmount(condition.waitCondition(), waitUnit));
         }
         this.editorData.putInt("Unit", waitUnit.ordinal());
         this.editorData.putInt("Operator", condition.waitCondition().cargoOperator());
         this.editorData.putInt("Measure", condition.waitCondition().cargoMeasure());
+        this.editorData.putInt("Target", condition.waitCondition().cargoTarget().ordinal());
+        this.editorData.putInt("Stable", cargoStableSeconds(condition.waitCondition()));
+        this.editorData.putInt("Powered", condition.waitCondition().redstonePowered() ? 0 : 1);
+        this.editorData.putInt("Hour", condition.waitCondition().timeOfDayHour());
+        this.editorData.putInt("Minute", condition.waitCondition().timeOfDayMinute());
+        this.editorData.putInt("Rotation", condition.waitCondition().timeOfDayRotation());
 
         ModularGuiLineBuilder builder = this.editorSubWidgets.newLineBuilder(this.font, this.leftPos + 77, this.topPos + 92)
                 .speechBubble();
-        if (itemThreshold || fluidThreshold) {
-            builder.addSelectionScrollInput(0, 24, (input, label) -> {
+        MutableObject<Label> timeEditorLabel = new MutableObject<>();
+        MutableObject<Label> cargoStableLabel = new MutableObject<>();
+        if (cargoThreshold) {
+            builder.addSelectionScrollInput(0, 13, (input, label) -> {
                 input.forOptions(Ops.translatedOptions())
-                        .titled(Component.translatable("create.schedule.condition.threshold.train_holds", ""));
-                input.format(state -> Component.literal(" " + Ops.values()[Mth.clamp(state, 0, Ops.values().length - 1)].formatted));
+                        .titled(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.cargo_holds"));
+                input.format(state -> Component.literal(Ops.values()[Mth.clamp(state, 0, Ops.values().length - 1)].formatted));
+                label.setX(label.getX() - 1);
                 label.withShadow();
             }, "Operator");
-            builder.addIntegerTextInput(29, 41, (box, tooltip) -> {
+            builder.addIntegerTextInput(14, 22, (box, tooltip) -> {
+                box.setMaxLength(2);
             }, "Duration");
-            builder.addSelectionScrollInput(71, 50, (input, label) -> {
+            builder.addSelectionScrollInput(37, itemThreshold ? 41 : 43, (input, label) -> {
                 List<Component> options = itemThreshold
                         ? List.of(
                                 Component.translatable("create.schedule.condition.threshold.items"),
@@ -1748,8 +2060,90 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                 input.titled(itemThreshold
                         ? Component.translatable("create.schedule.condition.threshold.item_measure")
                         : null);
+                if (!itemThreshold) {
+                    label.setX(label.getX() - 3);
+                }
                 label.withShadow();
             }, "Measure");
+            builder.addSelectionScrollInput(itemThreshold ? 79 : 81, itemThreshold ? 42 : 41, (input, label) -> {
+                input.forOptions(cargoTargetOptions())
+                        .titled(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.cargo_target"));
+                if (!itemThreshold) {
+                    label.setX(label.getX() - 2);
+                }
+                label.withShadow();
+            }, "Target");
+        } else if (cargoWait) {
+            builder.addSelectionScrollInput(0, 94, (input, label) -> {
+                input.forOptions(cargoTargetOptions())
+                        .titled(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.cargo_target"));
+                label.withShadow();
+            }, "Target");
+            builder.addScrollInput(95, 26, (input, label) -> {
+                input.withRange(0, 100)
+                        .titled(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.cargo_stable_for"))
+                        .withShiftStep(10)
+                        .calling(value -> label.text = cargoStableSecondsLabel(value));
+                cargoStableLabel.setValue(label);
+                input.lockedTooltipX = -15;
+                input.lockedTooltipY = 35;
+                label.withShadow();
+            }, "Stable");
+        } else if (redstoneLink) {
+            builder.addSelectionScrollInput(40, 81, (input, label) -> {
+                input.forOptions(List.of(
+                                Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.redstone_link.powered"),
+                                Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.redstone_link.unpowered")
+                        ))
+                        .titled(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.redstone_link.state"));
+                label.withShadow();
+            }, "Powered");
+        } else if (timeOfDay) {
+            MutableObject<ScrollInput> minuteInput = new MutableObject<>();
+            MutableObject<ScrollInput> hourInput = new MutableObject<>();
+            MutableObject<Label> timeLabel = new MutableObject<>();
+            builder.addScrollInput(0, 16, (input, label) -> {
+                input.withRange(0, 24);
+                timeLabel.setValue(label);
+                timeEditorLabel.setValue(label);
+                hourInput.setValue(input);
+            }, "Hour");
+            builder.addScrollInput(18, 16, (input, label) -> {
+                input.withRange(0, 60)
+                        .titled(Component.translatable("create.generic.daytime.minute"));
+                minuteInput.setValue(input);
+                label.visible = false;
+            }, "Minute");
+            builder.addSelectionScrollInput(52, 68, (input, label) -> {
+                input.forOptions(timeOfDayRotationOptions())
+                        .titled(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.time_of_day.rotation"));
+                label.withShadow();
+            }, "Rotation");
+            hourInput.getValue()
+                    .titled(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.time_of_day.start_time"))
+                    .calling(value -> {
+                        if (timeLabel.getValue() != null && minuteInput.getValue() != null) {
+                            timeLabel.getValue().text = timeOfDayDisplay(value, minuteInput.getValue().getState(), true);
+                        }
+                    })
+                    .writingTo(null)
+                    .withShiftStep(6);
+            minuteInput.getValue()
+                    .titled(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.time_of_day.start_time"))
+                    .calling(value -> {
+                        if (timeLabel.getValue() != null && hourInput.getValue() != null) {
+                            timeLabel.getValue().text = timeOfDayDisplay(hourInput.getValue().getState(), value, true);
+                        }
+                    })
+                    .writingTo(null)
+                    .withShiftStep(15);
+            minuteInput.getValue().lockedTooltipX = hourInput.getValue().lockedTooltipX = -15;
+            minuteInput.getValue().lockedTooltipY = hourInput.getValue().lockedTooltipY = 35;
+            if (timeLabel.getValue() != null && hourInput.getValue() != null && minuteInput.getValue() != null) {
+                timeLabel.getValue().text = timeOfDayDisplay(hourInput.getValue().getState(), minuteInput.getValue().getState(), true);
+            }
+            builder.customArea(0, 52);
+            builder.customArea(52, 69);
         } else {
             builder.addScrollInput(0, 31, (input, label) -> {
                 this.editorDurationInput = input.withRange(0, 10001)
@@ -1768,6 +2162,18 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             }, "Unit");
         }
         this.editorSubWidgets.load(this.editorData);
+        if (timeOfDay && timeEditorLabel.getValue() != null) {
+            timeEditorLabel.getValue().text = timeOfDayDisplay(
+                    Mth.clamp(this.editorData.getInt("Hour"), 0, 23),
+                    Mth.clamp(this.editorData.getInt("Minute"), 0, 59),
+                    true
+            );
+        }
+        if (cargoWait && cargoStableLabel.getValue() != null) {
+            cargoStableLabel.getValue().text = cargoStableSecondsLabel(
+                    Mth.clamp(this.editorData.getInt("Stable"), 0, 99)
+            );
+        }
     }
 
     private void onStationEditorTextChanged(String value) {
@@ -1782,7 +2188,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             return;
         }
         String lower = value.toLowerCase(Locale.ROOT);
-        String suggestion = AirshipStationRegistry.knownStations(this.minecraft.level.dimension()).stream()
+        String suggestion = availableStations().stream()
                 .map(AirshipStationSnapshot::stationName)
                 .filter(name -> name.toLowerCase(Locale.ROOT).startsWith(lower))
                 .filter(name -> name.length() > value.length())
@@ -1798,6 +2204,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     }
 
     private void closeEditor() {
+        closeCargoStablePopup();
         this.editorMode = EditorMode.NONE;
         this.routeChoices.clear();
         this.routeChoiceSelected = 0;
@@ -1818,6 +2225,10 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     }
 
     private void confirmEditor() {
+        if (isScheduleReadOnly()) {
+            closeEditor();
+            return;
+        }
         if (this.editorMode == EditorMode.STATION) {
             saveEditorData();
             List<AirshipStationSnapshot> matches = filteredStations(this.editorData.getString("Text"));
@@ -1841,16 +2252,68 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
 
     private void saveEditorData() {
         this.editorSubWidgets.save(this.editorData);
+        saveCargoStablePopupValue();
+    }
+
+    private void openCargoStablePopup() {
+        saveEditorData();
+        closeCargoStablePopup();
+        this.cargoStablePopupOpen = true;
+        int x = cargoStablePopupX() + CARGO_STABLE_PANEL_FIELD_X;
+        int y = cargoStablePopupY() + CARGO_STABLE_PANEL_FIELD_Y;
+        this.cargoStablePopupInput = new ScrollInput(x, y, CARGO_STABLE_PANEL_FIELD_WIDTH, 18);
+        this.cargoStablePopupInput
+                .withRange(0, 100)
+                .withShiftStep(10)
+                .titled(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.cargo_stable_for"))
+                .calling(value -> this.editorData.putInt("Stable", value))
+                .setState(Mth.clamp(this.editorData.getInt("Stable"), 0, 99));
+        this.cargoStablePopupInput.lockedTooltipX = -15;
+        this.cargoStablePopupInput.lockedTooltipY = 35;
+        this.cargoStablePopupConfirmButton = new IconButton(
+                cargoStablePopupX() + CARGO_STABLE_PANEL_CONFIRM_X,
+                cargoStablePopupY() + CARGO_STABLE_PANEL_CONFIRM_Y,
+                AllIcons.I_CONFIRM
+        );
+        this.cargoStablePopupConfirmButton.withCallback(this::closeCargoStablePopup);
+        addRenderableWidget(this.cargoStablePopupInput);
+    }
+
+    private void closeCargoStablePopup() {
+        saveCargoStablePopupValue();
+        if (this.cargoStablePopupInput != null) {
+            removeWidget(this.cargoStablePopupInput);
+            this.cargoStablePopupInput = null;
+        }
+        this.cargoStablePopupConfirmButton = null;
+        this.cargoStablePopupOpen = false;
+    }
+
+    private void saveCargoStablePopupValue() {
+        if (this.cargoStablePopupInput != null) {
+            this.editorData.putInt("Stable", this.cargoStablePopupInput.getState());
+        }
+    }
+
+    private int cargoStablePopupX() {
+        return this.leftPos + (this.imageWidth - CARGO_STABLE_PANEL_WIDTH) / 2;
+    }
+
+    private int cargoStablePopupY() {
+        return this.topPos + 33;
     }
 
     private void pressAction(int actionId) {
         applyLocalAction(actionId);
-        if (actionId < AirshipScheduleMenu.ACTION_SELECT_ENTRY_BASE) {
+        if (!isScheduleReadOnly() && actionId < AirshipScheduleMenu.ACTION_SELECT_ENTRY_BASE) {
             syncSchedule();
         }
     }
 
     private void saveTitle() {
+        if (isScheduleReadOnly()) {
+            return;
+        }
         if (this.titleBox != null) {
             this.localSchedule = currentSchedule().withTitle(this.titleBox.getValue());
             syncSchedule();
@@ -1858,12 +2321,23 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     }
 
     private void syncSchedule() {
+        if (isScheduleReadOnly()) {
+            return;
+        }
         PacketDistributor.sendToServer(new UpdateAirshipSchedulePayload(AirshipScheduleNbtSerializer.write(currentSchedule())));
     }
 
     private void applyLocalAction(int actionId) {
         if (actionId >= AirshipScheduleMenu.ACTION_SELECT_ENTRY_BASE) {
             this.selectedIndex = Math.max(0, Math.min(actionId - AirshipScheduleMenu.ACTION_SELECT_ENTRY_BASE, Math.max(0, currentSchedule().entries().size() - 1)));
+            return;
+        }
+        if (isScheduleReadOnly()) {
+            if (actionId == AirshipScheduleMenu.ACTION_SELECT_PREVIOUS) {
+                selectLocally(-1);
+            } else if (actionId == AirshipScheduleMenu.ACTION_SELECT_NEXT) {
+                selectLocally(1);
+            }
             return;
         }
         if (isTransponderManagedPlan()
@@ -2056,14 +2530,19 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             case UNTIL_DOCKED -> condition.waitCondition().runtimeTicks();
             case UNTIL_IDLE -> condition.waitCondition().idleTicks();
             case UNTIL_ITEM_THRESHOLD, UNTIL_FLUID_THRESHOLD -> condition.waitCondition().durationTicks();
+            case UNTIL_ITEM_EMPTY, UNTIL_ITEM_FULL, UNTIL_FLUID_EMPTY, UNTIL_FLUID_FULL -> condition.waitCondition().cargoStabilityTicks();
             default -> 0;
         };
         int step = switch (condition.waitCondition().type()) {
             case UNTIL_ITEM_THRESHOLD -> condition.waitCondition().cargoMeasure() == 1 ? 1 : 16;
             case UNTIL_FLUID_THRESHOLD -> 1;
+            case UNTIL_ITEM_EMPTY, UNTIL_ITEM_FULL, UNTIL_FLUID_EMPTY, UNTIL_FLUID_FULL -> 20;
             default -> entry.waitUnit().ticksPerStep() * 5;
         };
         int nextTicks = Math.max(0, currentTicks + direction * step);
+        if (isCargoThresholdWaitType(condition.waitCondition().type())) {
+            nextTicks = Math.min(99, nextTicks);
+        }
         setEditedConditionWait(waitConditionWithTicks(condition.waitCondition().type(), nextTicks));
     }
 
@@ -2100,7 +2579,15 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         return List.of(
                 WaitConditionType.TIMED,
                 WaitConditionType.UNTIL_DOCKED,
-                WaitConditionType.UNTIL_IDLE
+                WaitConditionType.UNTIL_IDLE,
+                WaitConditionType.REDSTONE_LINK,
+                WaitConditionType.TIME_OF_DAY,
+                WaitConditionType.UNTIL_ITEM_EMPTY,
+                WaitConditionType.UNTIL_ITEM_FULL,
+                WaitConditionType.UNTIL_FLUID_EMPTY,
+                WaitConditionType.UNTIL_FLUID_FULL,
+                WaitConditionType.UNTIL_ITEM_THRESHOLD,
+                WaitConditionType.UNTIL_FLUID_THRESHOLD
         );
     }
 
@@ -2108,8 +2595,14 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         return switch (type) {
             case UNTIL_DOCKED -> WaitCondition.untilDocked(WaitCondition.DEFAULT_TIMED_WAIT_TICKS);
             case UNTIL_IDLE -> WaitCondition.untilIdle(WaitCondition.DEFAULT_TIMED_WAIT_TICKS, 0);
-            case UNTIL_FLUID_THRESHOLD -> WaitCondition.fluidThreshold(10, 0);
-            case UNTIL_ITEM_THRESHOLD -> WaitCondition.itemThreshold(10, 0);
+            case REDSTONE_LINK -> WaitCondition.redstoneLink(ItemStack.EMPTY, ItemStack.EMPTY, true);
+            case TIME_OF_DAY -> WaitCondition.timeOfDay(12, 0, 0);
+            case UNTIL_ITEM_EMPTY -> WaitCondition.itemEmpty(0, CargoWaitTarget.SHIP_CARGO);
+            case UNTIL_ITEM_FULL -> WaitCondition.itemFull(0, CargoWaitTarget.SHIP_CARGO);
+            case UNTIL_FLUID_EMPTY -> WaitCondition.fluidEmpty(0, CargoWaitTarget.SHIP_CARGO);
+            case UNTIL_FLUID_FULL -> WaitCondition.fluidFull(0, CargoWaitTarget.SHIP_CARGO);
+            case UNTIL_FLUID_THRESHOLD -> WaitCondition.fluidThreshold(10, 0, 0, 0, ItemStack.EMPTY, CargoWaitTarget.SHIP_CARGO);
+            case UNTIL_ITEM_THRESHOLD -> WaitCondition.itemThreshold(10, 0, 0, 0, ItemStack.EMPTY, CargoWaitTarget.SHIP_CARGO);
             default -> WaitCondition.timed(WaitCondition.DEFAULT_TIMED_WAIT_TICKS);
         };
     }
@@ -2128,20 +2621,57 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     }
 
     private boolean isCargoWait(WaitCondition waitCondition) {
-        return waitCondition.type() == WaitConditionType.UNTIL_ITEM_THRESHOLD
-                || waitCondition.type() == WaitConditionType.UNTIL_FLUID_THRESHOLD;
+        return isCargoWaitType(waitCondition.type());
+    }
+
+    private boolean isRedstoneLinkWaitType(WaitConditionType type) {
+        return type == WaitConditionType.REDSTONE_LINK || type == WaitConditionType.REDSTONE;
+    }
+
+    private boolean isTimeOfDayWaitType(WaitConditionType type) {
+        return type == WaitConditionType.TIME_OF_DAY;
+    }
+
+    private List<Component> timeOfDayRotationOptions() {
+        return List.of(
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.time_of_day.rotation.every_24"),
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.time_of_day.rotation.every_12"),
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.time_of_day.rotation.every_6"),
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.time_of_day.rotation.every_4"),
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.time_of_day.rotation.every_3"),
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.time_of_day.rotation.every_2"),
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.time_of_day.rotation.every_1"),
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.time_of_day.rotation.every_0_45"),
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.time_of_day.rotation.every_0_30"),
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.time_of_day.rotation.every_0_15")
+        );
     }
 
     private void setEditedConditionFilter(ItemStack stack) {
         AirshipScheduleCondition condition = currentCondition().orElse(null);
-        if (condition == null || !isCargoWait(condition.waitCondition())) {
+        if (condition == null || !isCargoThresholdWaitType(condition.waitCondition().type())) {
             return;
         }
         ItemStack filter = stack == null || stack.isEmpty() ? ItemStack.EMPTY : stack.copyWithCount(1);
         WaitCondition current = condition.waitCondition();
         WaitCondition next = current.type() == WaitConditionType.UNTIL_ITEM_THRESHOLD
-                ? WaitCondition.itemThreshold(current.durationTicks(), current.maxTicks(), current.cargoOperator(), current.cargoMeasure(), filter)
-                : WaitCondition.fluidThreshold(current.durationTicks(), current.maxTicks(), current.cargoOperator(), current.cargoMeasure(), filter);
+                ? WaitCondition.itemThreshold(current.durationTicks(), current.maxTicks(), current.cargoStabilityTicks(), current.cargoOperator(), current.cargoMeasure(), filter, current.cargoTarget())
+                : WaitCondition.fluidThreshold(current.durationTicks(), current.maxTicks(), current.cargoStabilityTicks(), current.cargoOperator(), current.cargoMeasure(), filter, current.cargoTarget());
+        setEditedConditionWait(next);
+    }
+
+    private void setEditedRedstoneFrequency(int slot, ItemStack stack) {
+        AirshipScheduleCondition condition = currentCondition().orElse(null);
+        if (condition == null || !isRedstoneLinkWaitType(condition.waitCondition().type())) {
+            return;
+        }
+        ItemStack frequency = stack == null || stack.isEmpty() ? ItemStack.EMPTY : stack.copyWithCount(1);
+        WaitCondition current = condition.waitCondition();
+        WaitCondition next = WaitCondition.redstoneLink(
+                slot == 0 ? frequency : current.redstoneFrequencyFirst(),
+                slot == 1 ? frequency : current.redstoneFrequencySecond(),
+                current.redstonePowered()
+        );
         setEditedConditionWait(next);
     }
 
@@ -2152,15 +2682,33 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                 .map(AirshipScheduleCondition::waitCondition)
                 .map(WaitCondition::type)
                 .orElse(WaitConditionType.TIMED);
-        int amount = isCargoWaitType(type)
-                ? parsePositiveInt(this.editorData.getString("Duration"), 10)
+        WaitCondition current = currentCondition()
+                .map(AirshipScheduleCondition::waitCondition)
+                .orElse(defaultWaitConditionForType(type));
+        if (isRedstoneLinkWaitType(type)) {
+            setEditedConditionWait(WaitCondition.redstoneLink(
+                    current.redstoneFrequencyFirst(),
+                    current.redstoneFrequencySecond(),
+                    this.editorData.getInt("Powered") == 0
+            ));
+            return;
+        }
+        if (isTimeOfDayWaitType(type)) {
+            setEditedConditionWait(WaitCondition.timeOfDay(
+                    Mth.clamp(this.editorData.getInt("Hour"), 0, 23),
+                    Mth.clamp(this.editorData.getInt("Minute"), 0, 59),
+                    Mth.clamp(this.editorData.getInt("Rotation"), 0, 9)
+            ));
+            return;
+        }
+        int amount = isCargoThresholdWaitType(type)
+                ? Mth.clamp(parsePositiveInt(this.editorData.getString("Duration"), 10), 0, 99)
                 : Math.max(0, this.editorData.getInt("Duration"));
         int operator = Mth.clamp(this.editorData.getInt("Operator"), 0, Ops.values().length - 1);
         int measure = Math.max(0, this.editorData.getInt("Measure"));
-        ItemStack filter = currentCondition()
-                .map(AirshipScheduleCondition::waitCondition)
-                .map(WaitCondition::cargoFilter)
-                .orElse(ItemStack.EMPTY);
+        CargoWaitTarget target = CargoWaitTarget.values()[Mth.clamp(this.editorData.getInt("Target"), 0, CargoWaitTarget.values().length - 1)];
+        int cargoStableTicks = Math.max(0, this.editorData.getInt("Stable")) * 20;
+        ItemStack filter = current.cargoFilter();
         int ticks = switch (type) {
             case UNTIL_ITEM_THRESHOLD, UNTIL_FLUID_THRESHOLD -> amount;
             default -> switch (unit) {
@@ -2178,10 +2726,18 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         AirshipScheduleEntry entry = entries.get(this.editorEntryIndex).withWaitUnit(unit);
         entries.set(this.editorEntryIndex, entry);
         this.localSchedule = schedule.withEntries(entries);
-        setEditedConditionWait(waitConditionWithTicks(type, ticks, operator, measure, filter));
+        setEditedConditionWait(waitConditionWithTicks(type, ticks, cargoStableTicks, operator, measure, filter, target));
     }
 
     private boolean isCargoWaitType(WaitConditionType type) {
+        return isCargoThresholdWaitType(type)
+                || type == WaitConditionType.UNTIL_ITEM_EMPTY
+                || type == WaitConditionType.UNTIL_ITEM_FULL
+                || type == WaitConditionType.UNTIL_FLUID_EMPTY
+                || type == WaitConditionType.UNTIL_FLUID_FULL;
+    }
+
+    private boolean isCargoThresholdWaitType(WaitConditionType type) {
         return type == WaitConditionType.UNTIL_ITEM_THRESHOLD || type == WaitConditionType.UNTIL_FLUID_THRESHOLD;
     }
 
@@ -2196,17 +2752,33 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     private WaitCondition waitConditionWithTicks(WaitConditionType type, int ticks) {
         AirshipScheduleCondition condition = currentCondition().orElse(null);
         WaitCondition current = condition == null ? WaitCondition.none() : condition.waitCondition();
-        return waitConditionWithTicks(type, ticks, current.cargoOperator(), current.cargoMeasure(), current.cargoFilter());
+        return waitConditionWithTicks(type, ticks, current.cargoStabilityTicks(), current.cargoOperator(), current.cargoMeasure(), current.cargoFilter(), current.cargoTarget());
     }
 
-    private WaitCondition waitConditionWithTicks(WaitConditionType type, int ticks, int operator, int measure, ItemStack filter) {
+    private WaitCondition waitConditionWithTicks(WaitConditionType type, int ticks, int cargoStableTicks, int operator, int measure, ItemStack filter, CargoWaitTarget target) {
+        WaitCondition current = currentCondition()
+                .map(AirshipScheduleCondition::waitCondition)
+                .orElse(defaultWaitConditionForType(type));
         return switch (type) {
             case UNTIL_DOCKED -> WaitCondition.untilDocked(ticks);
             case UNTIL_IDLE -> WaitCondition.untilIdle(ticks, 0);
-            case UNTIL_ITEM_THRESHOLD -> WaitCondition.itemThreshold(ticks, 0, operator, measure, filter);
-            case UNTIL_FLUID_THRESHOLD -> WaitCondition.fluidThreshold(ticks, 0, operator, measure, filter);
+            case REDSTONE_LINK, REDSTONE -> WaitCondition.redstoneLink(current.redstoneFrequencyFirst(), current.redstoneFrequencySecond(), current.redstonePowered());
+            case TIME_OF_DAY -> WaitCondition.timeOfDay(current.timeOfDayHour(), current.timeOfDayMinute(), current.timeOfDayRotation());
+            case UNTIL_ITEM_THRESHOLD -> WaitCondition.itemThreshold(ticks, 0, cargoStableTicks, operator, measure, filter, target);
+            case UNTIL_FLUID_THRESHOLD -> WaitCondition.fluidThreshold(ticks, 0, cargoStableTicks, operator, measure, filter, target);
+            case UNTIL_ITEM_EMPTY -> WaitCondition.itemEmpty(cargoStableTicks, ticks, target);
+            case UNTIL_ITEM_FULL -> WaitCondition.itemFull(cargoStableTicks, ticks, target);
+            case UNTIL_FLUID_EMPTY -> WaitCondition.fluidEmpty(cargoStableTicks, ticks, target);
+            case UNTIL_FLUID_FULL -> WaitCondition.fluidFull(cargoStableTicks, ticks, target);
             default -> ticks == 0 ? WaitCondition.none() : WaitCondition.timed(ticks);
         };
+    }
+
+    private List<Component> cargoTargetOptions() {
+        return List.of(
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.cargo_target.ship"),
+                Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.cargo_target.station")
+        );
     }
 
     private void updateConditionGroups(int entryIndex, java.util.function.Consumer<List<List<AirshipScheduleCondition>>> updater) {
@@ -2262,7 +2834,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         if (schedule.entries().isEmpty() || this.minecraft == null || this.minecraft.level == null) {
             return;
         }
-        List<AirshipStationSnapshot> stations = AirshipStationRegistry.knownStations(this.minecraft.level.dimension());
+        List<AirshipStationSnapshot> stations = availableStations();
         if (stations.isEmpty()) {
             return;
         }
@@ -2286,7 +2858,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             return;
         }
         String normalizedFilter = filter == null ? "" : filter.trim().toLowerCase(Locale.ROOT);
-        List<AirshipStationSnapshot> stations = AirshipStationRegistry.knownStations(this.minecraft.level.dimension()).stream()
+        List<AirshipStationSnapshot> stations = availableStations().stream()
                 .filter(station -> normalizedFilter.isBlank() || station.stationName().toLowerCase(Locale.ROOT).contains(normalizedFilter))
                 .toList();
         if (!stations.isEmpty()) {
@@ -2303,7 +2875,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             return List.of();
         }
         String filter = rawFilter == null ? "" : rawFilter.trim().toLowerCase(Locale.ROOT);
-        return AirshipStationRegistry.knownStations(this.minecraft.level.dimension()).stream()
+        return availableStations().stream()
                 .filter(station -> filter.isBlank() || station.stationName().toLowerCase(Locale.ROOT).startsWith(filter))
                 .toList();
     }
@@ -2368,8 +2940,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             confirmDeleteStop();
             return true;
         }
-        if (inside((int) mouseX, (int) mouseY, x + boxW - 72, y + boxH - 19, 52, 14)
-                || !inside((int) mouseX, (int) mouseY, x, y, boxW, boxH)) {
+        if (inside((int) mouseX, (int) mouseY, x + boxW - 72, y + boxH - 19, 52, 14)) {
             closeDeleteStopConfirm();
             return true;
         }
@@ -2439,10 +3010,14 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                     .filter(found -> !found.isBlank())
                     .orElse(schedule.assignedShipName());
             this.assignedShipBox.setValue(name);
+            this.assignedShipBox.setCursorPosition(0);
+            this.assignedShipBox.setHighlightPos(0);
             this.assignedShipBox.setSuggestion("");
             return;
         }
         this.assignedShipBox.setValue("");
+        this.assignedShipBox.setCursorPosition(0);
+        this.assignedShipBox.setHighlightPos(0);
         ShipTransponderRegistry.knownShips(this.minecraft.level.dimension()).stream()
                 .min((left, right) -> Double.compare(distanceToPlayer(left), distanceToPlayer(right)))
                 .ifPresentOrElse(
@@ -2484,7 +3059,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         }
         Vec3 playerPosition = this.minecraft.player.position();
         Set<String> seen = new HashSet<>();
-        return AirshipStationRegistry.knownStations(this.minecraft.level.dimension()).stream()
+        return availableStations().stream()
                 .filter(station -> seen.add(station.stationName()))
                 .map(station -> IntAttached.with(
                         (int) Vec3.atCenterOf(station.stationPos()).distanceTo(playerPosition),
@@ -2497,10 +3072,30 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             return List.of();
         }
         Set<String> seen = new HashSet<>();
-        return ShipTransponderRegistry.knownShips(this.minecraft.level.dimension()).stream()
+        return availableShips().stream()
                 .sorted((left, right) -> Double.compare(distanceToPlayer(left), distanceToPlayer(right)))
                 .filter(ship -> seen.add(ship.shipName()))
                 .map(ship -> IntAttached.with((int) distanceToPlayer(ship), ship.shipName()))
+                .toList();
+    }
+
+    private List<AirshipStationSnapshot> availableStations() {
+        if (this.minecraft == null || this.minecraft.level == null) {
+            return List.of();
+        }
+        return AirshipStationRegistry.knownStations(this.minecraft.level.dimension()).stream()
+                .filter(station -> this.minecraft.level.getBlockEntity(station.stationPos()) instanceof AirshipStationBlockEntity blockEntity
+                        && blockEntity.stationId().equals(station.stationId()))
+                .toList();
+    }
+
+    private List<ShipTransponderSnapshot> availableShips() {
+        if (this.minecraft == null || this.minecraft.level == null) {
+            return List.of();
+        }
+        return ShipTransponderRegistry.knownShips(this.minecraft.level.dimension()).stream()
+                .filter(ship -> this.minecraft.level.getBlockEntity(ship.transponderPos()) instanceof ShipTransponderBlockEntity blockEntity
+                        && blockEntity.transponderId().equals(ship.transponderId()))
                 .toList();
     }
 
@@ -2768,12 +3363,19 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             );
         }
         if (condition.waitCondition().type() == WaitConditionType.UNTIL_IDLE) {
-            return Component.translatable("create.schedule.condition.idle_short", formatCreateTime(condition.waitCondition(), unit, true));
+            return Component.translatable(
+                    "gui.create_aeronautics_automated_logistics.airship_schedule.wait.until_idle",
+                    waitAmount(condition.waitCondition(), unit),
+                    unitShortText(unit)
+            );
         }
-        if (condition.waitCondition().type() == WaitConditionType.UNTIL_ITEM_THRESHOLD) {
-            return cargoSummaryText(condition);
+        if (isRedstoneLinkWaitType(condition.waitCondition().type())) {
+            return redstoneLinkSummaryText(condition.waitCondition());
         }
-        if (condition.waitCondition().type() == WaitConditionType.UNTIL_FLUID_THRESHOLD) {
+        if (isTimeOfDayWaitType(condition.waitCondition().type())) {
+            return timeOfDaySummaryText(condition.waitCondition());
+        }
+        if (isCargoWaitType(condition.waitCondition().type())) {
             return cargoSummaryText(condition);
         }
         return Component.translatable(
@@ -2791,18 +3393,32 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             );
         }
         if (condition.waitCondition().type() == WaitConditionType.UNTIL_IDLE) {
-            return Component.translatable("create.schedule.condition.for_x_time", formatCreateTime(condition.waitCondition(), unit, false));
+            return Component.translatable(
+                    "gui.create_aeronautics_automated_logistics.airship_schedule.dock_inactivity.long",
+                    formatCreateTime(condition.waitCondition(), unit, false)
+            );
         }
-        if (condition.waitCondition().type() == WaitConditionType.UNTIL_ITEM_THRESHOLD) {
-            return cargoLongText(condition);
+        if (isRedstoneLinkWaitType(condition.waitCondition().type())) {
+            return redstoneLinkLongText(condition.waitCondition());
         }
-        if (condition.waitCondition().type() == WaitConditionType.UNTIL_FLUID_THRESHOLD) {
+        if (isTimeOfDayWaitType(condition.waitCondition().type())) {
+            return timeOfDayLongText(condition.waitCondition());
+        }
+        if (isCargoWaitType(condition.waitCondition().type())) {
             return cargoLongText(condition);
         }
         return Component.literal(waitAmount(condition.waitCondition(), unit) + " ").append(unitText(unit));
     }
 
     private Component conditionValueText(AirshipScheduleCondition condition) {
+        if (isTimeOfDayWaitType(condition.waitCondition().type())) {
+            return timeOfDayDisplay(condition.waitCondition(), false);
+        }
+        if (isRedstoneLinkWaitType(condition.waitCondition().type())) {
+            return condition.waitCondition().redstonePowered()
+                    ? Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.redstone_link.powered")
+                    : Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.redstone_link.unpowered");
+        }
         WaitDurationUnit unit = currentEntry().map(AirshipScheduleEntry::waitUnit).orElse(WaitDurationUnit.SECONDS);
         return Component.literal(Integer.toString(waitAmount(condition.waitCondition(), unit)));
     }
@@ -2812,13 +3428,31 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             return Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.until_docked");
         }
         if (condition.waitCondition().type() == WaitConditionType.UNTIL_IDLE) {
-            return Component.translatable("create.schedule.condition.idle");
+            return Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.until_idle");
+        }
+        if (isRedstoneLinkWaitType(condition.waitCondition().type())) {
+            return Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.redstone_link");
+        }
+        if (isTimeOfDayWaitType(condition.waitCondition().type())) {
+            return Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.time_of_day");
         }
         if (condition.waitCondition().type() == WaitConditionType.UNTIL_ITEM_THRESHOLD) {
-            return Component.translatable("create.schedule.condition.item_threshold");
+            return Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.until_item_threshold");
         }
         if (condition.waitCondition().type() == WaitConditionType.UNTIL_FLUID_THRESHOLD) {
-            return Component.translatable("create.schedule.condition.fluid_threshold");
+            return Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.until_fluid_threshold");
+        }
+        if (condition.waitCondition().type() == WaitConditionType.UNTIL_ITEM_EMPTY) {
+            return Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.item_empty");
+        }
+        if (condition.waitCondition().type() == WaitConditionType.UNTIL_ITEM_FULL) {
+            return Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.item_full");
+        }
+        if (condition.waitCondition().type() == WaitConditionType.UNTIL_FLUID_EMPTY) {
+            return Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.fluid_empty");
+        }
+        if (condition.waitCondition().type() == WaitConditionType.UNTIL_FLUID_FULL) {
+            return Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.fluid_full");
         }
         return Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.scheduled_delay");
     }
@@ -2830,6 +3464,12 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         if (condition.waitCondition().type() == WaitConditionType.UNTIL_IDLE) {
             return Items.HOPPER.getDefaultInstance();
         }
+        if (isRedstoneLinkWaitType(condition.waitCondition().type())) {
+            return redstoneLinkIcon();
+        }
+        if (isTimeOfDayWaitType(condition.waitCondition().type())) {
+            return ItemStack.EMPTY;
+        }
         if (condition.waitCondition().type() == WaitConditionType.UNTIL_ITEM_THRESHOLD) {
             return condition.waitCondition().cargoFilter().isEmpty()
                     ? ItemStack.EMPTY
@@ -2840,32 +3480,136 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                     ? ItemStack.EMPTY
                     : condition.waitCondition().cargoFilter();
         }
+        if (condition.waitCondition().type() == WaitConditionType.UNTIL_ITEM_EMPTY
+                || condition.waitCondition().type() == WaitConditionType.UNTIL_ITEM_FULL) {
+            return Items.CHEST.getDefaultInstance();
+        }
+        if (condition.waitCondition().type() == WaitConditionType.UNTIL_FLUID_EMPTY
+                || condition.waitCondition().type() == WaitConditionType.UNTIL_FLUID_FULL) {
+            return Items.WATER_BUCKET.getDefaultInstance();
+        }
         return Items.REPEATER.getDefaultInstance();
     }
 
     private Component cargoSummaryText(AirshipScheduleCondition condition) {
         WaitCondition wait = condition.waitCondition();
+        if (!isCargoThresholdWaitType(wait.type())) {
+            return switch (wait.type()) {
+                case UNTIL_ITEM_EMPTY -> Component.translatable(
+                        "gui.create_aeronautics_automated_logistics.airship_schedule.cargo_state_summary",
+                        cargoTargetText(wait),
+                        Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.item_empty")
+                );
+                case UNTIL_ITEM_FULL -> Component.translatable(
+                        "gui.create_aeronautics_automated_logistics.airship_schedule.cargo_state_summary",
+                        cargoTargetText(wait),
+                        Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.item_full")
+                );
+                case UNTIL_FLUID_EMPTY -> Component.translatable(
+                        "gui.create_aeronautics_automated_logistics.airship_schedule.cargo_state_summary",
+                        cargoTargetText(wait),
+                        Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.fluid_empty")
+                );
+                case UNTIL_FLUID_FULL -> Component.translatable(
+                        "gui.create_aeronautics_automated_logistics.airship_schedule.cargo_state_summary",
+                        cargoTargetText(wait),
+                        Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.fluid_full")
+                );
+                default -> cargoTargetText(wait);
+            };
+        }
         Ops[] ops = Ops.values();
         Ops operator = ops[Mth.clamp(wait.cargoOperator(), 0, ops.length - 1)];
-        return Component.literal(operator.formatted + " " + wait.durationTicks()).append(cargoUnitText(wait));
+        return Component.translatable(
+                "gui.create_aeronautics_automated_logistics.airship_schedule.cargo_threshold_summary",
+                Component.literal(operator.formatted),
+                Component.literal(Integer.toString(wait.durationTicks())),
+                cargoMeasureText(wait)
+        );
+    }
+
+    private Component redstoneLinkSummaryText(WaitCondition wait) {
+        return wait.redstonePowered()
+                ? Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.redstone_link.powered")
+                : Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.redstone_link.unpowered");
+    }
+
+    private Component redstoneLinkLongText(WaitCondition wait) {
+        return Component.translatable(
+                wait.redstonePowered()
+                        ? "gui.create_aeronautics_automated_logistics.airship_schedule.redstone_link.long.powered"
+                        : "gui.create_aeronautics_automated_logistics.airship_schedule.redstone_link.long.unpowered",
+                redstoneFrequencyName(wait.redstoneFrequencyFirst()),
+                redstoneFrequencyName(wait.redstoneFrequencySecond())
+        );
+    }
+
+    private Component timeOfDaySummaryText(WaitCondition wait) {
+        return timeOfDayDisplay(wait, false)
+                .copy()
+                .append(Component.literal(" / "))
+                .append(timeOfDayRepeatShortText(wait));
+    }
+
+    private Component timeOfDayLongText(WaitCondition wait) {
+        return Component.translatable(
+                "gui.create_aeronautics_automated_logistics.airship_schedule.time_of_day.long",
+                timeOfDayDisplay(wait, false),
+                timeOfDayRotationOptions().get(Mth.clamp(wait.timeOfDayRotation(), 0, timeOfDayRotationOptions().size() - 1))
+        );
+    }
+
+    private Component timeOfDayRepeatShortText(WaitCondition wait) {
+        return switch (wait.timeOfDayRotation()) {
+            case 9 -> Component.literal("15m");
+            case 8 -> Component.literal("30m");
+            case 7 -> Component.literal("45m");
+            case 6 -> Component.literal("1h");
+            case 5 -> Component.literal("2h");
+            case 4 -> Component.literal("3h");
+            case 3 -> Component.literal("4h");
+            case 2 -> Component.literal("6h");
+            case 1 -> Component.literal("12h");
+            default -> Component.literal("24h");
+        };
     }
 
     private Component cargoLongText(AirshipScheduleCondition condition) {
         WaitCondition wait = condition.waitCondition();
+        if (!isCargoThresholdWaitType(wait.type())) {
+            Component text = Component.translatable(
+                    switch (wait.type()) {
+                        case UNTIL_ITEM_EMPTY -> "gui.create_aeronautics_automated_logistics.airship_schedule.item_empty.long";
+                        case UNTIL_ITEM_FULL -> "gui.create_aeronautics_automated_logistics.airship_schedule.item_full.long";
+                        case UNTIL_FLUID_EMPTY -> "gui.create_aeronautics_automated_logistics.airship_schedule.fluid_empty.long";
+                        case UNTIL_FLUID_FULL -> "gui.create_aeronautics_automated_logistics.airship_schedule.fluid_full.long";
+                        default -> "gui.create_aeronautics_automated_logistics.airship_schedule.scheduled_delay";
+                    },
+                    cargoTargetText(wait)
+            );
+            if (wait.cargoStabilityTicks() > 0) {
+                text = text.copy()
+                        .append(Component.literal(" "))
+                        .append(cargoStableLongText(wait).copy().withStyle(ChatFormatting.DARK_AQUA));
+            }
+            return text;
+        }
         Ops[] ops = Ops.values();
         Ops operator = ops[Mth.clamp(wait.cargoOperator(), 0, ops.length - 1)];
-        String operatorId = operator.name().toLowerCase(Locale.ROOT);
-        return Component.translatable(
-                        "create.schedule.condition.threshold.train_holds",
-                        Component.translatable("create.schedule.condition.threshold." + operatorId)
-                )
-                .append(" ")
-                .append(Component.translatable(
-                        "create.schedule.condition.threshold.x_units_of_item",
-                        wait.durationTicks(),
-                        cargoMeasureText(wait),
-                        cargoFilterText(wait)
-                ).withStyle(ChatFormatting.DARK_AQUA));
+        Component text = Component.translatable(
+                "gui.create_aeronautics_automated_logistics.airship_schedule.cargo_threshold_long",
+                Component.literal(operator.formatted),
+                Component.literal(Integer.toString(wait.durationTicks())),
+                cargoMeasureText(wait),
+                cargoFilterText(wait),
+                cargoTargetText(wait)
+        );
+        if (wait.cargoStabilityTicks() > 0) {
+            text = text.copy()
+                    .append(Component.literal(" "))
+                    .append(cargoStableLongText(wait).copy().withStyle(ChatFormatting.DARK_AQUA));
+        }
+        return text;
     }
 
     private Component cargoUnitText(WaitCondition wait) {
@@ -2889,6 +3633,46 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         return wait.cargoFilter().getHoverName();
     }
 
+    private Component cargoTargetText(WaitCondition wait) {
+        return Component.translatable(
+                wait.cargoTarget() == CargoWaitTarget.SHIP_CARGO
+                        ? "gui.create_aeronautics_automated_logistics.airship_schedule.cargo_target.ship"
+                        : "gui.create_aeronautics_automated_logistics.airship_schedule.cargo_target.station"
+        );
+    }
+
+    private Component redstoneFrequencyName(ItemStack stack) {
+        return stack.isEmpty()
+                ? Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.redstone_link.empty")
+                : stack.getHoverName();
+    }
+
+    private ItemStack redstoneLinkIcon() {
+        ResourceLocation id = ResourceLocation.fromNamespaceAndPath("create", "redstone_link");
+        return BuiltInRegistries.ITEM.getOptional(id).map(ItemStack::new).orElse(Items.REDSTONE.getDefaultInstance());
+    }
+
+    private Component timeOfDayDisplay(WaitCondition wait, boolean doubleDigitHours) {
+        return timeOfDayDisplay(wait.timeOfDayHour(), wait.timeOfDayMinute(), doubleDigitHours);
+    }
+
+    private Component timeOfDayDisplay(int hour, int minute, boolean doubleDigitHours) {
+        int hour12 = hour % 12 == 0 ? 12 : hour % 12;
+        String displayHour12 = doubleDigitHours ? twoDigits(hour12) : Integer.toString(hour12);
+        String displayHour24 = doubleDigitHours ? twoDigits(hour) : Integer.toString(hour);
+        return Component.translatable(
+                "gui.create_aeronautics_automated_logistics.airship_schedule.time_of_day.digital_format",
+                displayHour12,
+                displayHour24,
+                twoDigits(minute),
+                Component.translatable(hour > 11 ? "create.generic.daytime.pm" : "create.generic.daytime.am")
+        );
+    }
+
+    private String twoDigits(int value) {
+        return value < 10 ? "0" + value : Integer.toString(value);
+    }
+
     private Component optionLine(WaitDurationUnit unit) {
         WaitDurationUnit current = currentEntry().map(AirshipScheduleEntry::waitUnit).orElse(WaitDurationUnit.SECONDS);
         return Component.literal(current == unit ? "-> " : "> ")
@@ -2904,11 +3688,12 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         int ticks = switch (waitCondition.type()) {
             case UNTIL_DOCKED -> waitCondition.runtimeTicks();
             case UNTIL_IDLE -> waitCondition.idleTicks();
+            case REDSTONE_LINK, REDSTONE, TIME_OF_DAY -> 0;
             case UNTIL_ITEM_THRESHOLD, UNTIL_FLUID_THRESHOLD -> waitCondition.durationTicks();
+            case UNTIL_ITEM_EMPTY, UNTIL_ITEM_FULL, UNTIL_FLUID_EMPTY, UNTIL_FLUID_FULL -> 0;
             default -> waitCondition.durationTicks();
         };
-        if (waitCondition.type() == WaitConditionType.UNTIL_ITEM_THRESHOLD
-                || waitCondition.type() == WaitConditionType.UNTIL_FLUID_THRESHOLD) {
+        if (isCargoThresholdWaitType(waitCondition.type())) {
             return ticks;
         }
         return switch (waitUnit) {
@@ -3033,6 +3818,28 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         private void renderBg(int guiLeft, GuiGraphics graphics) {
             this.line.renderWidgetBG(guiLeft, graphics);
         }
+    }
+
+    private int cargoStableSeconds(WaitCondition waitCondition) {
+        return waitCondition.cargoStabilityTicks() / 20;
+    }
+
+    private Component cargoStableSecondsLabel(int seconds) {
+        return Component.literal(seconds + "s");
+    }
+
+    private Component cargoStableShortText(WaitCondition waitCondition) {
+        return Component.translatable(
+                "gui.create_aeronautics_automated_logistics.airship_schedule.cargo_stable_for.short",
+                cargoStableSeconds(waitCondition)
+        );
+    }
+
+    private Component cargoStableLongText(WaitCondition waitCondition) {
+        return Component.translatable(
+                "gui.create_aeronautics_automated_logistics.airship_schedule.cargo_stable_for.long",
+                cargoStableSeconds(waitCondition)
+        );
     }
 
     private static final class ClippedEditBox extends EditBox {

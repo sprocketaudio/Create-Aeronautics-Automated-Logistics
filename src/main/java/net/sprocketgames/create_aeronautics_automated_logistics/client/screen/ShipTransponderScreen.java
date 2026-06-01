@@ -15,6 +15,7 @@ import java.util.Set;
 import java.util.UUID;
 import net.createmod.catnip.data.IntAttached;
 import net.createmod.catnip.gui.element.ScreenElement;
+import net.minecraft.core.BlockPos;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
@@ -29,6 +30,8 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
+import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity;
+import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.CargoLinkPromptClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.DockLinkPromptClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.LogisticsClientOverlays;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.MenuActionBarClientState;
@@ -59,14 +62,18 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     private static final ResourceLocation CREATE_WIDGETS =
             ResourceLocation.fromNamespaceAndPath("create", "textures/gui/widgets.png");
     private static final int SCHEDULE_LABEL_X = 36;
-    private static final int SCHEDULE_LABEL_Y = 96;
+    private static final int SCHEDULE_LABEL_Y = 91;
     private static final int CONTROL_LABEL_X = 36;
     private static final int CONTROL_LABEL_Y = 66;
     private static final int CONTROL_BUTTON_Y = 56;
     private static final int DOCK_LABEL_X = 36;
-    private static final int DOCK_LABEL_Y = 123;
+    private static final int DOCK_LABEL_Y = 110;
+    private static final int CARGO_LABEL_X = 36;
+    private static final int CARGO_LABEL_Y = 124;
     private static final int DOCK_BUTTON_RIGHT_X = 142;
     private static final int DOCK_BUTTON_LEFT_X = 128;
+    private static final int CARGO_BUTTON_RIGHT_X = 142;
+    private static final int CARGO_BUTTON_LEFT_X = 128;
     private static final int STATUS_FOOTER_X = 60;
     private static final int STATUS_FOOTER_Y = 159;
     private static final int STATUS_FOOTER_WIDTH = 118;
@@ -74,6 +81,8 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             new AtlasIcon(ResourceLocation.fromNamespaceAndPath("create", "textures/gui/icons.png"), 176, 16, 16, 16, 256);
     private static final ScreenElement SHOW_DOCK_ICON =
             new AtlasIcon(ResourceLocation.fromNamespaceAndPath("create", "textures/gui/icons.png"), 64, 192, 16, 16, 256);
+    private static final ScreenElement SHOW_CARGO_ICON =
+            new AtlasIcon(ResourceLocation.fromNamespaceAndPath("create", "textures/gui/icons.png"), -1, 176, 15, 15, 256, 1.0F, 16);
     private static final ScreenElement EDIT_SCHEDULE_ICON =
             new AtlasIcon(ResourceLocation.fromNamespaceAndPath(CreateAeronauticsAutomatedLogistics.MOD_ID, "textures/gui/transponder.png"), 16, 240, 16, 16, 256, 1.0F, 16);
     private static final int MODE_TOGGLE_U = 219;
@@ -90,7 +99,8 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     private static final int RECORD_LABEL_Y = 66;
     private static final int RECORD_BUTTON_Y = 56;
     private static final int FOOTER_ROUTE_BUTTON_X = 17;
-    private static final int FOOTER_DOCK_BUTTON_X = 43;
+    private static final int FOOTER_DOCK_BUTTON_X = 38;
+    private static final int FOOTER_CARGO_BUTTON_X = 59;
     private static final int ROUTE_SELECTION_WIDTH = 206;
     private static final int ROUTE_SELECTION_HEIGHT = 101;
     private static final int ROUTE_SELECTION_Y = 43;
@@ -120,9 +130,12 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     private IconButton recordCancelButton;
     private IconButton previewButton;
     private IconButton dockPreviewButton;
+    private IconButton cargoPreviewButton;
     private IconButton scheduleEditButton;
     private MiniIconButton dockLinkButton;
     private MiniIconButton dockClearButton;
+    private MiniIconButton cargoLinkButton;
+    private MiniIconButton cargoClearButton;
     private boolean recordingMode;
     private boolean recordingSessionActive;
     private boolean routeSelectionOpen;
@@ -140,6 +153,10 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     private int dockValueY;
     private int dockValueWidth;
     private int dockValueHeight;
+    private int cargoValueX;
+    private int cargoValueY;
+    private int cargoValueWidth;
+    private int cargoValueHeight;
 
     public ShipTransponderScreen(ShipTransponderMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
@@ -197,7 +214,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         );
         scheduleEditButton = addIconButton(
                 this.leftPos + 137,
-                this.topPos + 86,
+                this.topPos + 83,
                 EDIT_SCHEDULE_ICON,
                 this::openInstalledScheduleEditor,
                 Component.literal("Edit stop order, remove stops, and set wait conditions.")
@@ -209,6 +226,13 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                 this::toggleDockPreview,
                 dockPreviewTooltip()
         );
+        cargoPreviewButton = addIconButton(
+                this.leftPos + FOOTER_CARGO_BUTTON_X,
+                this.topPos + 154,
+                SHOW_CARGO_ICON,
+                this::toggleCargoPreview,
+                cargoPreviewTooltip()
+        );
         addIconButton(
                 this.leftPos + 167,
                 this.topPos + 154,
@@ -218,17 +242,31 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         );
         dockLinkButton = addMiniIconButton(
                 this.leftPos + DOCK_BUTTON_LEFT_X,
-                this.topPos + 119,
+                this.topPos + 108,
                 AllIcons.I_ADD,
                 () -> pressAction(ShipTransponderMenu.ACTION_BEGIN_LINK_DOCK),
                 Component.translatable("gui.create_aeronautics_automated_logistics.dock.link")
         );
         dockClearButton = addMiniIconButton(
                 this.leftPos + DOCK_BUTTON_RIGHT_X,
-                this.topPos + 119,
+                this.topPos + 108,
                 AllIcons.I_MTD_CLOSE,
                 () -> pressAction(ShipTransponderMenu.ACTION_CLEAR_DOCK_LINK),
                 Component.translatable("gui.create_aeronautics_automated_logistics.dock.clear")
+        );
+        cargoLinkButton = addMiniIconButton(
+                this.leftPos + CARGO_BUTTON_LEFT_X,
+                this.topPos + 122,
+                AllIcons.I_ADD,
+                () -> pressAction(ShipTransponderMenu.ACTION_LINK_CARGO),
+                Component.translatable("gui.create_aeronautics_automated_logistics.cargo.link")
+        );
+        cargoClearButton = addMiniIconButton(
+                this.leftPos + CARGO_BUTTON_RIGHT_X,
+                this.topPos + 122,
+                AllIcons.I_MTD_CLOSE,
+                () -> pressAction(ShipTransponderMenu.ACTION_CLEAR_CARGO),
+                Component.translatable("gui.create_aeronautics_automated_logistics.cargo.clear")
         );
         recordButton = addIconButton(
                 this.leftPos + 111,
@@ -318,14 +356,14 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             previewButton.active = showScheduleButtons
                     && this.minecraft != null
                     && this.minecraft.player != null
-                    && menu.canControlTransponderLocally(this.minecraft.player);
+                    && menu.canControlTransponderLocally(this.minecraft.player)
+                    && menu.canPreviewOwnedRoute(this.minecraft.player);
         }
         if (scheduleEditButton != null) {
             scheduleEditButton.visible = true;
             scheduleEditButton.active = this.minecraft != null
                     && this.minecraft.player != null
-                    && menu.hasOwnedStops(this.minecraft.player)
-                    && !menu.isScheduleSlotLocked(this.minecraft.player);
+                    && menu.hasOwnedStops(this.minecraft.player);
         }
         if (recordButton != null) {
             recordButton.visible = recordingMode;
@@ -352,6 +390,13 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                     && this.minecraft.player != null
                     && menu.dockPreviewPos(this.minecraft.player).isPresent();
         }
+        if (cargoPreviewButton != null) {
+            cargoPreviewButton.visible = !recordingMode;
+            cargoPreviewButton.active = !recordingMode
+                    && this.minecraft != null
+                    && this.minecraft.player != null
+                    && !menu.cargoPreviewPositionGroups(this.minecraft.player).isEmpty();
+        }
         if (dockLinkButton != null) {
             dockLinkButton.visible = !recordingMode;
             dockLinkButton.active = !recordingMode;
@@ -363,7 +408,21 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                     && this.minecraft.player != null
                     && menu.dockPreviewPos(this.minecraft.player).isPresent();
         }
+        if (cargoLinkButton != null) {
+            cargoLinkButton.visible = !recordingMode;
+            cargoLinkButton.active = !recordingMode;
+        }
+        if (cargoClearButton != null) {
+            cargoClearButton.visible = !recordingMode;
+            cargoClearButton.active = !recordingMode
+                    && this.minecraft != null
+                    && this.minecraft.player != null
+                    && menu.hasLinkedCargo(this.minecraft.player);
+        }
         if (previewButton != null) {
+            if (!previewButton.active) {
+                LogisticsClientOverlays.clearFlightPath();
+            }
             previewButton.green = LogisticsClientOverlays.hasFlightPath();
         }
         if (!recordingMode && dockPreviewButton != null && this.minecraft != null && this.minecraft.player != null) {
@@ -380,6 +439,19 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             boolean pendingDockLink = DockLinkPromptClientState.isPendingForTransponder(this.menu.transponderPos());
             dockClearButton.active = pendingDockLink || menu.dockPreviewPos(this.minecraft.player).isPresent();
             dockClearButton.green = pendingDockLink;
+        }
+        if (!recordingMode && cargoPreviewButton != null && this.minecraft != null && this.minecraft.player != null) {
+            List<List<BlockPos>> cargoPreview = menu.cargoPreviewPositionGroups(this.minecraft.player);
+            if (cargoPreview.isEmpty()) {
+                LogisticsClientOverlays.clearCargo();
+            }
+            cargoPreviewButton.active = !cargoPreview.isEmpty();
+            cargoPreviewButton.green = LogisticsClientOverlays.isCargoVisibleGroups(cargoPreview);
+        }
+        if (!recordingMode && cargoClearButton != null && this.minecraft != null && this.minecraft.player != null) {
+            boolean pendingCargoLink = CargoLinkPromptClientState.isPendingForTransponder(this.menu.transponderPos());
+            cargoClearButton.active = pendingCargoLink || menu.hasLinkedCargo(this.minecraft.player);
+            cargoClearButton.green = pendingCargoLink;
         }
         if (routeSelectionOpen) {
             if (nameBox != null) {
@@ -402,11 +474,20 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             if (dockPreviewButton != null) {
                 dockPreviewButton.active = false;
             }
+            if (cargoPreviewButton != null) {
+                cargoPreviewButton.active = false;
+            }
             if (dockLinkButton != null) {
                 dockLinkButton.active = false;
             }
             if (dockClearButton != null) {
                 dockClearButton.active = false;
+            }
+            if (cargoLinkButton != null) {
+                cargoLinkButton.active = false;
+            }
+            if (cargoClearButton != null) {
+                cargoClearButton.active = false;
             }
             if (recordButton != null) {
                 recordButton.active = false;
@@ -624,17 +705,29 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             Component dock = menu.dockCompactText(this.minecraft.player);
             int dockY = this.topPos + DOCK_LABEL_Y;
             guiGraphics.drawString(this.font, "Dock:", this.leftPos + DOCK_LABEL_X, dockY, 0xFF9EA5AA, false);
-            int dockValueAreaLeft = this.leftPos + DOCK_LABEL_X + this.font.width("Dock: ") + 2;
-            int dockValueAreaWidth = (this.leftPos + DOCK_BUTTON_LEFT_X - 4) - dockValueAreaLeft;
-            String dockText = shortText(dock, Math.max(1, dockValueAreaWidth));
-            int dockValueDrawX = dockValueAreaLeft + Math.max(0, (dockValueAreaWidth - this.font.width(dockText)) / 2);
-            dockValueX = Math.max(dockValueAreaLeft, dockValueDrawX);
+            int linkValueAreaLeft = this.leftPos + DOCK_LABEL_X + Math.max(this.font.width("Dock: "), this.font.width("Cargo: ")) + 2;
+            int linkValueAreaWidth = (this.leftPos + DOCK_BUTTON_LEFT_X - 4) - linkValueAreaLeft;
+            String dockText = shortText(dock, Math.max(1, linkValueAreaWidth));
+            int dockValueDrawX = linkValueAreaLeft + Math.max(0, (linkValueAreaWidth - this.font.width(dockText)) / 2);
+            dockValueX = Math.max(linkValueAreaLeft, dockValueDrawX);
             dockValueY = dockY;
             dockValueWidth = this.font.width(dockText);
             dockValueHeight = this.font.lineHeight;
             guiGraphics.drawString(this.font, dockText, dockValueX, dockY, menu.dockStatusColor(this.minecraft.player), false);
+
+            Component cargo = menu.cargoCompactText(this.minecraft.player);
+            int cargoY = this.topPos + CARGO_LABEL_Y;
+            guiGraphics.drawString(this.font, "Cargo:", this.leftPos + CARGO_LABEL_X, cargoY, 0xFF9EA5AA, false);
+            String cargoText = shortText(cargo, Math.max(1, linkValueAreaWidth));
+            int cargoValueDrawX = linkValueAreaLeft + Math.max(0, (linkValueAreaWidth - this.font.width(cargoText)) / 2);
+            cargoValueX = Math.max(linkValueAreaLeft, cargoValueDrawX);
+            cargoValueY = cargoY;
+            cargoValueWidth = this.font.width(cargoText);
+            cargoValueHeight = this.font.lineHeight;
+            guiGraphics.drawString(this.font, cargoText, cargoValueX, cargoY, menu.cargoStatusColor(this.minecraft.player), false);
         } else {
             dockValueX = dockValueY = dockValueWidth = dockValueHeight = 0;
+            cargoValueX = cargoValueY = cargoValueWidth = cargoValueHeight = 0;
         }
     }
 
@@ -658,15 +751,31 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             guiGraphics.renderTooltip(this.font, List.of(dockPreviewTooltip()), java.util.Optional.empty(), mouseX, mouseY);
             return;
         }
+        if (cargoPreviewButton != null && cargoPreviewButton.isHovered()) {
+            guiGraphics.renderTooltip(this.font, List.of(cargoPreviewTooltip()), java.util.Optional.empty(), mouseX, mouseY);
+            return;
+        }
         if (dockClearButton != null && dockClearButton.isHovered()) {
             guiGraphics.renderTooltip(this.font, List.of(dockClearTooltip()), java.util.Optional.empty(), mouseX, mouseY);
+            return;
+        }
+        if (cargoClearButton != null && cargoClearButton.isHovered()) {
+            guiGraphics.renderTooltip(
+                    this.font,
+                    List.of(cargoClearTooltip()),
+                    java.util.Optional.empty(),
+                    mouseX,
+                    mouseY
+            );
             return;
         }
         for (ButtonTooltip tooltip : buttonTooltips) {
             if (tooltip.button() == recordButton
                     || tooltip.button() == previewButton
                     || tooltip.button() == dockPreviewButton
-                    || tooltip.button() == dockClearButton) {
+                    || tooltip.button() == cargoPreviewButton
+                    || tooltip.button() == dockClearButton
+                    || tooltip.button() == cargoClearButton) {
                 continue;
             }
             if (tooltip.button().isHovered() && !tooltip.lines().isEmpty()) {
@@ -687,6 +796,10 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             }
             if (isInside(mouseX, mouseY, dockValueX, dockValueY, Math.max(1, dockValueWidth), Math.max(1, dockValueHeight))) {
                 guiGraphics.renderTooltip(this.font, menu.dockTooltip(this.minecraft.player), java.util.Optional.empty(), mouseX, mouseY);
+                return;
+            }
+            if (isInside(mouseX, mouseY, cargoValueX, cargoValueY, Math.max(1, cargoValueWidth), Math.max(1, cargoValueHeight))) {
+                guiGraphics.renderTooltip(this.font, menu.cargoTooltip(this.minecraft.player), java.util.Optional.empty(), mouseX, mouseY);
                 return;
             }
         }
@@ -722,6 +835,18 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         );
     }
 
+    private void toggleCargoPreview() {
+        if (this.minecraft == null || this.minecraft.player == null) {
+            return;
+        }
+        List<List<BlockPos>> cargoPreview = this.menu.cargoPreviewPositionGroups(this.minecraft.player);
+        if (cargoPreview.isEmpty()) {
+            LogisticsClientOverlays.clearCargo();
+            return;
+        }
+        LogisticsClientOverlays.toggleCargoGroups(cargoPreview);
+    }
+
     public boolean isRecordingMode() {
         return recordingMode;
     }
@@ -731,6 +856,25 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                 DockLinkPromptClientState.isPendingForTransponder(this.menu.transponderPos())
                         ? "gui.create_aeronautics_automated_logistics.dock.cancel"
                         : "gui.create_aeronautics_automated_logistics.dock.clear"
+        );
+    }
+
+    private Component cargoPreviewTooltip() {
+        boolean visible = this.minecraft != null
+                && this.minecraft.player != null
+                && LogisticsClientOverlays.isCargoVisibleGroups(this.menu.cargoPreviewPositionGroups(this.minecraft.player));
+        return Component.translatable(
+                visible
+                        ? "gui.create_aeronautics_automated_logistics.cargo.hide"
+                        : "gui.create_aeronautics_automated_logistics.cargo.show"
+        );
+    }
+
+    private Component cargoClearTooltip() {
+        return Component.translatable(
+                CargoLinkPromptClientState.isPendingForTransponder(this.menu.transponderPos())
+                        ? "gui.create_aeronautics_automated_logistics.cargo.cancel"
+                        : "gui.create_aeronautics_automated_logistics.cargo.clear"
         );
     }
 
@@ -940,6 +1084,8 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         }
         boolean isOp = this.minecraft.player.hasPermissions(2);
         return AirshipStationRegistry.knownStations(this.minecraft.level.dimension()).stream()
+                .filter(station -> this.minecraft.level.getBlockEntity(station.stationPos()) instanceof AirshipStationBlockEntity blockEntity
+                        && blockEntity.stationId().equals(station.stationId()))
                 .filter(station -> StationPermissionService.canControl(this.minecraft.player.getUUID(), isOp, station))
                 .toList();
     }

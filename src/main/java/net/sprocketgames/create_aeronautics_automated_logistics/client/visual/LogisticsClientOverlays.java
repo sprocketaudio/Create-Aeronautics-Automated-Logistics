@@ -2,12 +2,18 @@ package net.sprocketgames.create_aeronautics_automated_logistics.client.visual;
 
 import com.mojang.datafixers.util.Pair;
 import com.simibubi.create.AllSpecialTextures;
+import java.util.ArrayDeque;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.ArrayList;
+import java.util.Set;
 import net.createmod.catnip.outliner.Outliner;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -24,12 +30,15 @@ public final class LogisticsClientOverlays {
     private static final int START_COLOR = 0x95E06C;
     private static final int END_COLOR = 0xFFD36C;
     private static final int DOCK_COLOR = 0x7AD7FF;
+    private static final int CARGO_COLOR = 0x9BEA8B;
     private static final int LANDING_SEGMENTS = 48;
     private static final int LATITUDE_RINGS = 5;
     private static final int ROUTE_ARROW_SPACING = 12;
 
     private static Optional<LandingAreaOverlay> landingAreaOverlay = Optional.empty();
     private static Optional<BlockPos> dockOverlay = Optional.empty();
+    private static List<BlockPos> cargoOverlay = List.of();
+    private static List<List<BlockPos>> cargoOverlayGroups = List.of();
     private static List<Vec3> flightPath = List.of();
     private static List<Integer> flightPathLegEnds = List.of();
     private static Optional<UUID> previewedRouteId = Optional.empty();
@@ -73,6 +82,56 @@ public final class LogisticsClientOverlays {
         return dockOverlay.isPresent() && dockOverlay.get().equals(dockPos);
     }
 
+    public static void toggleCargo(List<BlockPos> cargoPositions) {
+        toggleCargoGroups(List.of(cargoPositions));
+    }
+
+    public static void toggleCargoGroups(List<List<BlockPos>> cargoPositionGroups) {
+        List<List<BlockPos>> normalized = normalizeCargoGroups(cargoPositionGroups);
+        List<BlockPos> flat = normalized.stream().flatMap(List::stream).toList();
+        if (cargoOverlayGroups.equals(normalized)) {
+            clearCargo();
+            return;
+        }
+        clearCargo();
+        cargoOverlayGroups = normalized;
+        cargoOverlay = flat;
+    }
+
+    private static List<BlockPos> normalizeCargoPositions(List<BlockPos> cargoPositions) {
+        List<BlockPos> normalized = cargoPositions.stream().map(BlockPos::immutable).distinct().sorted(Comparator
+                .comparingInt((BlockPos pos) -> pos.getY())
+                .thenComparingInt(pos -> pos.getZ())
+                .thenComparingInt(pos -> pos.getX())).toList();
+        return normalized;
+    }
+
+    private static List<List<BlockPos>> normalizeCargoGroups(List<List<BlockPos>> cargoPositionGroups) {
+        return cargoPositionGroups.stream()
+                .map(LogisticsClientOverlays::normalizeCargoPositions)
+                .filter(group -> !group.isEmpty())
+                .sorted(Comparator
+                        .comparingInt((List<BlockPos> group) -> group.getFirst().getY())
+                        .thenComparingInt(group -> group.getFirst().getZ())
+                        .thenComparingInt(group -> group.getFirst().getX()))
+                .toList();
+    }
+
+    public static void clearCargo() {
+        removeCargo(cargoOverlayGroups);
+        cargoOverlay = List.of();
+        cargoOverlayGroups = List.of();
+    }
+
+    public static boolean isCargoVisible(List<BlockPos> cargoPositions) {
+        return isCargoVisibleGroups(List.of(cargoPositions));
+    }
+
+    public static boolean isCargoVisibleGroups(List<List<BlockPos>> cargoPositionGroups) {
+        List<List<BlockPos>> normalized = normalizeCargoGroups(cargoPositionGroups);
+        return cargoOverlayGroups.equals(normalized) && !cargoOverlayGroups.isEmpty();
+    }
+
     public static void setFlightPath(List<Vec3> points, List<Integer> legEndIndices) {
         removeFlightPath(flightPath);
         flightPath = List.copyOf(points);
@@ -101,6 +160,9 @@ public final class LogisticsClientOverlays {
     public static void refresh() {
         landingAreaOverlay.ifPresent(LogisticsClientOverlays::showLandingArea);
         dockOverlay.ifPresent(LogisticsClientOverlays::showDock);
+        if (!cargoOverlay.isEmpty()) {
+            showCargo(cargoOverlayGroups);
+        }
         if (flightPath.size() >= 2) {
             showFlightPath(flightPath, flightPathLegEnds);
         }
@@ -167,6 +229,71 @@ public final class LogisticsClientOverlays {
 
     private static void removeDock(BlockPos dockPos) {
         Outliner.getInstance().remove(Pair.of("dock_overlay", dockPos));
+    }
+
+    private static void showCargo(List<List<BlockPos>> cargoPositionGroups) {
+        for (List<BlockPos> group : cargoPositionGroups) {
+            List<CargoCluster> clusters = clusterCargo(group);
+            for (CargoCluster cluster : clusters) {
+                Outliner.getInstance()
+                        .showAABB(Pair.of("cargo_overlay", cluster.key()), cluster.bounds())
+                        .colored(CARGO_COLOR)
+                        .lineWidth(1 / 18f)
+                        .disableLineNormals()
+                        .withFaceTexture(AllSpecialTextures.SELECTION);
+            }
+        }
+    }
+
+    private static void removeCargo(List<List<BlockPos>> cargoPositionGroups) {
+        for (List<BlockPos> group : cargoPositionGroups) {
+            for (CargoCluster cluster : clusterCargo(group)) {
+                Outliner.getInstance().remove(Pair.of("cargo_overlay", cluster.key()));
+            }
+        }
+    }
+
+    private static List<CargoCluster> clusterCargo(List<BlockPos> cargoPositions) {
+        Set<BlockPos> remaining = new HashSet<>(cargoPositions.stream().map(BlockPos::immutable).toList());
+        List<CargoCluster> clusters = new ArrayList<>();
+        while (!remaining.isEmpty()) {
+            BlockPos seed = remaining.iterator().next();
+            remaining.remove(seed);
+            ArrayDeque<BlockPos> queue = new ArrayDeque<>();
+            queue.add(seed);
+            int minX = seed.getX();
+            int minY = seed.getY();
+            int minZ = seed.getZ();
+            int maxX = seed.getX();
+            int maxY = seed.getY();
+            int maxZ = seed.getZ();
+            while (!queue.isEmpty()) {
+                BlockPos current = queue.removeFirst();
+                minX = Math.min(minX, current.getX());
+                minY = Math.min(minY, current.getY());
+                minZ = Math.min(minZ, current.getZ());
+                maxX = Math.max(maxX, current.getX());
+                maxY = Math.max(maxY, current.getY());
+                maxZ = Math.max(maxZ, current.getZ());
+                for (Direction direction : Direction.values()) {
+                    BlockPos neighbor = current.relative(direction).immutable();
+                    if (remaining.remove(neighbor)) {
+                        queue.addLast(neighbor);
+                    }
+                }
+            }
+            AABB bounds = new AABB(minX, minY, minZ, maxX + 1D, maxY + 1D, maxZ + 1D);
+            clusters.add(new CargoCluster(seed, bounds));
+        }
+        return clusters.stream()
+                .sorted(Comparator
+                        .comparingInt((CargoCluster cluster) -> cluster.key().getY())
+                        .thenComparingInt(cluster -> cluster.key().getZ())
+                        .thenComparingInt(cluster -> cluster.key().getX()))
+                .toList();
+    }
+
+    private record CargoCluster(BlockPos key, AABB bounds) {
     }
 
     private static void showFlightPath(List<Vec3> points, List<Integer> legEndIndices) {

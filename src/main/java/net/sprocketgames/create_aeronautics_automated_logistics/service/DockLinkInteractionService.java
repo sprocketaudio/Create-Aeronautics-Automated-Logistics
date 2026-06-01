@@ -29,13 +29,11 @@ public final class DockLinkInteractionService {
 
     public static void beginStationLink(ServerPlayer player, BlockPos stationPos) {
         PENDING.put(player.getUUID(), new PendingDockLink(LinkTarget.STATION, stationPos.immutable(), player.level().dimension(), player.level().getGameTime() + LINK_TIMEOUT_TICKS));
-        actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.dock_link.station_begin"));
         PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(true, false, stationPos.immutable()));
     }
 
     public static void beginTransponderLink(ServerPlayer player, BlockPos transponderPos) {
         PENDING.put(player.getUUID(), new PendingDockLink(LinkTarget.TRANSPONDER, transponderPos.immutable(), player.level().dimension(), player.level().getGameTime() + LINK_TIMEOUT_TICKS));
-        actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.dock_link.transponder_begin"));
         PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(true, true, transponderPos.immutable()));
     }
 
@@ -161,7 +159,6 @@ public final class DockLinkInteractionService {
     }
 
     private static void actionBar(ServerPlayer player, Component message) {
-        player.displayClientMessage(message, true);
         SetMenuActionBarMessagePayload.send(player, message);
     }
 

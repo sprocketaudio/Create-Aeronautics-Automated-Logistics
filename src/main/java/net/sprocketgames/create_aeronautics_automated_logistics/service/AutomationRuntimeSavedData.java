@@ -61,8 +61,8 @@ public class AutomationRuntimeSavedData extends SavedData {
 
     public void apply(MinecraftServer server) {
         logSnapshot("applying to server", true);
-        AutomatedLogisticsServices.PLAYBACK.loadRuntime(server, playbackTag);
         AutomatedLogisticsServices.SCHEDULES.loadRuntime(server, scheduleTag);
+        AutomatedLogisticsServices.PLAYBACK.loadRuntime(server, playbackTag);
     }
 
     @Override

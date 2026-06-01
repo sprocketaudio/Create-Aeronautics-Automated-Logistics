@@ -38,6 +38,26 @@ public final class RouteSegmentRegistry {
         SEGMENTS.remove(segmentId);
     }
 
+    public static List<RouteSegment> connectedToStation(UUID stationId) {
+        return SEGMENTS.values().stream()
+                .filter(segment -> segment.startStationId().equals(stationId) || segment.endStationId().equals(stationId))
+                .sorted(Comparator
+                        .comparingLong(RouteSegment::createdEpochMillis)
+                        .reversed()
+                        .thenComparing(segment -> segment.id().value().toString()))
+                .toList();
+    }
+
+    public static List<RouteSegment> forTransponder(UUID transponderId) {
+        return SEGMENTS.values().stream()
+                .filter(segment -> segment.transponderId().equals(transponderId))
+                .sorted(Comparator
+                        .comparingLong(RouteSegment::createdEpochMillis)
+                        .reversed()
+                        .thenComparing(segment -> segment.id().value().toString()))
+                .toList();
+    }
+
     public static List<RouteSegment> endingAt(
             UUID endStationId,
             ResourceKey<Level> dimension,

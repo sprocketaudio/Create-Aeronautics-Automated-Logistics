@@ -115,6 +115,14 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
 
     public int selectedIndex(Player player) {
         AirshipSchedule schedule = schedule(player);
+        Optional<ShipTransponderBlockEntity> transponder = editableTransponder(player);
+        if (transponder.isPresent()) {
+            Optional<Integer> currentEntryIndex = net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES
+                    .currentEntryIndex(transponder.get().transponderId());
+            if (currentEntryIndex.isPresent() && !schedule.entries().isEmpty()) {
+                return Math.max(0, Math.min(currentEntryIndex.get(), schedule.entries().size() - 1));
+            }
+        }
         clampSelectedIndex(schedule);
         return selectedIndex;
     }
@@ -156,6 +164,13 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         return originTransponderPos != null;
     }
 
+    public boolean isReadOnly(Player player) {
+        return editableTransponder(player)
+                .map(transponder -> !transponder.isRemoved()
+                        && net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES.isRunning(transponder.transponderId()))
+                .orElse(false);
+    }
+
     public Optional<BlockPos> originTransponderPos() {
         return Optional.ofNullable(originTransponderPos);
     }
@@ -186,6 +201,9 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
             return true;
         }
         if (!canModify(player)) {
+            return false;
+        }
+        if (isReadOnly(player)) {
             return false;
         }
         AirshipSchedule schedule = schedule(player);
@@ -496,6 +514,9 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
     }
 
     public void writeSchedule(Player player, AirshipSchedule schedule) {
+        if (isReadOnly(player)) {
+            return;
+        }
         Optional<ShipTransponderBlockEntity> transponder = editableTransponder(player);
         if (transponder.isPresent()) {
             if (player instanceof ServerPlayer serverPlayer

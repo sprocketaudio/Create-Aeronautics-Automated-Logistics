@@ -3,6 +3,7 @@ package net.sprocketgames.create_aeronautics_automated_logistics.block;
 import com.mojang.serialization.MapCodec;
 import javax.annotation.Nullable;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.LivingEntity;
@@ -30,14 +31,19 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.Containers;
+import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityDirectorySavedData;
+import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.ShipTransponderMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.FailureReason;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteBlockBreakProtection;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
 import org.jetbrains.annotations.NotNull;
 
 public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock {
@@ -95,6 +101,23 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
     }
 
     @Override
+    public void attack(BlockState state, Level level, BlockPos pos, Player player) {
+        RouteBlockBreakProtection.warnIfBlocked(
+                level,
+                player,
+                Component.translatable("message.create_aeronautics_automated_logistics.transponder.break_requires_crouch")
+        );
+    }
+
+    @Override
+    public float getDestroyProgress(BlockState state, Player player, BlockGetter level, BlockPos pos) {
+        if (RouteBlockBreakProtection.shouldBlockBreak(player)) {
+            return 0.0F;
+        }
+        return super.getDestroyProgress(state, player, level, pos);
+    }
+
+    @Override
     public void setPlacedBy(Level level, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack stack) {
         super.setPlacedBy(level, pos, state, placer, stack);
         if (!(level.getBlockEntity(pos) instanceof ShipTransponderBlockEntity transponder)) {
@@ -118,9 +141,20 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
             if (DockLinkInteractionService.cancelPendingIfSource(serverPlayer, pos)) {
                 return InteractionResult.CONSUME;
             }
+            if (CargoLinkInteractionService.cancelPendingIfSource(serverPlayer, pos)) {
+                return InteractionResult.CONSUME;
+            }
             transponder.refreshRuntimeShip((ServerLevel) level);
+            transponder.pruneInvalidOwnedSchedule((ServerLevel) level);
             ShipTransponderMenu.InitialRecordingState recordingState =
                     ShipTransponderMenu.resolveInitialRecordingState(serverPlayer, transponder, false);
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Transponder openMenu id={} pos={} linkedCargoCount={} cargoSummary={}",
+                    transponder.transponderId(),
+                    pos,
+                    transponder.linkedCargo().size(),
+                    transponder.linkedCargoSummary()
+            );
             serverPlayer.openMenu(transponder, buffer -> {
                 buffer.writeBlockPos(pos);
                 buffer.writeBoolean(recordingState.recordingMode());
@@ -128,6 +162,8 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
                 buffer.writeBoolean(recordingState.appendToSchedule());
                 buffer.writeBoolean(transponder.recordingDestinationStationId().isPresent());
                 transponder.recordingDestinationStationId().ifPresent(buffer::writeUUID);
+                ShipTransponderMenu.writeCargoSummary(buffer, transponder.linkedCargoSummary());
+                ShipTransponderMenu.writeLinkedCargoEntries(buffer, transponder.linkedCargo());
             });
         }
         return InteractionResult.CONSUME;
@@ -202,6 +238,8 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
                 transponder.setRecordingDestinationStationId(java.util.Optional.empty());
                 transponder.setDockOutputActive(false);
                 transponder.setRuntimeStatus(RouteStatus.IDLE);
+                ScheduleRouteCleanup.removeRoutesForDeletedTransponder(serverLevel, transponder.transponderId());
+                ShipTransponderRegistry.unregister(transponder.transponderId());
                 IdentityDirectorySavedData.removeShip(serverLevel.getServer(), transponder.transponderId());
             }
         }

@@ -6,6 +6,7 @@ import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.client.gui.ConfigurationScreen;
@@ -18,6 +19,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.Ai
 import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.ShipTransponderScreen;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.AutomatedShipVisualClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.DockLinkPromptClientState;
+import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.CargoLinkPromptClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.LogisticsClientOverlays;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.MenuActionBarClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModMenus;
@@ -28,6 +30,7 @@ public class CreateAeronauticsAutomatedLogisticsClient {
     public CreateAeronauticsAutomatedLogisticsClient(ModContainer container) {
         container.registerExtensionPoint(IConfigScreenFactory.class, ConfigurationScreen::new);
         NeoForge.EVENT_BUS.addListener(CreateAeronauticsAutomatedLogisticsClient::onClientTick);
+        NeoForge.EVENT_BUS.addListener(CreateAeronauticsAutomatedLogisticsClient::onRenderGuiPost);
         NeoForge.EVENT_BUS.addListener(CreateAeronauticsAutomatedLogisticsClient::onScreenRenderPost);
         PonderIndex.addPlugin(new AutomatedLogisticsPonderPlugin());
     }
@@ -42,11 +45,26 @@ public class CreateAeronauticsAutomatedLogisticsClient {
     public static void onClientTick(ClientTickEvent.Post event) {
         AutomatedShipVisualClientState.clearIfWorldMissing();
         DockLinkPromptClientState.tick();
+        CargoLinkPromptClientState.tick();
         MenuActionBarClientState.tick();
         LogisticsClientOverlays.refresh();
     }
 
+    public static void onRenderGuiPost(RenderGuiEvent.Post event) {
+        renderOverlayMessages(event.getGuiGraphics(), false);
+    }
+
     public static void onScreenRenderPost(ScreenEvent.Render.Post event) {
-        MenuActionBarClientState.render(event.getGuiGraphics());
+        renderOverlayMessages(event.getGuiGraphics(), true);
+    }
+
+    private static void renderOverlayMessages(net.minecraft.client.gui.GuiGraphics guiGraphics, boolean screenOpen) {
+        net.minecraft.client.Minecraft minecraft = net.minecraft.client.Minecraft.getInstance();
+        if ((minecraft.screen != null) != screenOpen) {
+            return;
+        }
+        DockLinkPromptClientState.render(guiGraphics);
+        CargoLinkPromptClientState.render(guiGraphics);
+        MenuActionBarClientState.render(guiGraphics);
     }
 }
