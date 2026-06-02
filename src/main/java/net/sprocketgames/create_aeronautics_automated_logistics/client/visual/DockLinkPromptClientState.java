@@ -1,6 +1,7 @@
 package net.sprocketgames.create_aeronautics_automated_logistics.client.visual;
 
 import java.util.Optional;
+import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -11,23 +12,28 @@ public final class DockLinkPromptClientState {
     private static long expiresAtGameTime = -1L;
     private static boolean shipPrompt;
     private static Optional<BlockPos> sourcePos = Optional.empty();
+    private static List<BlockPos> candidatePositions = List.of();
 
     private DockLinkPromptClientState() {
     }
 
-    public static void show(boolean forShip, BlockPos pendingSourcePos) {
+    public static void show(boolean forShip, BlockPos pendingSourcePos, List<BlockPos> candidates) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null) {
             return;
         }
         shipPrompt = forShip;
         sourcePos = Optional.of(pendingSourcePos.immutable());
+        candidatePositions = candidates.stream().map(BlockPos::immutable).toList();
+        LogisticsClientOverlays.setDockLinkCandidates(candidatePositions);
         expiresAtGameTime = minecraft.level.getGameTime() + 20L * 30L;
     }
 
     public static void clear() {
         expiresAtGameTime = -1L;
         sourcePos = Optional.empty();
+        candidatePositions = List.of();
+        LogisticsClientOverlays.clearDockLinkCandidates();
     }
 
     public static boolean isPendingForStation(BlockPos stationPos) {

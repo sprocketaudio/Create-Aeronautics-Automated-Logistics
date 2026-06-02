@@ -172,6 +172,9 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         recordingMode = this.menu.initialRecordingMode();
         recordingSessionActive = this.menu.initialRecordingSessionActive();
         recordingDestinationStationId = this.menu.initialRecordingDestinationStationId();
+        if (this.minecraft != null && this.minecraft.player != null) {
+            this.menu.primeClientRuntimeState(this.minecraft.player);
+        }
         if (recordingSessionActive) {
             recordingMode = true;
         }
@@ -217,7 +220,9 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                 this.topPos + 83,
                 EDIT_SCHEDULE_ICON,
                 this::openInstalledScheduleEditor,
-                Component.literal("Edit stop order, remove stops, and set wait conditions.")
+                Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.edit_schedule.tooltip"),
+                Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.edit_schedule.tooltip_skip")
+                        .withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC)
         );
         dockPreviewButton = addIconButton(
                 this.leftPos + FOOTER_DOCK_BUTTON_X,

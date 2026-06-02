@@ -37,6 +37,24 @@ public record LinkedCargoSnapshot(
         for (LinkedCargoEntry entry : entries) {
             CargoStorageRootResolver.StorageRoot root = CargoStorageRootResolver.resolve(level, entry.pos());
             BlockPos accessPos = root.accessPos();
+            CustomCargoEndpointSupport.EndpointCapture customCapture = CustomCargoEndpointSupport.capture(level, accessPos);
+            if (customCapture != null) {
+                if (customCapture.hasItemStorage() && seenItemRoots.add(customCapture.itemRootKey())) {
+                    hasItemStorage = true;
+                    for (ItemStack stack : customCapture.itemStacks()) {
+                        itemStacks.add(stack.copy());
+                    }
+                    remainingItemCapacity = safeAdd(remainingItemCapacity, customCapture.remainingItemCapacity());
+                }
+                if (customCapture.hasFluidStorage() && seenFluidRoots.add(customCapture.fluidRootKey())) {
+                    hasFluidStorage = true;
+                    for (FluidStack stack : customCapture.fluidStacks()) {
+                        fluidStacks.add(stack.copy());
+                    }
+                    remainingFluidCapacity = safeAdd(remainingFluidCapacity, customCapture.remainingFluidCapacity());
+                }
+                continue;
+            }
 
             IItemHandler itemHandler = CargoCapabilityAccess.findItemHandler(level, accessPos);
             Object itemRootKey = itemHandler == null
@@ -72,24 +90,6 @@ public record LinkedCargoSnapshot(
                             remainingFluidCapacity,
                             Math.max(0L, (long) tankCapacity - fluidStack.getAmount())
                     );
-                }
-            }
-
-            CustomCargoEndpointSupport.EndpointCapture customCapture = CustomCargoEndpointSupport.capture(level, accessPos);
-            if (customCapture != null) {
-                if (customCapture.hasItemStorage() && seenItemRoots.add(customCapture.itemRootKey())) {
-                    hasItemStorage = true;
-                    for (ItemStack stack : customCapture.itemStacks()) {
-                        itemStacks.add(stack.copy());
-                    }
-                    remainingItemCapacity = safeAdd(remainingItemCapacity, customCapture.remainingItemCapacity());
-                }
-                if (customCapture.hasFluidStorage() && seenFluidRoots.add(customCapture.fluidRootKey())) {
-                    hasFluidStorage = true;
-                    for (FluidStack stack : customCapture.fluidStacks()) {
-                        fluidStacks.add(stack.copy());
-                    }
-                    remainingFluidCapacity = safeAdd(remainingFluidCapacity, customCapture.remainingFluidCapacity());
                 }
             }
         }

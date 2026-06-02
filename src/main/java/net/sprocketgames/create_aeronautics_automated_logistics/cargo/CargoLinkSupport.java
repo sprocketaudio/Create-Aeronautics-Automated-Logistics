@@ -26,10 +26,14 @@ public final class CargoLinkSupport {
         }
         boolean itemStorage = CargoCapabilityAccess.hasAnyItemHandler(level, pos);
         boolean fluidStorage = CargoCapabilityAccess.hasAnyFluidHandler(level, pos);
-        if (!itemStorage && !fluidStorage) {
+        CustomCargoEndpointSupport.EndpointCapture endpointCapture = CustomCargoEndpointSupport.capture(level, pos);
+        if (endpointCapture != null) {
+            itemStorage = endpointCapture.hasItemStorage();
+            fluidStorage = endpointCapture.hasFluidStorage();
+        } else {
             CustomCargoEndpointSupport.EndpointKinds endpointKinds = CustomCargoEndpointSupport.detect(level, pos);
-            itemStorage = endpointKinds.itemStorage();
-            fluidStorage = endpointKinds.fluidStorage();
+            itemStorage = itemStorage || endpointKinds.itemStorage();
+            fluidStorage = fluidStorage || endpointKinds.fluidStorage();
         }
         if (!itemStorage && !fluidStorage) {
             return Optional.empty();
@@ -124,6 +128,39 @@ public final class CargoLinkSupport {
                 .sorted(Comparator
                         .comparingInt((List<BlockPos> positions) -> positions.getFirst().getY())
                         .thenComparingInt(positions -> positions.getFirst().getZ())
+                .thenComparingInt(positions -> positions.getFirst().getX()))
+                .toList();
+    }
+
+    public static List<List<BlockPos>> discoverSupportedGroups(Level level, BlockPos ownerOrigin, int radius) {
+        Map<CargoStorageRootResolver.StorageRoot, Set<BlockPos>> positionsByRoot = new LinkedHashMap<>();
+        BlockPos min = ownerOrigin.offset(-radius, -radius, -radius);
+        BlockPos max = ownerOrigin.offset(radius, radius, radius);
+        for (BlockPos candidate : BlockPos.betweenClosed(min, max)) {
+            BlockPos immutablePos = candidate.immutable();
+            if (immutablePos.equals(ownerOrigin)) {
+                continue;
+            }
+            Optional<LinkedCargoEntry> maybeEntry = supportedEntryAt(level, immutablePos);
+            if (maybeEntry.isEmpty()) {
+                continue;
+            }
+            CargoStorageRootResolver.StorageRoot root = CargoStorageRootResolver.resolve(level, immutablePos);
+            positionsByRoot.computeIfAbsent(root, ignored -> new LinkedHashSet<>()).add(immutablePos);
+        }
+
+        return positionsByRoot.values().stream()
+                .map(positions -> positions.stream()
+                        .distinct()
+                        .sorted(Comparator
+                                .comparingInt((BlockPos pos) -> pos.getY())
+                                .thenComparingInt(pos -> pos.getZ())
+                                .thenComparingInt(pos -> pos.getX()))
+                        .toList())
+                .filter(positions -> !positions.isEmpty())
+                .sorted(Comparator
+                        .comparingInt((List<BlockPos> positions) -> positions.getFirst().getY())
+                        .thenComparingInt(positions -> positions.getFirst().getZ())
                         .thenComparingInt(positions -> positions.getFirst().getX()))
                 .toList();
     }
@@ -140,10 +177,10 @@ public final class CargoLinkSupport {
                 "Sophisticated Storage blocks and controller-linked storage",
                 "Placed Sophisticated Backpacks",
                 "Iron Chests",
-                "Mekanism storage blocks and supported multiblock tank storage",
+                "Mekanism bins / Personal Chests / Personal Barrels / Fluid Tanks / QIO Drive Arrays / QIO Exporters",
                 "Tom's Storage connector/interface/proxy endpoints",
-                "Refined Storage 2 Grids / Storage Monitors / Interfaces / Exporters / Importers",
-                "Applied Energistics 2 ME Interfaces / ME Chests / Cable Bus import-export parts"
+                "Refined Storage 2 Controllers / Exporters",
+                "Applied Energistics 2 Controllers / ME Chests / Sky Stone Tanks / Cable Bus export parts"
         );
     }
 
@@ -171,16 +208,15 @@ public final class CargoLinkSupport {
             return true;
         }
 
-        if (className.equals("com.refinedmods.refinedstorage.common.storagemonitor.StorageMonitorBlockEntity")
-                || className.equals("com.refinedmods.refinedstorage.common.iface.InterfaceBlockEntity")
+        if (className.equals("com.refinedmods.refinedstorage.common.controller.ControllerBlockEntity")
                 || isClassOrSuperclass(blockEntity, "com.refinedmods.refinedstorage.common.exporter.AbstractExporterBlockEntity")
-                || isClassOrSuperclass(blockEntity, "com.refinedmods.refinedstorage.common.importer.AbstractImporterBlockEntity")
-                || className.startsWith("com.refinedmods.refinedstorage.common.grid.")) {
+        ) {
             return true;
         }
 
-        return className.equals("appeng.blockentity.misc.InterfaceBlockEntity")
+        return className.equals("appeng.blockentity.networking.ControllerBlockEntity")
                 || className.equals("appeng.blockentity.storage.MEChestBlockEntity")
+                || className.equals("appeng.blockentity.storage.SkyStoneTankBlockEntity")
                 || (className.equals("appeng.blockentity.networking.CableBusBlockEntity")
                 && CustomCargoEndpointSupport.detect(blockEntity.getLevel(), blockEntity.getBlockPos()).hasAnyStorage());
     }

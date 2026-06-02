@@ -1,3 +1,7 @@
+# When true, local builds and IDE prep will automatically download the curated
+# storage-mod set for 1.21.1 NeoForge compatibility testing from Modrinth.
+download_dev_storage_mods=false
+
 # Optional local dev/runtime jars.
 # Copy this file to `gradle-local.properties` and point each entry at a local jar if you
 # want that mod available in IDE runs and local Gradle testing without publishing it as a dependency.
@@ -12,6 +16,7 @@ ae2_jar=
 iron_chests_jar=
 storage_drawers_jar=
 mekanism_jar=
+toms_storage_jar=
 sophisticated_storage_jar=
 functional_storage_jar=
 sophisticated_backpacks_jar=

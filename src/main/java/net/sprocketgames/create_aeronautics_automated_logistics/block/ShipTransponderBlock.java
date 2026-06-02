@@ -162,8 +162,15 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
                 buffer.writeBoolean(recordingState.appendToSchedule());
                 buffer.writeBoolean(transponder.recordingDestinationStationId().isPresent());
                 transponder.recordingDestinationStationId().ifPresent(buffer::writeUUID);
+                buffer.writeEnum(transponder.runtimeStatus());
+                buffer.writeBoolean(transponder.dockOutputActive());
+                ShipTransponderMenu.writeCargoRevision(buffer, transponder.linkedCargoRevision());
                 ShipTransponderMenu.writeCargoSummary(buffer, transponder.linkedCargoSummary());
                 ShipTransponderMenu.writeLinkedCargoEntries(buffer, transponder.linkedCargo());
+                ShipTransponderMenu.writeCargoFailureContext(
+                        buffer,
+                        AutomatedLogisticsServices.SCHEDULES.lastCargoFailureContext(transponder.transponderId())
+                );
             });
         }
         return InteractionResult.CONSUME;

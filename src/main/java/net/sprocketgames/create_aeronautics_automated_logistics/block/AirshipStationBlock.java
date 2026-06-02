@@ -38,6 +38,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoLin
 import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteBlockBreakProtection;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
 import org.jetbrains.annotations.Nullable;
 
 public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock {
@@ -137,8 +138,13 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
         );
         serverPlayer.openMenu(station, buffer -> {
             buffer.writeBlockPos(pos);
+            ShipTransponderMenu.writeCargoRevision(buffer, station.linkedCargoRevision());
             ShipTransponderMenu.writeCargoSummary(buffer, station.linkedCargoSummary());
             ShipTransponderMenu.writeLinkedCargoEntries(buffer, station.linkedCargo());
+            ShipTransponderMenu.writeCargoFailureContext(
+                    buffer,
+                    station.selectedTransponderId().flatMap(AutomatedLogisticsServices.SCHEDULES::lastCargoFailureContext)
+            );
         });
         return InteractionResult.CONSUME;
     }

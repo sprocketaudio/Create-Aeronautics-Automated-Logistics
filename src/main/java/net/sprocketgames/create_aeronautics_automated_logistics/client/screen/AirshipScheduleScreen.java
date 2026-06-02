@@ -35,9 +35,11 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
@@ -59,6 +61,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSch
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleEntry;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.CargoWaitTarget;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentId;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry;
@@ -148,6 +151,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     private SelectionScrollInput editorUnitInput;
     private ScrollInput cargoStablePopupInput;
     private IconButton cargoStablePopupConfirmButton;
+    private IconButton skipStopButton;
     private StationSuggestions stationSuggestions;
     private ShipSuggestions assignedShipSuggestions;
     private final EditorSubWidgets editorSubWidgets = new EditorSubWidgets();
@@ -256,6 +260,12 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         addRenderableWidget(this.stationFilterBox);
         addRenderableWidget(this.editorSubWidgets);
 
+        this.skipStopButton = new IconButton(this.leftPos + 43, this.topPos + 196, AllIcons.I_PRIORITY_LOW);
+        this.skipStopButton.withCallback(() -> sendServerAction(AirshipScheduleMenu.ACTION_SKIP_CURRENT_STOP));
+        this.skipStopButton.setToolTip(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.skip_stop"));
+        addRenderableWidget(this.skipStopButton);
+        updateSkipStopButtonState();
+
         cachePlayerInventorySlots();
         this.showPlayerInventorySlots = false;
     }
@@ -285,6 +295,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         if (this.editorMode != EditorMode.NONE) {
             renderEditor(guiGraphics, mouseX, mouseY);
         }
+        renderSkipStopAvailabilityPulse(guiGraphics);
     }
 
     @Override
@@ -320,6 +331,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     @Override
     protected void containerTick() {
         super.containerTick();
+        updateSkipStopButtonState();
         if (usesRouteEditorBacking()) {
             dismissSuggestionPopups();
             return;
@@ -334,6 +346,31 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
 
     @Override
     protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+    }
+
+    private void renderSkipStopAvailabilityPulse(GuiGraphics guiGraphics) {
+        if (this.skipStopButton == null
+                || !this.skipStopButton.visible
+                || !this.skipStopButton.active
+                || this.minecraft == null
+                || this.minecraft.level == null) {
+            return;
+        }
+        float phase = (this.minecraft.level.getGameTime() % 20L) / 20.0F;
+        float pulse = 0.5F + 0.5F * Mth.sin(phase * (float) (Math.PI * 2.0));
+        int alpha = (int) (255.0F * pulse);
+        if (alpha <= 0) {
+            return;
+        }
+        int x = this.skipStopButton.getX();
+        int y = this.skipStopButton.getY();
+        int glow = net.minecraft.util.FastColor.ARGB32.color(alpha, 255, 225, 96);
+        int border = net.minecraft.util.FastColor.ARGB32.color(alpha, 255, 208, 64);
+        guiGraphics.fill(x - 2, y - 2, x + 18 + 2, y + 18 + 2, glow);
+        guiGraphics.fill(x - 3, y - 3, x + 18 + 3, y - 2, border);
+        guiGraphics.fill(x - 3, y + 18 + 2, x + 18 + 3, y + 18 + 3, border);
+        guiGraphics.fill(x - 3, y - 2, x - 2, y + 18 + 2, border);
+        guiGraphics.fill(x + 18 + 2, y - 2, x + 18 + 3, y + 18 + 2, border);
     }
 
     @Override
@@ -1132,6 +1169,13 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         if (inside(mx, my, 214, 196, 18, 18)) {
             return List.of(Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.confirm"));
         }
+        if (skipStopButtonVisible() && inside(mx, my, 43, 196, 18, 18)) {
+            return List.of(
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.skip_stop"),
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.skip_stop.tooltip").withStyle(ChatFormatting.GRAY),
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.skip_stop.tooltip_availability").withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC)
+            );
+        }
         if (isScheduleReadOnly() && inside(mx, my, READ_ONLY_FOOTER_X, READ_ONLY_FOOTER_Y - 1, READ_ONLY_FOOTER_WIDTH, this.font.lineHeight + 2)) {
             return List.of(
                     Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.read_only"),
@@ -1158,6 +1202,13 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     private List<Component> editorTooltipAt(int mouseX, int mouseY) {
         int mx = mouseX - this.leftPos;
         int my = mouseY - this.topPos;
+        if (skipStopButtonVisible() && inside(mx, my, 43, 196, 18, 18)) {
+            return List.of(
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.skip_stop"),
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.skip_stop.tooltip").withStyle(ChatFormatting.GRAY),
+                    Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.skip_stop.tooltip_availability").withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC)
+            );
+        }
         if (this.cargoStablePopupOpen) {
             int panelX = cargoStablePopupX() - this.leftPos;
             int panelY = cargoStablePopupY() - this.topPos;
@@ -1408,6 +1459,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             return true;
         }
         if (inside(mx, my, 214, 196, 18, 18)) {
+            playUiButtonClick();
             saveTitle();
             if (this.minecraft != null && this.minecraft.player != null) {
                 this.minecraft.player.closeContainer();
@@ -1564,6 +1616,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         }
         if (editable && ((!usesRouteEditorBacking() && inside(mx, my, 224, 87, 18, 18))
                 || (usesRouteEditorBacking() && insideRouteSelectorConfirm(mx, my)))) {
+            playUiButtonClick();
             confirmEditor();
             return true;
         }
@@ -1781,6 +1834,44 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         return this.minecraft != null
                 && this.minecraft.player != null
                 && this.menu.isReadOnly(this.minecraft.player);
+    }
+
+    private void updateSkipStopButtonState() {
+        if (this.skipStopButton == null) {
+            return;
+        }
+        boolean visible = skipStopButtonVisible();
+        this.skipStopButton.visible = visible;
+        this.skipStopButton.active = visible && this.editorMode == EditorMode.NONE && canSkipStopFromUiState();
+    }
+
+    private boolean skipStopButtonVisible() {
+        return this.menu.openedFromTransponder()
+                && isScheduleReadOnly()
+                && !this.noRoutePopupOpen
+                && this.pendingDeleteStopIndex == null;
+    }
+
+    private boolean canSkipStopFromUiState() {
+        if (this.minecraft == null || this.minecraft.player == null) {
+            return false;
+        }
+        if (this.menu.skipStopUiActive(this.minecraft.player)) {
+            return true;
+        }
+        return openedTransponder().map(ShipTransponderBlockEntity::runtimeStatus)
+                .map(status -> status == RouteStatus.WAITING || status == RouteStatus.HELD_FAULTED)
+                .orElse(false);
+    }
+
+    private Optional<ShipTransponderBlockEntity> openedTransponder() {
+        if (this.minecraft == null || this.minecraft.level == null || this.menu.originTransponderPos().isEmpty()) {
+            return Optional.empty();
+        }
+        if (this.minecraft.level.getBlockEntity(this.menu.originTransponderPos().get()) instanceof ShipTransponderBlockEntity transponder) {
+            return Optional.of(transponder);
+        }
+        return Optional.empty();
     }
 
     @Override
@@ -2307,6 +2398,18 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         applyLocalAction(actionId);
         if (!isScheduleReadOnly() && actionId < AirshipScheduleMenu.ACTION_SELECT_ENTRY_BASE) {
             syncSchedule();
+        }
+    }
+
+    private void sendServerAction(int actionId) {
+        if (this.minecraft != null && this.minecraft.gameMode != null) {
+            this.minecraft.gameMode.handleInventoryButtonClick(this.menu.containerId, actionId);
+        }
+    }
+
+    private void playUiButtonClick() {
+        if (this.minecraft != null) {
+            this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
         }
     }
 

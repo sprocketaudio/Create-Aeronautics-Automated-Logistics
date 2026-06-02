@@ -50,8 +50,12 @@ import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBloc
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModItems;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.CargoWaitTarget;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoFailureContext;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.SableSubLevelVehicleController;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerRef;
 
@@ -80,6 +84,14 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     private static final String LINKED_CARGO_Z = "z";
     private static final String LINKED_CARGO_ITEM = "item";
     private static final String LINKED_CARGO_FLUID = "fluid";
+    private static final String LINKED_CARGO_TOTAL = "linkedCargoTotal";
+    private static final String LINKED_CARGO_VALID = "linkedCargoValid";
+    private static final String LINKED_CARGO_STALE = "linkedCargoStale";
+    private static final String LINKED_CARGO_ITEM_COUNT = "linkedCargoItemCount";
+    private static final String LINKED_CARGO_FLUID_COUNT = "linkedCargoFluidCount";
+    private static final String LINKED_CARGO_REVISION = "linkedCargoRevision";
+    private static final String CARGO_FAILURE_TARGET = "cargoFailureTarget";
+    private static final String CARGO_FAILURE_WAIT_TYPE = "cargoFailureWaitType";
     private static final int CURRENT_DATA_VERSION = 1;
     private static final int REFRESH_INTERVAL_TICKS = 40;
     public static final int INTERNAL_SCHEDULE_SLOT = 0;
@@ -100,6 +112,9 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     private long lastSeenGameTime = -1L;
     private final NonNullList<ItemStack> items = NonNullList.withSize(1, ItemStack.EMPTY);
     private final List<LinkedCargoEntry> linkedCargo = new ArrayList<>();
+    private @Nullable LinkedCargoSummary syncedLinkedCargoSummary;
+    private int linkedCargoRevision;
+    private Optional<CargoFailureContext> syncedCargoFailureContext = Optional.empty();
 
     public ShipTransponderBlockEntity(BlockPos pos, BlockState blockState) {
         super(ModBlockEntities.SHIP_TRANSPONDER.get(), pos, blockState);
@@ -131,6 +146,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
             refreshRuntimeShip(serverLevel);
             refreshShipDockLink(serverLevel);
             migrateLegacyInstalledSchedule();
+            AutomatedLogisticsServices.SCHEDULES.reconcileRuntimeStatus(serverLevel, this);
         }
         return new ShipTransponderMenu(containerId, playerInventory, worldPosition);
     }
@@ -220,12 +236,28 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     }
 
     public LinkedCargoSummary linkedCargoSummary() {
-        return CargoLinkDiscovery.summarize(level, resolvedLinkedCargo());
+        if (level != null && level.isClientSide && syncedLinkedCargoSummary != null) {
+            return syncedLinkedCargoSummary;
+        }
+        return resolveLinkedCargoSummary(true);
+    }
+
+    public Optional<CargoFailureContext> syncedCargoFailureContext() {
+        return syncedCargoFailureContext;
+    }
+
+    public boolean hasSyncedLinkedCargoSummary() {
+        return syncedLinkedCargoSummary != null;
+    }
+
+    public int linkedCargoRevision() {
+        return linkedCargoRevision;
     }
 
     public LinkedCargoSummary relinkCargo(ServerLevel level) {
         linkedCargo.clear();
         linkedCargo.addAll(CargoLinkDiscovery.discover(level, worldPosition));
+        linkedCargoRevision++;
         setChanged();
         return linkedCargoSummary();
     }
@@ -249,6 +281,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
             added++;
         }
         if (added > 0) {
+            linkedCargoRevision++;
             setChanged();
             persistLinkedCargo();
             CreateAeronauticsAutomatedLogistics.debugLog(
@@ -274,6 +307,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
             return false;
         }
         linkedCargo.clear();
+        linkedCargoRevision++;
         setChanged();
         persistLinkedCargo();
         CreateAeronauticsAutomatedLogistics.debugLog(
@@ -542,10 +576,10 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     @Override
     protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.saveAdditional(tag, registries);
-        writeData(tag, registries);
+        writeData(tag, registries, false);
     }
 
-    private void writeData(CompoundTag tag, HolderLookup.Provider registries) {
+    private void writeData(CompoundTag tag, HolderLookup.Provider registries, boolean liveCargoSummary) {
         tag.putInt(DATA_VERSION, CURRENT_DATA_VERSION);
         tag.putUUID(TRANSPONDER_ID, transponderId);
         tag.putString(SHIP_NAME, shipName());
@@ -577,6 +611,20 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                 linkedCargoTag.add(entryTag);
             }
             tag.put(LINKED_CARGO, linkedCargoTag);
+        }
+        LinkedCargoSummary summary = resolveLinkedCargoSummary(liveCargoSummary);
+        tag.putInt(LINKED_CARGO_TOTAL, summary.totalLinks());
+        tag.putInt(LINKED_CARGO_VALID, summary.validLinks());
+        tag.putInt(LINKED_CARGO_STALE, summary.staleLinks());
+        tag.putInt(LINKED_CARGO_ITEM_COUNT, summary.itemLinks());
+        tag.putInt(LINKED_CARGO_FLUID_COUNT, summary.fluidLinks());
+        tag.putInt(LINKED_CARGO_REVISION, linkedCargoRevision);
+        Optional<CargoFailureContext> cargoFailureContext = level instanceof ServerLevel serverLevel
+                ? AutomatedLogisticsServices.SCHEDULES.lastCargoFailureContext(transponderId)
+                : syncedCargoFailureContext;
+        if (cargoFailureContext.isPresent()) {
+            tag.putString(CARGO_FAILURE_TARGET, cargoFailureContext.get().target().name());
+            tag.putString(CARGO_FAILURE_WAIT_TYPE, cargoFailureContext.get().waitType().name());
         }
         lastKnownPosition.ifPresent(pos -> {
             tag.putDouble(LAST_X, pos.x);
@@ -627,6 +675,9 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                 readStoredLinkedCargo(linkedCargoTag.getCompound(i)).ifPresent(linkedCargo::add);
             }
         }
+        syncedLinkedCargoSummary = readLinkedCargoSummary(tag);
+        linkedCargoRevision = tag.getInt(LINKED_CARGO_REVISION);
+        syncedCargoFailureContext = readCargoFailureContext(tag);
         migrateLegacyInstalledSchedule();
         lastKnownPosition = tag.contains(LAST_X, Tag.TAG_ANY_NUMERIC)
                 && tag.contains(LAST_Y, Tag.TAG_ANY_NUMERIC)
@@ -668,8 +719,35 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     @Override
     public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
         CompoundTag tag = new CompoundTag();
-        writeData(tag, registries);
+        writeData(tag, registries, true);
         return tag;
+    }
+
+    private LinkedCargoSummary resolveLinkedCargoSummary(boolean liveAllowed) {
+        if (level != null && level.isClientSide && syncedLinkedCargoSummary != null) {
+            return syncedLinkedCargoSummary;
+        }
+        if (!liveAllowed) {
+            return syncedLinkedCargoSummary != null ? syncedLinkedCargoSummary : structuralLinkedCargoSummary();
+        }
+        LinkedCargoSummary summary = CargoLinkDiscovery.summarize(level, resolvedLinkedCargo());
+        syncedLinkedCargoSummary = summary;
+        return summary;
+    }
+
+    private LinkedCargoSummary structuralLinkedCargoSummary() {
+        int total = linkedCargo.size();
+        int item = 0;
+        int fluid = 0;
+        for (LinkedCargoEntry entry : resolvedLinkedCargo()) {
+            if (entry.itemStorage()) {
+                item++;
+            }
+            if (entry.fluidStorage()) {
+                fluid++;
+            }
+        }
+        return new LinkedCargoSummary(total, total, 0, item, fluid);
     }
 
     private DockLinkStatus readDockStatus(CompoundTag tag) {
@@ -748,6 +826,37 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     private List<LinkedCargoEntry> resolvedLinkedCargo() {
         ensureLinkedCargoLoaded();
         return linkedCargo;
+    }
+
+    private @Nullable LinkedCargoSummary readLinkedCargoSummary(CompoundTag tag) {
+        if (!tag.contains(LINKED_CARGO_TOTAL, Tag.TAG_ANY_NUMERIC)
+                || !tag.contains(LINKED_CARGO_VALID, Tag.TAG_ANY_NUMERIC)
+                || !tag.contains(LINKED_CARGO_STALE, Tag.TAG_ANY_NUMERIC)
+                || !tag.contains(LINKED_CARGO_ITEM_COUNT, Tag.TAG_ANY_NUMERIC)
+                || !tag.contains(LINKED_CARGO_FLUID_COUNT, Tag.TAG_ANY_NUMERIC)) {
+            return null;
+        }
+        return new LinkedCargoSummary(
+                tag.getInt(LINKED_CARGO_TOTAL),
+                tag.getInt(LINKED_CARGO_VALID),
+                tag.getInt(LINKED_CARGO_STALE),
+                tag.getInt(LINKED_CARGO_ITEM_COUNT),
+                tag.getInt(LINKED_CARGO_FLUID_COUNT)
+        );
+    }
+
+    private Optional<CargoFailureContext> readCargoFailureContext(CompoundTag tag) {
+        if (!tag.contains(CARGO_FAILURE_TARGET, Tag.TAG_STRING) || !tag.contains(CARGO_FAILURE_WAIT_TYPE, Tag.TAG_STRING)) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(new CargoFailureContext(
+                    CargoWaitTarget.valueOf(tag.getString(CARGO_FAILURE_TARGET)),
+                    WaitConditionType.valueOf(tag.getString(CARGO_FAILURE_WAIT_TYPE))
+            ));
+        } catch (IllegalArgumentException ignored) {
+            return Optional.empty();
+        }
     }
 
     private void ensureLinkedCargoLoaded() {

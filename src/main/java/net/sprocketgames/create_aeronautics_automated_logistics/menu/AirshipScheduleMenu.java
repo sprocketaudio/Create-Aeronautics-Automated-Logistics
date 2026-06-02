@@ -29,6 +29,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSch
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentResolver;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitCondition;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.TransponderPermissionService;
@@ -50,6 +51,7 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
     public static final int ACTION_ADD_CONDITION = 13;
     public static final int ACTION_ADD_ALTERNATIVE_CONDITION = 14;
     public static final int ACTION_PIN_NEWEST_SEGMENT = 15;
+    public static final int ACTION_SKIP_CURRENT_STOP = 16;
     public static final int ACTION_SELECT_ENTRY_BASE = 100;
     private static final int WAIT_ADJUST_TICKS = 20 * 5;
 
@@ -179,6 +181,13 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         return returnToRecordingMode;
     }
 
+    public boolean skipStopUiActive(Player player) {
+        return editableTransponder(player)
+                .map(ShipTransponderBlockEntity::runtimeStatus)
+                .map(status -> status == RouteStatus.WAITING || status == RouteStatus.HELD_FAULTED)
+                .orElse(false);
+    }
+
     private void addPlayerInventory(Inventory inventory) {
         int startX = 46;
         int startY = 140;
@@ -199,6 +208,9 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
             AirshipSchedule schedule = schedule(player);
             selectedIndex = Math.max(0, Math.min(id - ACTION_SELECT_ENTRY_BASE, Math.max(0, schedule.entries().size() - 1)));
             return true;
+        }
+        if (id == ACTION_SKIP_CURRENT_STOP) {
+            return skipCurrentStop(player);
         }
         if (!canModify(player)) {
             return false;
@@ -575,6 +587,23 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         if (player instanceof ServerPlayer serverPlayer) {
             SetMenuActionBarMessagePayload.send(serverPlayer, message);
         }
+    }
+
+    private boolean skipCurrentStop(Player player) {
+        Optional<ShipTransponderBlockEntity> transponder = editableTransponder(player);
+        if (transponder.isEmpty() || !(player instanceof ServerPlayer serverPlayer)) {
+            return false;
+        }
+        if (!TransponderPermissionService.ensureCanControl(serverPlayer, transponder.get())) {
+            return false;
+        }
+        if (!net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES
+                .skipCurrentStop(serverPlayer.serverLevel(), transponder.get().transponderId())) {
+            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.skip_stop_unavailable"));
+            return false;
+        }
+        actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.skip_stop_success"));
+        return true;
     }
 
     private boolean canModify(Player player) {

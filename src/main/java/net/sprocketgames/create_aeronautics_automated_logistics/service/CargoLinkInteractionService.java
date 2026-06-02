@@ -4,6 +4,8 @@ import com.simibubi.create.AllSoundEvents;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Comparator;
+import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -29,12 +31,12 @@ public final class CargoLinkInteractionService {
 
     public static void beginStationLink(ServerPlayer player, BlockPos stationPos) {
         PENDING.put(player.getUUID(), new PendingCargoLink(LinkTarget.STATION, stationPos.immutable(), player.level().dimension(), player.level().getGameTime() + LINK_TIMEOUT_TICKS));
-        PacketDistributor.sendToPlayer(player, new SetCargoLinkPromptPayload(true, false, stationPos.immutable()));
+        PacketDistributor.sendToPlayer(player, new SetCargoLinkPromptPayload(true, false, stationPos.immutable(), discoverCandidateGroups(player, stationPos)));
     }
 
     public static void beginTransponderLink(ServerPlayer player, BlockPos transponderPos) {
         PENDING.put(player.getUUID(), new PendingCargoLink(LinkTarget.TRANSPONDER, transponderPos.immutable(), player.level().dimension(), player.level().getGameTime() + LINK_TIMEOUT_TICKS));
-        PacketDistributor.sendToPlayer(player, new SetCargoLinkPromptPayload(true, true, transponderPos.immutable()));
+        PacketDistributor.sendToPlayer(player, new SetCargoLinkPromptPayload(true, true, transponderPos.immutable(), discoverCandidateGroups(player, transponderPos)));
     }
 
     public static boolean hasPendingStationLink(ServerPlayer player, BlockPos stationPos) {
@@ -57,7 +59,7 @@ public final class CargoLinkInteractionService {
 
     public static boolean cancelPending(ServerPlayer player) {
         PendingCargoLink removed = PENDING.remove(player.getUUID());
-        PacketDistributor.sendToPlayer(player, new SetCargoLinkPromptPayload(false, false, BlockPos.ZERO));
+        PacketDistributor.sendToPlayer(player, new SetCargoLinkPromptPayload(false, false, BlockPos.ZERO, List.of()));
         if (removed == null) {
             return false;
         }
@@ -76,7 +78,7 @@ public final class CargoLinkInteractionService {
         if (!pending.dimension().equals(player.level().dimension()) || player.level().getGameTime() > pending.expiresAt()) {
             PENDING.remove(player.getUUID());
             actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.cargo_link.expired"));
-            PacketDistributor.sendToPlayer(player, new SetCargoLinkPromptPayload(false, false, BlockPos.ZERO));
+            PacketDistributor.sendToPlayer(player, new SetCargoLinkPromptPayload(false, false, BlockPos.ZERO, List.of()));
             event.setCanceled(true);
             event.setCancellationResult(InteractionResult.SUCCESS);
             return;
@@ -112,7 +114,10 @@ public final class CargoLinkInteractionService {
         if (!StationPermissionService.ensureCanControl(player, station)) {
             return;
         }
-        if (station.isRecording() || station.isPlaybackRunning()) {
+        if (station.isRecording()
+                || station.selectedTransponderId()
+                .map(AutomatedLogisticsServices.SCHEDULES::isRunning)
+                .orElse(false)) {
             actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.cargo_link.locked_while_running"));
             AllSoundEvents.DENY.playOnServer(player.level(), stationPos, 0.5f, 1.0f);
             return;
@@ -190,10 +195,20 @@ public final class CargoLinkInteractionService {
         }
         if (!pending.dimension().equals(player.level().dimension()) || player.level().getGameTime() > pending.expiresAt()) {
             PENDING.remove(player.getUUID());
-            PacketDistributor.sendToPlayer(player, new SetCargoLinkPromptPayload(false, false, BlockPos.ZERO));
+            PacketDistributor.sendToPlayer(player, new SetCargoLinkPromptPayload(false, false, BlockPos.ZERO, List.of()));
             return null;
         }
         return pending;
+    }
+
+    private static List<List<BlockPos>> discoverCandidateGroups(ServerPlayer player, BlockPos ownerPos) {
+        return CargoLinkSupport.discoverSupportedGroups(player.serverLevel(), ownerPos, CargoLinkDiscovery.DEFAULT_LINK_RADIUS).stream()
+                .sorted(Comparator
+                        .comparingDouble((List<BlockPos> group) -> group.getFirst().distSqr(ownerPos))
+                        .thenComparingInt(group -> group.getFirst().getY())
+                        .thenComparingInt(group -> group.getFirst().getZ())
+                        .thenComparingInt(group -> group.getFirst().getX()))
+                .toList();
     }
 
     @FunctionalInterface

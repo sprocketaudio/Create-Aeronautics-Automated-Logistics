@@ -4,6 +4,8 @@ import com.simibubi.create.AllSoundEvents;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Comparator;
+import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -12,6 +14,7 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.level.Level;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.sprocketgames.create_aeronautics_automated_logistics.AutomatedLogisticsConfig;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.SetDockLinkPromptPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.SetMenuActionBarMessagePayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity;
@@ -29,22 +32,22 @@ public final class DockLinkInteractionService {
 
     public static void beginStationLink(ServerPlayer player, BlockPos stationPos) {
         PENDING.put(player.getUUID(), new PendingDockLink(LinkTarget.STATION, stationPos.immutable(), player.level().dimension(), player.level().getGameTime() + LINK_TIMEOUT_TICKS));
-        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(true, false, stationPos.immutable()));
+        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(true, false, stationPos.immutable(), discoverCandidates(player, stationPos, AutomatedLogisticsConfig.STATION_DOCK_SEARCH_RADIUS.get())));
     }
 
     public static void beginTransponderLink(ServerPlayer player, BlockPos transponderPos) {
         PENDING.put(player.getUUID(), new PendingDockLink(LinkTarget.TRANSPONDER, transponderPos.immutable(), player.level().dimension(), player.level().getGameTime() + LINK_TIMEOUT_TICKS));
-        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(true, true, transponderPos.immutable()));
+        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(true, true, transponderPos.immutable(), discoverCandidates(player, transponderPos, AutomatedLogisticsConfig.SHIP_DOCK_SEARCH_RADIUS.get())));
     }
 
     public static void clearPending(ServerPlayer player) {
         PENDING.remove(player.getUUID());
-        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false, BlockPos.ZERO));
+        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false, BlockPos.ZERO, List.of()));
     }
 
     public static boolean cancelPending(ServerPlayer player) {
         PendingDockLink removed = PENDING.remove(player.getUUID());
-        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false, BlockPos.ZERO));
+        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false, BlockPos.ZERO, List.of()));
         if (removed == null) {
             return false;
         }
@@ -85,7 +88,7 @@ public final class DockLinkInteractionService {
         if (!pending.dimension().equals(player.level().dimension()) || player.level().getGameTime() > pending.expiresAt()) {
             PENDING.remove(player.getUUID());
             actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.dock_link.expired"));
-            PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false, BlockPos.ZERO));
+            PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false, BlockPos.ZERO, List.of()));
             event.setCanceled(true);
             event.setCancellationResult(InteractionResult.SUCCESS);
             return;
@@ -111,7 +114,7 @@ public final class DockLinkInteractionService {
         };
         if (linked) {
             PENDING.remove(player.getUUID());
-            PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false, BlockPos.ZERO));
+            PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false, BlockPos.ZERO, List.of()));
         }
         event.setCanceled(true);
         event.setCancellationResult(InteractionResult.SUCCESS);
@@ -169,10 +172,25 @@ public final class DockLinkInteractionService {
         }
         if (!pending.dimension().equals(player.level().dimension()) || player.level().getGameTime() > pending.expiresAt()) {
             PENDING.remove(player.getUUID());
-            PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false, BlockPos.ZERO));
+            PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(false, false, BlockPos.ZERO, List.of()));
             return null;
         }
         return pending;
+    }
+
+    private static List<BlockPos> discoverCandidates(ServerPlayer player, BlockPos ownerPos, int radius) {
+        BlockPos min = ownerPos.offset(-radius, -radius, -radius);
+        BlockPos max = ownerPos.offset(radius, radius, radius);
+        return BlockPos.betweenClosedStream(min, max)
+                .map(BlockPos::immutable)
+                .filter(pos -> !pos.equals(ownerPos))
+                .filter(pos -> DockingConnectorDiscovery.isDock(player.serverLevel(), pos))
+                .sorted(Comparator
+                        .comparingDouble((BlockPos pos) -> pos.distSqr(ownerPos))
+                        .thenComparingInt(BlockPos::getY)
+                        .thenComparingInt(BlockPos::getZ)
+                        .thenComparingInt(BlockPos::getX))
+                .toList();
     }
 
     private enum LinkTarget {

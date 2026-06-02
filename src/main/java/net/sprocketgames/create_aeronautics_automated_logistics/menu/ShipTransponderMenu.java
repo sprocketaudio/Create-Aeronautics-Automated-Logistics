@@ -30,13 +30,18 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import net.sprocketgames.create_aeronautics_automated_logistics.AutomatedLogisticsConfig;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModMenus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleCondition;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleEntry;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.CargoWaitTarget;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentResolver;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitCondition;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AirshipScheduleExecutionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoFailureContext;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RecordingSession;
@@ -65,8 +70,12 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
     private final boolean initialRecordingSessionActive;
     private final boolean initialAppendToSchedule;
     private final Optional<UUID> initialRecordingDestinationStationId;
+    private final RouteStatus initialRuntimeStatus;
+    private final boolean initialDockOutputActive;
+    private final int initialCargoRevision;
     private final LinkedCargoSummary initialCargoSummary;
     private final List<net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry> initialLinkedCargoEntries;
+    private final Optional<CargoFailureContext> initialCargoFailureContext;
 
     public ShipTransponderMenu(int containerId, Inventory playerInventory, FriendlyByteBuf buffer) {
         this(
@@ -77,6 +86,9 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
                 buffer.readableBytes() > 0 && buffer.readBoolean(),
                 buffer.readableBytes() > 0 && buffer.readBoolean(),
                 buffer.readableBytes() > 0 && buffer.readBoolean() ? Optional.of(buffer.readUUID()) : Optional.empty(),
+                buffer.readableBytes() > 0 ? buffer.readEnum(RouteStatus.class) : RouteStatus.IDLE,
+                buffer.readableBytes() > 0 && buffer.readBoolean(),
+                buffer.readableBytes() >= Integer.BYTES ? buffer.readInt() : 0,
                 buffer.readableBytes() >= Integer.BYTES * 5
                         ? new LinkedCargoSummary(
                                 buffer.readInt(),
@@ -94,27 +106,32 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
                                         buffer.readBoolean()
                                 ))
                                 .toList()
-                        : List.of()
+                        : List.of(),
+                readCargoFailureContext(buffer)
         );
     }
 
     public ShipTransponderMenu(int containerId, Inventory playerInventory, BlockPos transponderPos) {
-        this(containerId, playerInventory, transponderPos, false, false, false, Optional.empty(), new LinkedCargoSummary(0, 0, 0, 0, 0), List.of());
+        this(containerId, playerInventory, transponderPos, false, false, false, Optional.empty(), RouteStatus.IDLE, false, 0, new LinkedCargoSummary(0, 0, 0, 0, 0), List.of(), Optional.empty());
     }
 
     public ShipTransponderMenu(int containerId, Inventory playerInventory, BlockPos transponderPos, boolean initialRecordingMode) {
-        this(containerId, playerInventory, transponderPos, initialRecordingMode, false, false, Optional.empty(), new LinkedCargoSummary(0, 0, 0, 0, 0), List.of());
+        this(containerId, playerInventory, transponderPos, initialRecordingMode, false, false, Optional.empty(), RouteStatus.IDLE, false, 0, new LinkedCargoSummary(0, 0, 0, 0, 0), List.of(), Optional.empty());
     }
 
-    public ShipTransponderMenu(int containerId, Inventory playerInventory, BlockPos transponderPos, boolean initialRecordingMode, boolean initialRecordingSessionActive, boolean initialAppendToSchedule, Optional<UUID> initialRecordingDestinationStationId, LinkedCargoSummary initialCargoSummary, List<net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry> initialLinkedCargoEntries) {
+    public ShipTransponderMenu(int containerId, Inventory playerInventory, BlockPos transponderPos, boolean initialRecordingMode, boolean initialRecordingSessionActive, boolean initialAppendToSchedule, Optional<UUID> initialRecordingDestinationStationId, RouteStatus initialRuntimeStatus, boolean initialDockOutputActive, int initialCargoRevision, LinkedCargoSummary initialCargoSummary, List<net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry> initialLinkedCargoEntries, Optional<CargoFailureContext> initialCargoFailureContext) {
         super(ModMenus.SHIP_TRANSPONDER.get(), containerId);
         this.transponderPos = transponderPos;
         this.initialRecordingMode = initialRecordingMode;
         this.initialRecordingSessionActive = initialRecordingSessionActive;
         this.initialAppendToSchedule = initialAppendToSchedule;
         this.initialRecordingDestinationStationId = initialRecordingDestinationStationId == null ? Optional.empty() : initialRecordingDestinationStationId;
+        this.initialRuntimeStatus = initialRuntimeStatus == null ? RouteStatus.IDLE : initialRuntimeStatus;
+        this.initialDockOutputActive = initialDockOutputActive;
+        this.initialCargoRevision = initialCargoRevision;
         this.initialCargoSummary = initialCargoSummary == null ? new LinkedCargoSummary(0, 0, 0, 0, 0) : initialCargoSummary;
         this.initialLinkedCargoEntries = initialLinkedCargoEntries == null ? List.of() : List.copyOf(initialLinkedCargoEntries);
+        this.initialCargoFailureContext = initialCargoFailureContext == null ? Optional.empty() : initialCargoFailureContext;
         addPlayerInventorySlots(playerInventory, 17, 198);
     }
 
@@ -138,12 +155,28 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         return initialRecordingDestinationStationId;
     }
 
+    public void primeClientRuntimeState(Player player) {
+        if (!(player.level().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity transponder)) {
+            return;
+        }
+        if (transponder.runtimeStatus() == RouteStatus.IDLE && initialRuntimeStatus != RouteStatus.IDLE) {
+            transponder.setRuntimeStatus(initialRuntimeStatus);
+        }
+        if (!transponder.dockOutputActive() && initialDockOutputActive) {
+            transponder.setDockOutputActive(true);
+        }
+    }
+
     public static void writeCargoSummary(FriendlyByteBuf buffer, LinkedCargoSummary summary) {
         buffer.writeInt(summary.totalLinks());
         buffer.writeInt(summary.validLinks());
         buffer.writeInt(summary.staleLinks());
         buffer.writeInt(summary.itemLinks());
         buffer.writeInt(summary.fluidLinks());
+    }
+
+    public static void writeCargoRevision(FriendlyByteBuf buffer, int revision) {
+        buffer.writeInt(revision);
     }
 
     public static void writeLinkedCargoEntries(FriendlyByteBuf buffer, List<net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry> entries) {
@@ -153,6 +186,25 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
             buffer.writeBoolean(entry.itemStorage());
             buffer.writeBoolean(entry.fluidStorage());
         }
+    }
+
+    public static void writeCargoFailureContext(FriendlyByteBuf buffer, Optional<CargoFailureContext> context) {
+        buffer.writeBoolean(context.isPresent());
+        if (context.isEmpty()) {
+            return;
+        }
+        buffer.writeEnum(context.get().target());
+        buffer.writeEnum(context.get().waitType());
+    }
+
+    public static Optional<CargoFailureContext> readCargoFailureContext(FriendlyByteBuf buffer) {
+        if (buffer.readableBytes() <= 0 || !buffer.readBoolean()) {
+            return Optional.empty();
+        }
+        return Optional.of(new CargoFailureContext(
+                buffer.readEnum(CargoWaitTarget.class),
+                buffer.readEnum(net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType.class)
+        ));
     }
 
     public static InitialRecordingState resolveInitialRecordingState(ServerPlayer player, ShipTransponderBlockEntity transponder, boolean preferredMode) {
@@ -348,10 +400,27 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
     }
 
     private LinkedCargoSummary resolveCargoSummary(Player player) {
-        if (!(player.level().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity transponder)) {
-            return initialCargoSummary;
+        if (player.level().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity transponder) {
+            LinkedCargoSummary liveSummary = transponder.linkedCargoSummary();
+            if (transponder.linkedCargoRevision() >= initialCargoRevision
+                    || liveSummary.hasLinks()
+                    || !initialCargoSummary.hasLinks()) {
+                return liveSummary;
+            }
         }
-        return transponder.linkedCargoSummary();
+        return initialCargoSummary;
+    }
+
+    private List<net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry> resolveLinkedCargoEntries(Player player) {
+        if (player.level().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity transponder) {
+            List<net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry> liveEntries = transponder.linkedCargo();
+            if (transponder.linkedCargoRevision() >= initialCargoRevision
+                    || !liveEntries.isEmpty()
+                    || initialLinkedCargoEntries.isEmpty()) {
+                return liveEntries;
+            }
+        }
+        return initialLinkedCargoEntries;
     }
 
     public Component installedScheduleText(Player player) {
@@ -699,12 +768,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         if (!canControlTransponderLocally(player)) {
             return List.of();
         }
-        List<net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry> linkedEntries = List.of();
-        if (player.level().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity transponder) {
-            linkedEntries = transponder.linkedCargo();
-        } else if (!initialLinkedCargoEntries.isEmpty()) {
-            linkedEntries = initialLinkedCargoEntries;
-        }
+        List<net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry> linkedEntries = resolveLinkedCargoEntries(player);
         if (linkedEntries.isEmpty()) {
             return List.of();
         }
@@ -740,14 +804,11 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
                 );
             }
             if (runtimeStatus == RouteStatus.HELD_FAULTED) {
-                String suffix = AutomatedLogisticsServices.SCHEDULES.heldFailure(transponder.transponderId())
-                        .orElse(PlaybackFailure.MOVEMENT_FAILURE)
-                        .name()
-                        .toLowerCase(Locale.ROOT);
+                PlaybackFailure heldFailure = AutomatedLogisticsServices.SCHEDULES.heldFailure(transponder.transponderId())
+                        .orElse(PlaybackFailure.MOVEMENT_FAILURE);
                 return List.of(
                         Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.paused_fault").withStyle(ChatFormatting.RED),
-                        Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.failure_reason." + suffix)
-                                .withStyle(ChatFormatting.GRAY),
+                        failureReasonText(transponder, heldFailure),
                         Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.paused_fault.2")
                                 .withStyle(ChatFormatting.DARK_GRAY)
                 );
@@ -792,11 +853,108 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         String suffix = value.name().toLowerCase(Locale.ROOT);
         return List.of(
                 failureStatusText(value).copy().withStyle(ChatFormatting.RED),
-                Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.failure_reason." + suffix)
-                        .withStyle(ChatFormatting.GRAY),
+                failureReasonText(transponder, value),
                 Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.failure_hint." + suffix)
                         .withStyle(ChatFormatting.DARK_GRAY)
         );
+    }
+
+    private Component failureReasonText(ShipTransponderBlockEntity transponder, PlaybackFailure failure) {
+        Optional<CargoFailureContext> context = AutomatedLogisticsServices.SCHEDULES.lastCargoFailureContext(transponder.transponderId())
+                .or(() -> transponder.syncedCargoFailureContext())
+                .or(() -> initialCargoFailureContext)
+                .or(() -> inferCargoFailureContext(transponder, failure));
+        if (failure == PlaybackFailure.CARGO_STORAGE_MISSING && context.isPresent()) {
+            return Component.translatable(
+                    "gui.create_aeronautics_automated_logistics.ship_transponder.failure_reason.cargo_storage_missing.detail",
+                    cargoFailureResourceText(context.get()),
+                    cargoFailureSideText(context.get())
+            ).withStyle(ChatFormatting.GRAY);
+        }
+        if (failure == PlaybackFailure.CARGO_CONDITION_TIMEOUT && context.isPresent()) {
+            return Component.translatable(
+                    "gui.create_aeronautics_automated_logistics.ship_transponder.failure_reason.cargo_condition_timeout.detail",
+                    cargoFailureResourceText(context.get()),
+                    cargoFailureSideText(context.get())
+            ).withStyle(ChatFormatting.GRAY);
+        }
+        return Component.translatable(
+                "gui.create_aeronautics_automated_logistics.ship_transponder.failure_reason."
+                        + failure.name().toLowerCase(java.util.Locale.ROOT)
+        ).withStyle(ChatFormatting.GRAY);
+    }
+
+    private Optional<CargoFailureContext> inferCargoFailureContext(ShipTransponderBlockEntity transponder, PlaybackFailure failure) {
+        if (failure != PlaybackFailure.CARGO_STORAGE_MISSING && failure != PlaybackFailure.CARGO_CONDITION_TIMEOUT) {
+            return Optional.empty();
+        }
+        LinkedCargoSummary shipSummary = transponder.linkedCargoSummary();
+        for (AirshipScheduleEntry entry : transponder.ownedSchedule().entries()) {
+            for (List<AirshipScheduleCondition> group : entry.effectiveConditionGroups()) {
+                for (AirshipScheduleCondition condition : group) {
+                    WaitCondition waitCondition = condition.waitCondition();
+                    if (!isCargoWaitType(waitCondition.type())) {
+                        continue;
+                    }
+                    LinkedCargoSummary summary = waitCondition.cargoTarget() == CargoWaitTarget.SHIP_CARGO
+                            ? shipSummary
+                            : stationCargoSummary(transponder, entry);
+                    if (summary == null || summary.staleLinks() > 0 || !summarySupportsWait(summary, waitCondition.type())) {
+                        return Optional.of(new CargoFailureContext(waitCondition.cargoTarget(), waitCondition.type()));
+                    }
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    private LinkedCargoSummary stationCargoSummary(ShipTransponderBlockEntity transponder, AirshipScheduleEntry entry) {
+        if (transponder.getLevel() == null || entry.targetStationId().isEmpty()) {
+            return null;
+        }
+        return entry.targetStationId()
+                .flatMap(AirshipStationRegistry::snapshot)
+                .flatMap(snapshot -> transponder.getLevel().getBlockEntity(snapshot.stationPos()) instanceof AirshipStationBlockEntity station
+                        ? Optional.of(station.linkedCargoSummary())
+                        : Optional.empty())
+                .orElse(null);
+    }
+
+    private boolean summarySupportsWait(LinkedCargoSummary summary, WaitConditionType type) {
+        return switch (type) {
+            case UNTIL_ITEM_THRESHOLD, UNTIL_ITEM_EMPTY, UNTIL_ITEM_FULL, UNTIL_EMPTY, UNTIL_FULL -> summary.itemLinks() > 0;
+            case UNTIL_FLUID_THRESHOLD, UNTIL_FLUID_EMPTY, UNTIL_FLUID_FULL -> summary.fluidLinks() > 0;
+            default -> true;
+        };
+    }
+
+    private boolean isCargoWaitType(WaitConditionType type) {
+        return type == WaitConditionType.UNTIL_ITEM_THRESHOLD
+                || type == WaitConditionType.UNTIL_FLUID_THRESHOLD
+                || type == WaitConditionType.UNTIL_ITEM_EMPTY
+                || type == WaitConditionType.UNTIL_ITEM_FULL
+                || type == WaitConditionType.UNTIL_FLUID_EMPTY
+                || type == WaitConditionType.UNTIL_FLUID_FULL
+                || type == WaitConditionType.UNTIL_EMPTY
+                || type == WaitConditionType.UNTIL_FULL;
+    }
+
+    private Component cargoFailureSideText(CargoFailureContext context) {
+        return Component.translatable(
+                context.target() == CargoWaitTarget.STATION_CARGO
+                        ? "gui.create_aeronautics_automated_logistics.cargo_failure.side.station"
+                        : "gui.create_aeronautics_automated_logistics.cargo_failure.side.ship"
+        );
+    }
+
+    private Component cargoFailureResourceText(CargoFailureContext context) {
+        return switch (context.waitType()) {
+            case UNTIL_FLUID_THRESHOLD, UNTIL_FLUID_EMPTY, UNTIL_FLUID_FULL ->
+                    Component.translatable("gui.create_aeronautics_automated_logistics.cargo_failure.resource.fluid");
+            case UNTIL_ITEM_THRESHOLD, UNTIL_ITEM_EMPTY, UNTIL_ITEM_FULL, UNTIL_EMPTY, UNTIL_FULL ->
+                    Component.translatable("gui.create_aeronautics_automated_logistics.cargo_failure.resource.item");
+            default -> Component.translatable("gui.create_aeronautics_automated_logistics.cargo_failure.resource.cargo");
+        };
     }
 
     private Component failureStatusText(PlaybackFailure failure) {

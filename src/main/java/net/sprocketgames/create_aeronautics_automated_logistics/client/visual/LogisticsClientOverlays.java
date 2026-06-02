@@ -31,14 +31,17 @@ public final class LogisticsClientOverlays {
     private static final int END_COLOR = 0xFFD36C;
     private static final int DOCK_COLOR = 0x7AD7FF;
     private static final int CARGO_COLOR = 0x9BEA8B;
+    private static final int[] LINK_CANDIDATE_COLORS = new int[]{0xFFE37A, 0xFFC84D};
     private static final int LANDING_SEGMENTS = 48;
     private static final int LATITUDE_RINGS = 5;
     private static final int ROUTE_ARROW_SPACING = 12;
 
     private static Optional<LandingAreaOverlay> landingAreaOverlay = Optional.empty();
     private static Optional<BlockPos> dockOverlay = Optional.empty();
+    private static List<BlockPos> dockLinkCandidates = List.of();
     private static List<BlockPos> cargoOverlay = List.of();
     private static List<List<BlockPos>> cargoOverlayGroups = List.of();
+    private static List<List<BlockPos>> cargoLinkCandidates = List.of();
     private static List<Vec3> flightPath = List.of();
     private static List<Integer> flightPathLegEnds = List.of();
     private static Optional<UUID> previewedRouteId = Optional.empty();
@@ -76,6 +79,20 @@ public final class LogisticsClientOverlays {
     public static void clearDock() {
         dockOverlay.ifPresent(LogisticsClientOverlays::removeDock);
         dockOverlay = Optional.empty();
+    }
+
+    public static void setDockLinkCandidates(List<BlockPos> candidatePositions) {
+        List<BlockPos> normalized = normalizeCargoPositions(candidatePositions);
+        if (dockLinkCandidates.equals(normalized)) {
+            return;
+        }
+        clearDockLinkCandidates();
+        dockLinkCandidates = normalized;
+    }
+
+    public static void clearDockLinkCandidates() {
+        removeDockLinkCandidates(dockLinkCandidates);
+        dockLinkCandidates = List.of();
     }
 
     public static boolean isDockVisible(BlockPos dockPos) {
@@ -123,6 +140,20 @@ public final class LogisticsClientOverlays {
         cargoOverlayGroups = List.of();
     }
 
+    public static void setCargoLinkCandidates(List<List<BlockPos>> candidateGroups) {
+        List<List<BlockPos>> normalized = normalizeCargoGroups(candidateGroups);
+        if (cargoLinkCandidates.equals(normalized)) {
+            return;
+        }
+        clearCargoLinkCandidates();
+        cargoLinkCandidates = normalized;
+    }
+
+    public static void clearCargoLinkCandidates() {
+        removeCargoCandidates(cargoLinkCandidates);
+        cargoLinkCandidates = List.of();
+    }
+
     public static boolean isCargoVisible(List<BlockPos> cargoPositions) {
         return isCargoVisibleGroups(List.of(cargoPositions));
     }
@@ -159,7 +190,13 @@ public final class LogisticsClientOverlays {
 
     public static void refresh() {
         landingAreaOverlay.ifPresent(LogisticsClientOverlays::showLandingArea);
+        if (!dockLinkCandidates.isEmpty()) {
+            showDockLinkCandidates(dockLinkCandidates);
+        }
         dockOverlay.ifPresent(LogisticsClientOverlays::showDock);
+        if (!cargoLinkCandidates.isEmpty()) {
+            showCargoCandidates(cargoLinkCandidates);
+        }
         if (!cargoOverlay.isEmpty()) {
             showCargo(cargoOverlayGroups);
         }
@@ -231,6 +268,25 @@ public final class LogisticsClientOverlays {
         Outliner.getInstance().remove(Pair.of("dock_overlay", dockPos));
     }
 
+    private static void showDockLinkCandidates(List<BlockPos> dockPositions) {
+        int color = pulsingLinkCandidateColor();
+        float lineWidth = pulsingLinkCandidateLineWidth();
+        for (BlockPos dockPos : dockPositions) {
+            Outliner.getInstance()
+                    .showAABB(Pair.of("dock_link_candidate", dockPos), AABB.ofSize(Vec3.atCenterOf(dockPos), 1.12D, 1.12D, 1.12D))
+                    .colored(color)
+                    .lineWidth(lineWidth)
+                    .disableLineNormals()
+                    .withFaceTexture(AllSpecialTextures.SELECTION);
+        }
+    }
+
+    private static void removeDockLinkCandidates(List<BlockPos> dockPositions) {
+        for (BlockPos dockPos : dockPositions) {
+            Outliner.getInstance().remove(Pair.of("dock_link_candidate", dockPos));
+        }
+    }
+
     private static void showCargo(List<List<BlockPos>> cargoPositionGroups) {
         for (List<BlockPos> group : cargoPositionGroups) {
             List<CargoCluster> clusters = clusterCargo(group);
@@ -249,6 +305,43 @@ public final class LogisticsClientOverlays {
         for (List<BlockPos> group : cargoPositionGroups) {
             for (CargoCluster cluster : clusterCargo(group)) {
                 Outliner.getInstance().remove(Pair.of("cargo_overlay", cluster.key()));
+            }
+        }
+    }
+
+    private static void showCargoCandidates(List<List<BlockPos>> cargoPositionGroups) {
+        int color = pulsingLinkCandidateColor();
+        float lineWidth = pulsingLinkCandidateLineWidth();
+        for (List<BlockPos> group : cargoPositionGroups) {
+            if (group.size() == 1) {
+                BlockPos pos = group.getFirst();
+                Outliner.getInstance()
+                        .showAABB(Pair.of("cargo_link_candidate", pos), AABB.ofSize(Vec3.atCenterOf(pos), 1.05D, 1.05D, 1.05D))
+                        .colored(color)
+                        .lineWidth(lineWidth)
+                        .disableLineNormals()
+                        .withFaceTexture(AllSpecialTextures.SELECTION);
+                continue;
+            }
+            for (CargoCluster cluster : clusterCargo(group)) {
+                Outliner.getInstance()
+                        .showAABB(Pair.of("cargo_link_candidate", cluster.key()), cluster.bounds())
+                        .colored(color)
+                        .lineWidth(lineWidth)
+                        .disableLineNormals()
+                        .withFaceTexture(AllSpecialTextures.SELECTION);
+            }
+        }
+    }
+
+    private static void removeCargoCandidates(List<List<BlockPos>> cargoPositionGroups) {
+        for (List<BlockPos> group : cargoPositionGroups) {
+            if (group.size() == 1) {
+                Outliner.getInstance().remove(Pair.of("cargo_link_candidate", group.getFirst()));
+                continue;
+            }
+            for (CargoCluster cluster : clusterCargo(group)) {
+                Outliner.getInstance().remove(Pair.of("cargo_link_candidate", cluster.key()));
             }
         }
     }
@@ -387,6 +480,16 @@ public final class LogisticsClientOverlays {
             }
         }
         return legEndIndices.size() - 1;
+    }
+
+    private static int pulsingLinkCandidateColor() {
+        long gameTime = Minecraft.getInstance().level != null ? Minecraft.getInstance().level.getGameTime() : 0L;
+        return LINK_CANDIDATE_COLORS[(int) ((gameTime / 10L) % LINK_CANDIDATE_COLORS.length)];
+    }
+
+    private static float pulsingLinkCandidateLineWidth() {
+        long gameTime = Minecraft.getInstance().level != null ? Minecraft.getInstance().level.getGameTime() : 0L;
+        return (gameTime / 10L) % 2L == 0L ? 1 / 10f : 1 / 16f;
     }
 
     private static Vec3 pointOnCircle(Vec3 center, double radius, double theta, int axis) {

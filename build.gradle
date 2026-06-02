@@ -1,3 +1,6 @@
+import groovy.json.JsonSlurper
+import java.net.URLEncoder
+
 plugins {
     id 'java-library'
     id 'maven-publish'
@@ -44,6 +47,14 @@ def resolveLocalJarPath = { String gradlePropertyName, String envVarName ->
             .get()
 }
 
+def resolveLocalBoolean = { String gradlePropertyName, String envVarName, boolean defaultValue = false ->
+    providers.gradleProperty(gradlePropertyName)
+            .orElse(providers.environmentVariable(envVarName))
+            .orElse(localProperties.getProperty(gradlePropertyName, String.valueOf(defaultValue)))
+            .map { String value -> value.equalsIgnoreCase('true') }
+            .get()
+}
+
 def localAeronauticsJarPath = resolveLocalJarPath('aeronautics_bundled_jar', 'AERONAUTICS_BUNDLED_JAR')
 def localSableJarPath = resolveLocalJarPath('sable_jar', 'SABLE_JAR')
 def localCreateJarPath = resolveLocalJarPath('create_jar', 'CREATE_JAR')
@@ -53,10 +64,125 @@ def localAe2JarPath = resolveLocalJarPath('ae2_jar', 'AE2_JAR')
 def localIronChestsJarPath = resolveLocalJarPath('iron_chests_jar', 'IRON_CHESTS_JAR')
 def localStorageDrawersJarPath = resolveLocalJarPath('storage_drawers_jar', 'STORAGE_DRAWERS_JAR')
 def localMekanismJarPath = resolveLocalJarPath('mekanism_jar', 'MEKANISM_JAR')
+def localTomsStorageJarPath = resolveLocalJarPath('toms_storage_jar', 'TOMS_STORAGE_JAR')
 def localSophisticatedStorageJarPath = resolveLocalJarPath('sophisticated_storage_jar', 'SOPHISTICATED_STORAGE_JAR')
 def localFunctionalStorageJarPath = resolveLocalJarPath('functional_storage_jar', 'FUNCTIONAL_STORAGE_JAR')
 def localSophisticatedBackpacksJarPath = resolveLocalJarPath('sophisticated_backpacks_jar', 'SOPHISTICATED_BACKPACKS_JAR')
+def localDownloadDevStorageMods = resolveLocalBoolean('download_dev_storage_mods', 'DOWNLOAD_DEV_STORAGE_MODS')
 def localModJarPaths = [localAeronauticsJarPath, localSableJarPath].findAll { !it.isBlank() }
+def devCompatProjects = [
+        'refined-storage',
+        'ae2',
+        'iron-chests',
+        'storagedrawers',
+        'mekanism',
+        'toms-storage',
+        'sophisticated-storage',
+        'functional-storage',
+        'sophisticated-backpacks'
+]
+
+def modrinthApiBase = 'https://api.modrinth.com/v2'
+def devCompatModsDir = layout.buildDirectory.dir('dev-compat-mods')
+def devCompatRunDirs = ['client', 'server', 'gameTestServer'].collect { runName ->
+    layout.projectDirectory.dir("run/${runName}/mods")
+}
+
+tasks.register('downloadDevCompatMods') {
+    group = 'dev'
+    description = 'Downloads optional storage-mod jars for local 1.21.1 NeoForge compatibility testing.'
+    outputs.dir(devCompatModsDir)
+    onlyIf { localDownloadDevStorageMods }
+
+    doLast {
+        def outputDir = devCompatModsDir.get().asFile
+        outputDir.mkdirs()
+
+        def slurper = new JsonSlurper()
+        def expectedFiles = [] as Set<String>
+        def seenProjects = [] as Set<String>
+        def seenVersions = [] as Set<String>
+        def projectInfoCache = [:]
+
+        def fetchJson = { String url ->
+            new URL(url).withInputStream { stream -> slurper.parse(stream) }
+        }
+
+        def resolveProject = { String projectRef ->
+            projectInfoCache.computeIfAbsent(projectRef) {
+                fetchJson("${modrinthApiBase}/project/${URLEncoder.encode(projectRef, 'UTF-8')}")
+            }
+        }
+
+        def downloadVersionFile
+        def downloadProjectLatest
+
+        downloadVersionFile = { Map version ->
+            if (!seenVersions.add(version.id as String)) {
+                return
+            }
+
+            def file = version.files.find { it.primary } ?: version.files.first()
+            def destination = new File(outputDir, file.filename as String)
+            expectedFiles.add(destination.name)
+
+            if (!destination.exists() || destination.length() != (file.size as long)) {
+                destination.withOutputStream { out ->
+                    new URL(file.url as String).withInputStream { stream ->
+                        stream.transferTo(out)
+                    }
+                }
+            }
+
+            (version.dependencies ?: [])
+                    .findAll { it.dependency_type == 'required' }
+                    .each { dependency ->
+                        if (dependency.version_id) {
+                            def dependencyVersion = fetchJson("${modrinthApiBase}/version/${dependency.version_id}")
+                            downloadVersionFile(dependencyVersion as Map)
+                        } else if (dependency.project_id) {
+                            downloadProjectLatest(dependency.project_id as String)
+                        }
+                    }
+        }
+
+        downloadProjectLatest = { String projectRef ->
+            if (!seenProjects.add(projectRef)) {
+                return
+            }
+
+            resolveProject(projectRef)
+            def encodedLoaders = URLEncoder.encode('["neoforge"]', 'UTF-8')
+            def queryVersions = { String gameVersion ->
+                def encodedGameVersions = URLEncoder.encode("[\"${gameVersion}\"]", 'UTF-8')
+                fetchJson("${modrinthApiBase}/project/${URLEncoder.encode(projectRef, 'UTF-8')}/version?loaders=${encodedLoaders}&game_versions=${encodedGameVersions}") as List
+            }
+
+            def versions = queryVersions('1.21.1')
+            if (!versions || versions.isEmpty()) {
+                versions = queryVersions('1.21')
+            }
+
+            if (!versions || versions.isEmpty()) {
+                throw new GradleException("No compatible 1.21.1/1.21 NeoForge Modrinth version found for '${projectRef}'. Use a manual *_jar override in gradle-local.properties if needed.")
+            }
+
+            def latestVersion = versions.sort { a, b ->
+                (b.date_published as String) <=> (a.date_published as String)
+            }.first() as Map
+
+            downloadVersionFile(latestVersion)
+        }
+
+        devCompatProjects.each { projectRef ->
+            downloadProjectLatest(projectRef)
+        }
+
+        outputDir.listFiles()?.findAll { it.isFile() && !expectedFiles.contains(it.name) }?.each { stale ->
+            stale.delete()
+        }
+    }
+}
 
 tasks.register('extractLocalModJarJars', Copy) {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
@@ -168,6 +294,7 @@ dependencies {
             localIronChestsJarPath,
             localStorageDrawersJarPath,
             localMekanismJarPath,
+            localTomsStorageJarPath,
             localSophisticatedStorageJarPath,
             localFunctionalStorageJarPath,
             localSophisticatedBackpacksJarPath
@@ -241,6 +368,43 @@ tasks.register('ideBeforeRun') {
     description = 'Prepares local IDE run outputs expected by generated NeoGradle run configurations.'
     dependsOn tasks.named('classes')
     dependsOn tasks.named('syncIdeaResources')
+    if (localDownloadDevStorageMods) {
+        dependsOn tasks.named('downloadDevCompatMods')
+        dependsOn tasks.named('syncDevCompatModsToRunDirs')
+    }
+}
+
+if (localDownloadDevStorageMods) {
+    tasks.named('build').configure {
+        dependsOn tasks.named('downloadDevCompatMods')
+        dependsOn tasks.named('syncDevCompatModsToRunDirs')
+    }
+}
+
+tasks.register('syncDevCompatModsToRunDirs') {
+    group = 'dev'
+    description = 'Copies downloaded local compatibility-test mods into the NeoForge run mods folders.'
+    dependsOn tasks.named('downloadDevCompatMods')
+    inputs.dir(devCompatModsDir)
+    outputs.dirs(devCompatRunDirs)
+    onlyIf { localDownloadDevStorageMods }
+
+    doLast {
+        def sourceDir = devCompatModsDir.get().asFile
+        devCompatRunDirs.each { targetDirProvider ->
+            def targetDir = targetDirProvider.asFile
+            copy {
+                from(sourceDir)
+                include '*.jar'
+                into(targetDir)
+            }
+
+            def expectedNames = sourceDir.listFiles()?.findAll { it.isFile() }?.collect { it.name }?.toSet() ?: [] as Set
+            targetDir.listFiles()?.findAll { it.isFile() && !expectedNames.contains(it.name) }?.each { stale ->
+                stale.delete()
+            }
+        }
+    }
 }
 
 // Example configuration to allow publishing using the maven-publish plugin

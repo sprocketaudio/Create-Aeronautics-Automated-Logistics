@@ -1,19 +1,26 @@
 package net.sprocketgames.create_aeronautics_automated_logistics.cargo;
 
+import java.util.ArrayDeque;
 import java.lang.reflect.Method;
+import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.level.block.state.properties.ChestType;
 
 final class CargoStorageRootResolver {
+    private static final String AE2_CONTROLLER = "appeng.blockentity.networking.ControllerBlockEntity";
     private static final Map<ClassMethodKey, Optional<Method>> METHOD_CACHE = new HashMap<>();
 
     private CargoStorageRootResolver() {
@@ -48,6 +55,11 @@ final class CargoStorageRootResolver {
         StorageRoot storageDrawersRoot = resolveStorageDrawers(blockEntity, pos);
         if (storageDrawersRoot != null) {
             return storageDrawersRoot;
+        }
+
+        StorageRoot ae2ControllerRoot = resolveAe2Controller(level, blockEntity, pos);
+        if (ae2ControllerRoot != null) {
+            return ae2ControllerRoot;
         }
 
         StorageRoot mekanismRoot = resolveMekanism(blockEntity, pos);
@@ -173,6 +185,28 @@ final class CargoStorageRootResolver {
         return StorageRoot.self(pos);
     }
 
+    private static StorageRoot resolveAe2Controller(Level level, BlockEntity blockEntity, BlockPos pos) {
+        if (!AE2_CONTROLLER.equals(blockEntity.getClass().getName())) {
+            return null;
+        }
+
+        String state = blockStateValueName(blockEntity.getBlockState(), "state");
+        if ("conflicted".equals(state)) {
+            return StorageRoot.self(pos);
+        }
+
+        Set<BlockPos> connectedControllers = collectConnectedAe2Controllers(level, pos);
+        if (connectedControllers.size() <= 1) {
+            return StorageRoot.self(pos);
+        }
+
+        BlockPos accessPos = connectedControllers.stream()
+                .min(CargoStorageRootResolver::compare)
+                .orElse(pos)
+                .immutable();
+        return StorageRoot.of("ae2_controller_multiblock", accessPos, accessPos);
+    }
+
     private static StorageRoot resolveVanillaChest(BlockEntity blockEntity, BlockPos pos) {
         if (!(blockEntity instanceof ChestBlockEntity chest)) {
             return null;
@@ -194,6 +228,9 @@ final class CargoStorageRootResolver {
     }
 
     private static Object invoke(Object target, String methodName) {
+        if (target == null) {
+            return null;
+        }
         Optional<Method> method = zeroArgMethod(target.getClass(), methodName);
         if (method.isEmpty()) {
             return null;
@@ -254,6 +291,56 @@ final class CargoStorageRootResolver {
             return resolved instanceof BlockPos blockPos ? blockPos.immutable() : null;
         }
         return value instanceof BlockPos blockPos ? blockPos.immutable() : null;
+    }
+
+    private static Set<BlockPos> collectConnectedAe2Controllers(Level level, BlockPos origin) {
+        Set<BlockPos> connected = new HashSet<>();
+        Deque<BlockPos> pending = new ArrayDeque<>();
+        pending.add(origin);
+
+        while (!pending.isEmpty()) {
+            BlockPos current = pending.removeFirst();
+            if (!connected.add(current.immutable())) {
+                continue;
+            }
+
+            for (Direction direction : Direction.values()) {
+                BlockPos neighborPos = current.relative(direction);
+                if (connected.contains(neighborPos)) {
+                    continue;
+                }
+                if (isNonConflictedAe2Controller(level, neighborPos)) {
+                    pending.addLast(neighborPos);
+                }
+            }
+        }
+
+        return connected;
+    }
+
+    private static boolean isNonConflictedAe2Controller(Level level, BlockPos pos) {
+        BlockEntity blockEntity = level.getBlockEntity(pos);
+        if (blockEntity == null || !AE2_CONTROLLER.equals(blockEntity.getClass().getName())) {
+            return false;
+        }
+
+        return !"conflicted".equals(blockStateValueName(blockEntity.getBlockState(), "state"));
+    }
+
+    @SuppressWarnings({ "rawtypes", "unchecked" })
+    private static String blockStateValueName(BlockState state, String propertyName) {
+        for (Property<?> property : state.getProperties()) {
+            if (!property.getName().equals(propertyName)) {
+                continue;
+            }
+
+            Object value = state.getValue((Property) property);
+            if (value == null) {
+                return null;
+            }
+            return value instanceof Enum<?> enumValue ? enumValue.name() : value.toString();
+        }
+        return null;
     }
 
     private static int compare(BlockPos a, BlockPos b) {

@@ -60,6 +60,33 @@ public final class DockingRuntime {
         return DockingWaitResult.waiting();
     }
 
+    public static Optional<PlaybackFailure> resetDockingPair(
+            ServerLevel level,
+            AirshipStationBlockEntity station,
+            Route route
+    ) {
+        DockingContext context = context(level, station, route);
+        if (context.failure().isPresent()) {
+            return context.failure();
+        }
+        BlockPos stationDock = context.stationDockPos().get();
+        BlockPos shipDock = context.shipDockPos().get();
+        if (DockingConnectorDiscovery.dockingConnector(level, stationDock).isEmpty()
+                || DockingConnectorDiscovery.dockingConnector(level, shipDock).isEmpty()) {
+            return Optional.of(PlaybackFailure.MISSING_DOCK);
+        }
+
+        DockingConnectorDiscovery.dockingConnector(level, stationDock).ifPresent(connector -> connector.unDock());
+        DockingConnectorDiscovery.dockingConnector(level, shipDock).ifPresent(connector -> connector.unDock());
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Docking wait reset connector pair: stationDock={} shipDock={} route={}",
+                stationDock.toShortString(),
+                shipDock.toShortString(),
+                route.id().value()
+        );
+        return Optional.empty();
+    }
+
     public static Optional<DockTransferSnapshot> transferSnapshot(
             ServerLevel level,
             AirshipStationBlockEntity station,

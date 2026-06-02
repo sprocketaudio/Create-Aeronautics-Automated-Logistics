@@ -389,6 +389,19 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         return Optional.ofNullable(activePlaybacks.get(routeId)).flatMap(ActivePlayback::heldFailure);
     }
 
+    public Optional<CargoWaitTarget> heldCargoFailureTarget(RouteId routeId) {
+        return heldCargoFailureContext(routeId).map(CargoFailureContext::target);
+    }
+
+    public Optional<CargoFailureContext> heldCargoFailureContext(RouteId routeId) {
+        return Optional.ofNullable(activePlaybacks.get(routeId)).flatMap(ActivePlayback::heldCargoFailureContext);
+    }
+
+    public boolean canSkipCurrentStop(RouteId routeId) {
+        ActivePlayback activePlayback = activePlaybacks.get(routeId);
+        return activePlayback != null && activePlayback.isWaiting();
+    }
+
     public boolean holdPlayback(ServerLevel level, RouteId routeId, PlaybackFailure failure) {
         Objects.requireNonNull(level, "level");
         Objects.requireNonNull(routeId, "routeId");
@@ -416,12 +429,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 return false;
             }
         }
-        activePlayback.resumeFromPause();
-        activePlayback.clearRecoverableWaitFailures();
-        activePlayback.resetDockHandshake();
-        activePlayback.beginRestoreCatch();
-        stationAt(level, activePlayback.stationPos()).ifPresent(station -> resumeStationState(station, activePlayback));
-        setVisualsActive(level, activePlayback, true);
+        resumePausedPlayback(level, activePlayback);
         return true;
     }
 
@@ -694,12 +702,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             if (!controller.isAssembled()) {
                 return PlaybackFailure.VEHICLE_MISSING;
             }
-            activePlayback.resumeFromPause();
-            activePlayback.clearRecoverableWaitFailures();
-            activePlayback.resetDockHandshake();
-            activePlayback.beginRestoreCatch();
-            station.ifPresent(value -> resumeStationState(value, activePlayback));
-            setVisualsActive(level, activePlayback, true);
+            resumePausedPlayback(level, activePlayback);
             return null;
         }
 
@@ -733,12 +736,34 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 }
             } else if (activePlayback.requiresDockLock()) {
                 activePlayback.activeDockStationPos(Optional.of(dockingStation.get().getBlockPos().immutable()));
-                if (activePlayback.dockWaitFailure().isEmpty() && !activePlayback.dockLocked()) {
+                if (activePlayback.dockWaitFailure().isEmpty()
+                        && !activePlayback.dockLocked()) {
+                    if (activePlayback.isDockReacquireMotionActive()
+                            && !activePlayback.hasReleasedDockReacquireControl()) {
+                        Optional<PlaybackFailure> resetFailure = DockingRuntime.resetDockingPair(
+                                level,
+                                dockingStation.get(),
+                                activePlayback.route()
+                        );
+                        if (resetFailure.isPresent()) {
+                            activePlayback.dockWaitFailure(Optional.of(resetFailure.get()));
+                            return resetFailure.get();
+                        }
+                        Optional<PlaybackFailure> dockFailure = DockingRuntime.beginDockingWait(
+                                level,
+                                dockingStation.get(),
+                                activePlayback.route()
+                        );
+                        if (dockFailure.isPresent()) {
+                            activePlayback.dockWaitFailure(Optional.of(dockFailure.get()));
+                        }
+                    }
                     DockingRuntime.DockingWaitResult docking = DockingRuntime.tickDockingWait(level, dockingStation.get(), activePlayback.route());
                     if (docking.failure().isPresent()) {
                         activePlayback.dockWaitFailure(Optional.of(docking.failure().get()));
                     } else if (docking.locked()) {
                         activePlayback.dockLocked(true);
+                        activePlayback.endDockReacquireMotion();
                         CreateAeronauticsAutomatedLogistics.debugLog(
                                 "Playback {} docked at stop {} while evaluating grouped stop conditions",
                                 activePlayback.route().id().value(),
@@ -751,9 +776,19 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             }
         }
 
-        PlaybackFailure failure = holdAtTarget(level, activePlayback, controller, targetPosition, targetRotation);
-        if (failure != null) {
-            return failure;
+        if (activePlayback.requiresDockLock()
+                && !activePlayback.dockLocked()
+                && activePlayback.isDockReacquireMotionActive()) {
+            if (!activePlayback.hasReleasedDockReacquireControl()) {
+                controller.stop(level);
+                activePlayback.markDockReacquireControlReleased();
+                activePlayback.resetProgress(controller.position().distanceTo(targetPosition));
+            }
+        } else {
+            PlaybackFailure holdFailure = holdAtTarget(level, activePlayback, controller, targetPosition, targetRotation);
+            if (holdFailure != null) {
+                return holdFailure;
+            }
         }
 
         ConditionTickResult conditionResult = tickConditionGroups(level, dockingStation, activePlayback);
@@ -917,14 +952,31 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 }
                 Optional<List<LinkedCargoEntry>> targetEntries =
                         cargoEntries(level, dockingStation, activePlayback, waitCondition.cargoTarget());
-                if (targetEntries.isEmpty() || cargoStorageMissing(level, targetEntries.get(), waitCondition)) {
+                if (targetEntries.isEmpty()) {
+                    CreateAeronauticsAutomatedLogistics.debugLog(
+                            "Cargo wait {} on playback {} failed: no target entries for {}",
+                            waitCondition.type(),
+                            activePlayback.route().id().value(),
+                            waitCondition.cargoTarget()
+                    );
+                    state.markFailure(PlaybackFailure.CARGO_STORAGE_MISSING);
+                    return ConditionTickResult.failedResult(PlaybackFailure.CARGO_STORAGE_MISSING);
+                }
+                if (cargoStorageMissing(level, targetEntries.get(), waitCondition, activePlayback.route().id().value().toString())) {
                     state.markFailure(PlaybackFailure.CARGO_STORAGE_MISSING);
                     return ConditionTickResult.failedResult(PlaybackFailure.CARGO_STORAGE_MISSING);
                 }
                 Optional<LinkedCargoSnapshot> snapshot = targetEntries
                         .map(entries -> LinkedCargoSnapshot.capture(level, entries))
                         .filter(captured -> relevantStoragePresent(captured, waitCondition));
-                if (snapshot.isEmpty() || targetEntries.isEmpty()) {
+                if (snapshot.isEmpty()) {
+                    CreateAeronauticsAutomatedLogistics.debugLog(
+                            "Cargo wait {} on playback {} failed: snapshot had no relevant {} storage for entries {}",
+                            waitCondition.type(),
+                            activePlayback.route().id().value(),
+                            waitCondition.type(),
+                            summarizeCargoEntries(targetEntries.get())
+                    );
                     state.markFailure(PlaybackFailure.CARGO_STORAGE_MISSING);
                     return ConditionTickResult.failedResult(PlaybackFailure.CARGO_STORAGE_MISSING);
                 }
@@ -935,6 +987,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                     }
                     return ConditionTickResult.pendingResult();
                 }
+                logCargoConditionPending(activePlayback, waitCondition, snapshot.get(), state, targetEntries.get());
                 state.resetIdleWait();
                 if (state.tickCargoTimeout()) {
                     state.markFailure(PlaybackFailure.CARGO_CONDITION_TIMEOUT);
@@ -999,24 +1052,80 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 .orElse(WaitCondition.none());
         Optional<List<LinkedCargoEntry>> targetEntries =
                 cargoEntries(level, Optional.of(station), activePlayback, waitCondition.cargoTarget());
-        if (targetEntries.isEmpty() || cargoStorageMissing(level, targetEntries.get(), waitCondition)) {
+        if (targetEntries.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Dock cargo wait {} on playback {} failed: no target entries for {}",
+                    waitCondition.type(),
+                    activePlayback.route().id().value(),
+                    waitCondition.cargoTarget()
+            );
+            return Optional.of(PlaybackFailure.CARGO_STORAGE_MISSING);
+        }
+        if (cargoStorageMissing(level, targetEntries.get(), waitCondition, activePlayback.route().id().value().toString())) {
             return Optional.of(PlaybackFailure.CARGO_STORAGE_MISSING);
         }
         Optional<LinkedCargoSnapshot> snapshot = targetEntries
                 .map(entries -> LinkedCargoSnapshot.capture(level, entries))
                 .filter(captured -> relevantStoragePresent(captured, waitCondition));
-        if (snapshot.isEmpty() || targetEntries.isEmpty()) {
+        if (snapshot.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Dock cargo wait {} on playback {} failed: snapshot had no relevant {} storage for entries {}",
+                    waitCondition.type(),
+                    activePlayback.route().id().value(),
+                    waitCondition.type(),
+                    summarizeCargoEntries(targetEntries.get())
+            );
             return Optional.of(PlaybackFailure.CARGO_STORAGE_MISSING);
         }
         if (cargoConditionSatisfied(level, snapshot.get(), waitCondition)) {
             activePlayback.cargoSatisfiedThisTick(true);
             return Optional.empty();
         }
+        logCargoConditionPending(
+                activePlayback,
+                waitCondition,
+                snapshot.get(),
+                activePlayback.conditionState(0, 0, waitCondition),
+                targetEntries.get()
+        );
         activePlayback.cargoSatisfiedThisTick(false);
         if (activePlayback.tickCargoTimeout()) {
             return Optional.of(PlaybackFailure.CARGO_CONDITION_TIMEOUT);
         }
         return Optional.empty();
+    }
+
+    private void logCargoConditionPending(
+            ActivePlayback activePlayback,
+            WaitCondition waitCondition,
+            LinkedCargoSnapshot snapshot,
+            ConditionRuntimeState state,
+            List<LinkedCargoEntry> entries
+    ) {
+        if (!activePlayback.shouldLogProgress()) {
+            return;
+        }
+        if (waitCondition.type() != WaitConditionType.UNTIL_ITEM_EMPTY
+                && waitCondition.type() != WaitConditionType.UNTIL_FLUID_EMPTY
+                && waitCondition.type() != WaitConditionType.UNTIL_EMPTY
+                && waitCondition.type() != WaitConditionType.UNTIL_FULL
+                && waitCondition.type() != WaitConditionType.UNTIL_ITEM_FULL
+                && waitCondition.type() != WaitConditionType.UNTIL_FLUID_FULL) {
+            return;
+        }
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Cargo wait {} on playback {} pending: target={} itemStorage={} fluidStorage={} totalItems={} totalFluids={} stabilityTicksRemaining={} cargoTimeoutTicksRemaining={} entries={}",
+                waitCondition.type(),
+                activePlayback.route().id().value(),
+                waitCondition.cargoTarget(),
+                snapshot.hasItemStorage(),
+                snapshot.hasFluidStorage(),
+                snapshot.totalItemCount(),
+                snapshot.totalFluidAmount(),
+                state.waitTicksRemaining,
+                state.cargoTimeoutTicksRemaining,
+                summarizeCargoEntries(entries)
+        );
     }
 
     private PlaybackFailure beginWaitAtTarget(
@@ -1245,6 +1354,16 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         station.startPlayback(activePlayback.route());
     }
 
+    private void resumePausedPlayback(ServerLevel level, ActivePlayback activePlayback) {
+        activePlayback.resumeFromPause();
+        activePlayback.clearRecoverableWaitFailures();
+        activePlayback.resetDockHandshake();
+        activePlayback.beginDockReacquireMotion();
+        activePlayback.beginRestoreCatch();
+        stationAt(level, activePlayback.stationPos()).ifPresent(station -> resumeStationState(station, activePlayback));
+        setVisualsActive(level, activePlayback, true);
+    }
+
     private void fail(ServerLevel level, ActivePlayback activePlayback, PlaybackFailure failure) {
         CreateAeronauticsAutomatedLogistics.LOGGER.warn(
                 "Route playback {} failed with {} at point {} after {} tick(s)",
@@ -1352,19 +1471,52 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         return Optional.empty();
     }
 
-    private boolean cargoStorageMissing(ServerLevel level, List<LinkedCargoEntry> entries, WaitCondition waitCondition) {
+    private boolean cargoStorageMissing(
+            ServerLevel level,
+            List<LinkedCargoEntry> entries,
+            WaitCondition waitCondition,
+            String playbackId
+    ) {
         if (entries.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Cargo wait {} on playback {} failed storage validation: entries empty",
+                    waitCondition.type(),
+                    playbackId
+            );
             return true;
         }
         LinkedCargoSummary summary = CargoLinkDiscovery.summarize(level, entries);
         if (summary.staleLinks() > 0) {
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Cargo wait {} on playback {} failed storage validation: stale links in {}",
+                    waitCondition.type(),
+                    playbackId,
+                    summary
+            );
             return true;
         }
-        return switch (waitCondition.type()) {
+        boolean missing = switch (waitCondition.type()) {
             case UNTIL_ITEM_THRESHOLD, UNTIL_ITEM_EMPTY, UNTIL_ITEM_FULL, UNTIL_EMPTY, UNTIL_FULL -> summary.itemLinks() <= 0;
             case UNTIL_FLUID_THRESHOLD, UNTIL_FLUID_EMPTY, UNTIL_FLUID_FULL -> summary.fluidLinks() <= 0;
             default -> false;
         };
+        if (missing) {
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Cargo wait {} on playback {} failed storage validation: summary {} for entries {}",
+                    waitCondition.type(),
+                    playbackId,
+                    summary,
+                    summarizeCargoEntries(entries)
+            );
+        }
+        return missing;
+    }
+
+    private String summarizeCargoEntries(List<LinkedCargoEntry> entries) {
+        return entries.stream()
+                .map(entry -> entry.pos() + "[item=" + entry.itemStorage() + ",fluid=" + entry.fluidStorage() + "]")
+                .toList()
+                .toString();
     }
 
     private boolean relevantStoragePresent(LinkedCargoSnapshot snapshot, WaitCondition waitCondition) {
@@ -1490,11 +1642,19 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 );
                 continue;
             }
-            restored.beginRestoreCatch();
-            if (restored.isPaused()) {
-                restored.controller(level).hold(level, restored.holdPosition(), restored.holdRotation());
+            restored.clearRecoverableWaitFailures();
+            restored.resetDockHandshake();
+            boolean resumeDockWaitThroughPauseRecovery = !restored.isPaused()
+                    && restored.isWaiting()
+                    && restored.requiresDockLock();
+            if (resumeDockWaitThroughPauseRecovery) {
+                holdTransient(level, restored, PlaybackFailure.DOCK_LOCK_FAILED);
             } else {
-                restored.controller(level).stop(level);
+                restored.beginDockReacquireMotion();
+                restored.beginRestoreCatch();
+            }
+            if (restored.isHoldLocked()) {
+                restored.controller(level).hold(level, restored.holdPosition(), restored.holdRotation());
             }
             stationAt(level, restored.stationPos()).ifPresent(station -> {
                 if (restored.isPaused()) {
@@ -1505,10 +1665,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                     );
                 } else if (restored.isWaiting()) {
                     station.waitPlayback(restored.route());
-                    if (restored.requiresDockLock()) {
-                        Optional<AirshipStationBlockEntity> dockingStation = dockingStation(level, station, restored);
-                        dockingStation.ifPresent(docking -> DockingRuntime.beginDockingWait(level, docking, restored.route()));
-                    }
                 } else {
                     station.startPlayback(restored.route());
                 }
@@ -1896,6 +2052,8 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         private int dockIdleTimeoutTicksRemaining;
         private int dockCargoTimeoutTicksRemaining;
         private boolean dockLocked;
+        private boolean dockReacquireMotionActive;
+        private boolean dockReacquireReleasedControl;
         private final Map<ConditionKey, ConditionRuntimeState> conditionStates = new HashMap<>();
         private Optional<PlaybackFailure> dockWaitFailure = Optional.empty();
         private int restoreCatchTicksRemaining;
@@ -2301,6 +2459,37 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             return heldFailure;
         }
 
+        private Optional<CargoFailureContext> heldCargoFailureContext() {
+            Optional<PlaybackFailure> failure = heldFailure;
+            if (failure.filter(value -> value == PlaybackFailure.CARGO_STORAGE_MISSING
+                    || value == PlaybackFailure.CARGO_CONDITION_TIMEOUT).isEmpty()) {
+                return Optional.empty();
+            }
+
+            List<List<AirshipScheduleCondition>> groups = conditionGroups();
+            for (int groupIndex = 0; groupIndex < groups.size(); groupIndex++) {
+                List<AirshipScheduleCondition> group = groups.get(groupIndex);
+                for (int conditionIndex = 0; conditionIndex < group.size(); conditionIndex++) {
+                    ConditionRuntimeState state = conditionStates.get(new ConditionKey(groupIndex, conditionIndex));
+                    if (state == null || state.failure.isEmpty() || state.failure.get() != failure.get()) {
+                        continue;
+                    }
+
+                    WaitCondition waitCondition = group.get(conditionIndex).waitCondition();
+                    if (isCargoWaitType(waitCondition.type())) {
+                        return Optional.of(new CargoFailureContext(waitCondition.cargoTarget(), waitCondition.type()));
+                    }
+                }
+            }
+
+            return groups.stream()
+                    .flatMap(List::stream)
+                    .map(AirshipScheduleCondition::waitCondition)
+                    .filter(waitCondition -> isCargoWaitType(waitCondition.type()))
+                    .map(waitCondition -> new CargoFailureContext(waitCondition.cargoTarget(), waitCondition.type()))
+                    .findFirst();
+        }
+
         private Vec3 holdPosition() {
             return holdPosition;
         }
@@ -2343,6 +2532,8 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 return;
             }
             dockLocked = false;
+            dockReacquireMotionActive = false;
+            dockReacquireReleasedControl = false;
             dockWaitFailure = Optional.empty();
             activeDockStationPos = Optional.empty();
             dockTransferSnapshot = Optional.empty();
@@ -2445,6 +2636,34 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
 
         private void dockLocked(boolean dockLocked) {
             this.dockLocked = dockLocked;
+            if (dockLocked) {
+                dockReacquireMotionActive = false;
+                dockReacquireReleasedControl = false;
+            }
+        }
+
+        private void beginDockReacquireMotion() {
+            if (isWaiting() && requiresDockLock()) {
+                dockReacquireMotionActive = true;
+                dockReacquireReleasedControl = false;
+            }
+        }
+
+        private void endDockReacquireMotion() {
+            dockReacquireMotionActive = false;
+            dockReacquireReleasedControl = false;
+        }
+
+        private boolean isDockReacquireMotionActive() {
+            return dockReacquireMotionActive;
+        }
+
+        private boolean hasReleasedDockReacquireControl() {
+            return dockReacquireReleasedControl;
+        }
+
+        private void markDockReacquireControlReleased() {
+            dockReacquireReleasedControl = true;
         }
 
         private Optional<DockTransferSnapshot> dockTransferSnapshot() {
