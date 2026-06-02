@@ -29,14 +29,10 @@ Primarily designed for Create Aeronautics airships. Other Sable-based vehicles m
 
 The current release includes:
 
-- Valid cargo and dock targets now pulse in-world while link mode is active
-- Transponder-owned route recording and playback
-- Stop editing, grouped wait-condition logic, and Skip Stop override during active waits
-- Dock linking on both ships and stations
-- Item and fluid cargo linking on both ships and stations
-- Cargo-aware waits, redstone waits, and time-of-day waits
-- In-world previews and Create-style UI feedback
-- Basic ownership / permission support for multiplayer
+- Route automation: transponder-owned route recording, stop planning, and route playback
+- Stop logic: grouped wait conditions, cargo-aware waits, redstone waits, and time-of-day waits
+- Linking systems: dock linking plus item and fluid cargo linking on both ships and stations
+- Feedback and control: in-world previews, Create-style UI feedback, and basic ownership / permission support for multiplayer
 
 ## Supported Cargo Link Targets
 
