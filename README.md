@@ -1,19 +1,19 @@
 # Create Aeronautics: Logistics
 
-Create Aeronautics: Logistics is add-on for recording and replaying airship routes.
+Create Aeronautics: Logistics is an addon for recording and replaying airship routes.
 
-Fly a route once, save it, then let the ship repeat it from its **Ship Transponder**. The transponder owns the route workflow: recording route legs, storing stops, running the ship's route plan, and coordinating waits, docking, and cargo-aware logic at each stop.
+It adds a logistics layer for airships built around the **Ship Transponder**. Routes are proven by flying them yourself first, then reused by the ship for repeat trips between stations, with docking, cargo transfer, and stop logic handled as part of the route.
 
-Ships follow recorded route data and still obey the physical limits of the craft, the route, and the world around them.
+Ships still follow the route physically, so they remain bound by the craft, the route you recorded, and the world around them.
 
-Primarily designed for Create Aeronautics airships. Other Sable-based vehicles may work experimentally, but ground vehicles are not an official target.
+It is built mainly for Create Aeronautics airships. Other Sable-based vehicles may work experimentally, but ground vehicles are not an intended target.
 
 ## What The Mod Does
 
 - Lets you name **Airship Stations** and **Ship Transponders**.
 - Lets you record real station-to-station route legs by flying them manually.
-- Lets each ship build its own stop list and automation plan from those recorded legs.
-- Adds schedule-style waits, docking logic, redstone integration, and cargo-aware stop conditions.
+- Lets each ship build its own stop list and route plan from those recorded legs.
+- Adds schedule-style waits, docking logic, cargo transfer support, redstone integration, and cargo-aware stop conditions.
 - Keeps the system grounded in physical playback rather than invisible correction or teleporting.
 
 ## Core Workflow
