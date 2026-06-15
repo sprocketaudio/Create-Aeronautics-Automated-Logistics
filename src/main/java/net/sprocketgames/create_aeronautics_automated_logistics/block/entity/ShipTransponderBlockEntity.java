@@ -593,10 +593,15 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     @Override
     protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.saveAdditional(tag, registries);
-        writeData(tag, registries, false);
+        writeData(tag, registries, false, true);
     }
 
-    private void writeData(CompoundTag tag, HolderLookup.Provider registries, boolean liveCargoSummary) {
+    private void writeData(
+            CompoundTag tag,
+            HolderLookup.Provider registries,
+            boolean liveCargoSummary,
+            boolean includeOwnedSchedule
+    ) {
         tag.putInt(DATA_VERSION, CURRENT_DATA_VERSION);
         tag.putUUID(TRANSPONDER_ID, transponderId);
         tag.putString(SHIP_NAME, shipName());
@@ -610,7 +615,9 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         tag.putString(SHIP_DOCK_STATUS, savedDockStatus.name());
         tag.putBoolean(DOCK_OUTPUT_ACTIVE, dockOutputActive);
         tag.putBoolean(APPEND_TO_SCHEDULE, appendToSchedule);
-        tag.put(OWNED_SCHEDULE, AirshipScheduleNbtSerializer.write(ownedSchedule()));
+        if (includeOwnedSchedule) {
+            tag.put(OWNED_SCHEDULE, AirshipScheduleNbtSerializer.write(ownedSchedule()));
+        }
         recordingDestinationStationId.ifPresent(id -> tag.putUUID(RECORDING_DESTINATION_STATION_ID, id));
         tag.putString(RUNTIME_STATUS, runtimeStatus.name());
         if (hasInstalledSchedule()) {
@@ -736,7 +743,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     @Override
     public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
         CompoundTag tag = new CompoundTag();
-        writeData(tag, registries, true);
+        writeData(tag, registries, true, false);
         return tag;
     }
 

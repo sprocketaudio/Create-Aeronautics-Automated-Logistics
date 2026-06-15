@@ -79,6 +79,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
     private final LinkedCargoSummary initialCargoSummary;
     private final List<net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry> initialLinkedCargoEntries;
     private final Optional<CargoFailureContext> initialCargoFailureContext;
+    private AirshipSchedule clientOwnedScheduleOverride = null;
 
     public ShipTransponderMenu(int containerId, Inventory playerInventory, FriendlyByteBuf buffer) {
         this(
@@ -445,6 +446,10 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
 
     public boolean hasOwnedStops(Player player) {
         return !resolveOwnedSchedule(player).entries().isEmpty();
+    }
+
+    public void setClientOwnedSchedule(AirshipSchedule schedule) {
+        this.clientOwnedScheduleOverride = schedule == null ? AirshipSchedule.empty() : schedule;
     }
 
     public boolean canPreviewOwnedRoute(Player player) {
@@ -1006,6 +1011,9 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
     }
 
     private AirshipSchedule resolveOwnedSchedule(Player player) {
+        if (!(player instanceof ServerPlayer) && clientOwnedScheduleOverride != null) {
+            return clientOwnedScheduleOverride;
+        }
         if (player.level().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity transponder) {
             AirshipSchedule liveSchedule = transponder.ownedSchedule();
             if (!liveSchedule.entries().isEmpty()

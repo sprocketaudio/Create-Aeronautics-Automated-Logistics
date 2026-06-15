@@ -699,7 +699,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
             failureReason.ifPresent(reason -> tag.putString(FAILURE_REASON, reason.name()));
         }
         tag.put(LINKED_CONTROLLERS, writeLinkedControllers());
-        if (!routeSegments.isEmpty()) {
+        if (!tag.getBoolean(LIVE_SYNC) && !routeSegments.isEmpty()) {
             tag.put(ROUTE_SEGMENTS, RouteSegmentNbtSerializer.writeSegments(routeSegments));
         }
         recordedRoute.ifPresent(route -> tag.put(RECORDED_ROUTE, RouteNbtSerializer.write(route.withStatus(savedStatus))));
@@ -716,8 +716,8 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     @Override
     public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
         CompoundTag tag = new CompoundTag();
-        writeStationData(tag, status, status != RouteStatus.RECORDING, true);
         tag.putBoolean(LIVE_SYNC, true);
+        writeStationData(tag, status, status != RouteStatus.RECORDING, true);
         return tag;
     }
 
@@ -757,9 +757,12 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         if (tag.getBoolean(LIVE_SYNC) && tag.contains(RECORDING_STOPS, Tag.TAG_LIST)) {
             recordingStops.addAll(RouteNbtSerializer.readStops(tag.getList(RECORDING_STOPS, Tag.TAG_COMPOUND), Integer.MAX_VALUE));
         }
+        boolean liveSync = tag.getBoolean(LIVE_SYNC);
         linkedControllers.clear();
         linkedControllers.addAll(readLinkedControllers(tag));
-        routeSegments.clear();
+        if (!liveSync || tag.contains(ROUTE_SEGMENTS, Tag.TAG_LIST)) {
+            routeSegments.clear();
+        }
         if (tag.contains(ROUTE_SEGMENTS, Tag.TAG_LIST)) {
             routeSegments.addAll(RouteSegmentNbtSerializer.readSegments(tag.getList(ROUTE_SEGMENTS, Tag.TAG_COMPOUND)));
         }
@@ -798,7 +801,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
                 worldPosition,
                 linkedCargo.size(),
                 tag.contains(LINKED_CARGO, Tag.TAG_LIST),
-                tag.getBoolean(LIVE_SYNC)
+                liveSync
         );
         selectedShipName = tag.contains(SELECTED_SHIP_NAME, Tag.TAG_STRING)
                 ? IdentityNames.sanitize(tag.getString(SELECTED_SHIP_NAME))
@@ -811,7 +814,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
 
     @Override
     public void setRemoved() {
-        if (level != null) {
+        if (level != null && !level.isClientSide) {
             AirshipStationRegistry.unregister(stationId);
             RouteSegmentRegistry.unregisterStartStation(stationId);
         }
@@ -833,8 +836,8 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         AirshipStationRegistry.register(snapshot);
         if (level instanceof ServerLevel serverLevel) {
             IdentityDirectorySavedData.upsertStation(serverLevel.getServer(), snapshot);
+            RouteSegmentRegistry.replaceForStartStation(stationId, routeSegmentsOwnedByThisStation());
         }
-        RouteSegmentRegistry.replaceForStartStation(stationId, routeSegmentsOwnedByThisStation());
     }
 
     private List<RouteSegment> routeSegmentsOwnedByThisStation() {

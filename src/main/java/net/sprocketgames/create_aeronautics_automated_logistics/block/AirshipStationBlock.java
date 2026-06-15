@@ -32,6 +32,7 @@ import net.minecraft.network.chat.Component;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityDirectorySavedData;
+import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipStationMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.ShipTransponderMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoLinkInteractionService;
@@ -147,6 +148,14 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
             ShipTransponderMenu.writeCargoFailureContext(
                     buffer,
                     station.selectedTransponderId().flatMap(AutomatedLogisticsServices.SCHEDULES::lastCargoFailureContext)
+            );
+            AirshipStationMenu.writeRouteChoiceSummaries(
+                    buffer,
+                    AirshipStationMenu.buildRouteChoiceSummaries(serverPlayer, station)
+            );
+            AirshipStationMenu.writeClientState(
+                    buffer,
+                    AirshipStationMenu.buildClientState(serverPlayer, station)
             );
         });
         return InteractionResult.CONSUME;

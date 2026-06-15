@@ -21,6 +21,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTra
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderSnapshot;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleEntry;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteOperationResult;
@@ -129,6 +130,13 @@ public record FinishTransponderRouteRecordingPayload(BlockPos transponderPos, UU
                             segment.shipName(),
                             segment.points().size()
                     ));
+                    PacketDistributor.sendToPlayer(
+                            player,
+                            new SyncTransponderOwnedSchedulePayload(
+                                    transponder.getBlockPos(),
+                                    AirshipScheduleNbtSerializer.write(transponder.ownedSchedule())
+                            )
+                    );
                     PacketDistributor.sendToPlayer(player, new SetTransponderRecordingStatePayload(false, Optional.empty()));
                 },
                 () -> result.failure().ifPresent(failure -> StartTransponderRouteRecordingPayload.fail(

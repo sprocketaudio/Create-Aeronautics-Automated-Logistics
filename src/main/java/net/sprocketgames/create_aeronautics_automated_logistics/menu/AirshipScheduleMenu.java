@@ -22,6 +22,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.identity.Airship
 import net.sprocketgames.create_aeronautics_automated_logistics.item.AirshipScheduleItem;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.SetFlightPathPreviewPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.SetMenuActionBarMessagePayload;
+import net.sprocketgames.create_aeronautics_automated_logistics.network.SyncTransponderOwnedSchedulePayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModItems;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModMenus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
@@ -572,6 +573,15 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
                 return;
             }
             transponder.get().setOwnedSchedule(schedule);
+            if (player instanceof ServerPlayer serverPlayer) {
+                PacketDistributor.sendToPlayer(
+                        serverPlayer,
+                        new SyncTransponderOwnedSchedulePayload(
+                                transponder.get().getBlockPos(),
+                                AirshipScheduleNbtSerializer.write(schedule)
+                        )
+                );
+            }
             return;
         }
         editableScheduleStack(player).ifPresent(stack -> {

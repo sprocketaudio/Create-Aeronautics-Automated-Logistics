@@ -94,5 +94,20 @@ public final class ModNetworking {
                 SetTransponderRecordingStatePayload.STREAM_CODEC,
                 SetTransponderRecordingStatePayload::handle
         );
+        registrar.playToClient(
+                SyncTransponderOwnedSchedulePayload.TYPE,
+                SyncTransponderOwnedSchedulePayload.STREAM_CODEC,
+                SyncTransponderOwnedSchedulePayload::handle
+        );
+        registrar.playToClient(
+                SyncStationRouteChoicesPayload.TYPE,
+                SyncStationRouteChoicesPayload.STREAM_CODEC,
+                SyncStationRouteChoicesPayload::handle
+        );
+        registrar.playToClient(
+                SyncStationMenuStatePayload.TYPE,
+                SyncStationMenuStatePayload.STREAM_CODEC,
+                SyncStationMenuStatePayload::handle
+        );
     }
 }
