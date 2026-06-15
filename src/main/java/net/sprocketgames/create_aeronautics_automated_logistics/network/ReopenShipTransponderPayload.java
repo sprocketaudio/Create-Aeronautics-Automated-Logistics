@@ -10,6 +10,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.ShipTransponderMenu;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
 
 public record ReopenShipTransponderPayload(BlockPos transponderPos, boolean recordingMode) implements CustomPacketPayload {
     public static final Type<ReopenShipTransponderPayload> TYPE = new Type<>(
@@ -51,6 +52,8 @@ public record ReopenShipTransponderPayload(BlockPos transponderPos, boolean reco
             transponder.recordingDestinationStationId().ifPresent(buffer::writeUUID);
             buffer.writeEnum(transponder.runtimeStatus());
             buffer.writeBoolean(transponder.dockOutputActive());
+            buffer.writeBoolean(transponder.hasOwnedStops());
+            buffer.writeNbt(AirshipScheduleNbtSerializer.write(transponder.ownedSchedule()));
             ShipTransponderMenu.writeCargoRevision(buffer, transponder.linkedCargoRevision());
             ShipTransponderMenu.writeCargoSummary(buffer, transponder.linkedCargoSummary());
             ShipTransponderMenu.writeLinkedCargoEntries(buffer, transponder.linkedCargo());

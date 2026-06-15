@@ -1,6 +1,6 @@
-# Create Aeronautics: Logistics
+# Create Aeronautics: Automated Logistics
 
-Create Aeronautics: Logistics is an addon for recording and replaying airship routes.
+Create Aeronautics: Automated Logistics is an addon for recording and replaying airship routes.
 
 It adds a logistics layer for airships built around the **Ship Transponder**. Routes are proven by flying them yourself first, then reused by the ship for repeat trips between stations, with docking, cargo transfer, and stop logic handled as part of the route.
 
@@ -75,7 +75,7 @@ Known compatibility note:
 
 ## Design Intent
 
-Create Aeronautics: Logistics is meant to feel like a believable logistics layer for airships.
+Create Aeronautics: Automated Logistics is meant to feel like a believable logistics layer for airships.
 
 You prove a route by flying it once. The mod then automates the repetition of that route. If the ship, station setup, docking, cargo setup, or recorded route is wrong, the system should fail clearly rather than silently cheating around the problem.
 

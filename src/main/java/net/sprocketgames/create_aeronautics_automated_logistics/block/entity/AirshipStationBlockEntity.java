@@ -55,6 +55,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBloc
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipStationMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RecordingSession;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerRef;
 
 public class AirshipStationBlockEntity extends BlockEntity implements MenuProvider {
@@ -122,6 +123,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         }
         if (level.getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
             station.refreshGroundDockLink(serverLevel);
+            ScheduleRouteCleanup.pruneInvalidRouteSegments(serverLevel, station);
         }
     }
 
@@ -153,6 +155,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     public AbstractContainerMenu createMenu(int containerId, Inventory playerInventory, Player player) {
         registerStationSnapshot();
         if (level instanceof ServerLevel serverLevel) {
+            ScheduleRouteCleanup.pruneInvalidRouteSegments(serverLevel, this);
             refreshGroundDockLink(serverLevel);
             selectedTransponderId.ifPresent(transponderId ->
                     AutomatedLogisticsServices.SCHEDULES.reconcileRuntimeStatus(serverLevel, transponderId));
@@ -179,6 +182,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         String sanitized = IdentityNames.sanitize(stationName);
         this.stationName = sanitized.isBlank() ? IdentityNames.defaultStationName(stationId) : sanitized;
         setChanged();
+        syncClientState();
     }
 
     public Optional<UUID> ownerId() {
@@ -232,6 +236,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         selectedShipName = snapshot.shipName();
         failureReason = Optional.empty();
         setChanged();
+        syncClientState();
     }
 
     public Optional<BlockPos> groundDockPos() {
@@ -274,6 +279,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         linkedCargoRevision++;
         setChanged();
         persistLinkedCargo(level);
+        syncClientState();
         return linkedCargoSummary();
     }
 
@@ -299,6 +305,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
             linkedCargoRevision++;
             setChanged();
             persistLinkedCargo();
+            syncClientState();
             CreateAeronauticsAutomatedLogistics.debugLog(
                     "Station addLinkedCargoEntries saved id={} pos={} added={} newCount={}",
                     stationId,
@@ -325,6 +332,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         linkedCargoRevision++;
         setChanged();
         persistLinkedCargo();
+        syncClientState();
         CreateAeronauticsAutomatedLogistics.debugLog(
                 "Station clearLinkedCargo cleared id={} pos={}",
                 stationId,
@@ -341,6 +349,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         setChanged();
         syncPoweredBlockState();
         notifyRedstoneNeighbors();
+        syncClientState();
     }
 
     public DockDiscoveryResult refreshGroundDockLink(ServerLevel level) {
@@ -354,6 +363,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
             groundDockPos = Optional.empty();
         }
         setChanged();
+        syncClientState();
         return result;
     }
 
@@ -362,6 +372,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
             groundDockPos = Optional.empty();
             groundDockStatus = DockLinkStatus.INVALID;
             setChanged();
+            syncClientState();
             return DockDiscoveryResult.invalid();
         }
         double maxDistance = AutomatedLogisticsConfig.STATION_DOCK_SEARCH_RADIUS.get();
@@ -370,11 +381,13 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
             groundDockPos = Optional.empty();
             groundDockStatus = DockLinkStatus.INVALID;
             setChanged();
+            syncClientState();
             return DockDiscoveryResult.invalid();
         }
         groundDockPos = Optional.of(dockPos.immutable());
         groundDockStatus = DockLinkStatus.LINKED;
         setChanged();
+        syncClientState();
         return DockDiscoveryResult.linked(dockPos.immutable());
     }
 
@@ -382,6 +395,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         groundDockPos = Optional.empty();
         groundDockStatus = DockLinkStatus.MISSING;
         setChanged();
+        syncClientState();
     }
 
     private DockDiscoveryResult validateGroundDockLink(ServerLevel level) {
@@ -407,15 +421,17 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     public void addRouteSegment(RouteSegment segment) {
         routeSegments.add(segment);
         pruneSegmentHistory(segment, 5);
-        RouteSegmentRegistry.replaceForStartStation(stationId, routeSegments);
+        RouteSegmentRegistry.replaceForStartStation(stationId, routeSegmentsOwnedByThisStation());
         setChanged();
+        syncClientState();
     }
 
     public boolean removeRouteSegment(UUID segmentId) {
         boolean removed = routeSegments.removeIf(segment -> segment.id().value().equals(segmentId));
         if (removed) {
-            RouteSegmentRegistry.replaceForStartStation(stationId, routeSegments);
+            RouteSegmentRegistry.replaceForStartStation(stationId, routeSegmentsOwnedByThisStation());
             setChanged();
+            syncClientState();
         }
         return removed;
     }
@@ -459,6 +475,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
             status = recordedRoute.isPresent() ? RouteStatus.RECORDED : RouteStatus.IDLE;
         }
         setChanged();
+        syncClientState();
     }
 
     public void startRecording(RecordingSession session) {
@@ -469,6 +486,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         status = RouteStatus.RECORDING;
         failureReason = Optional.empty();
         setChanged();
+        syncClientState();
     }
 
     public void addRecordedPoint(RoutePoint point) {
@@ -499,6 +517,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
             return route.withStops(stops);
         });
         setChanged();
+        syncClientState();
     }
 
     public void finishRecording(Route route) {
@@ -509,6 +528,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         status = RouteStatus.RECORDED;
         failureReason = Optional.empty();
         setChanged();
+        syncClientState();
     }
 
     public void cancelRecording() {
@@ -518,6 +538,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         status = recordedRoute.isPresent() ? RouteStatus.RECORDED : RouteStatus.IDLE;
         failureReason = Optional.empty();
         setChanged();
+        syncClientState();
     }
 
     public void startPlayback(Route route) {
@@ -525,6 +546,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         status = RouteStatus.RUNNING;
         failureReason = Optional.empty();
         setChanged();
+        syncClientState();
     }
 
     public void waitPlayback(Route route) {
@@ -532,6 +554,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         status = RouteStatus.WAITING;
         failureReason = Optional.empty();
         setChanged();
+        syncClientState();
     }
 
     public void holdPlayback(Route route, boolean faulted, Optional<FailureReason> reason) {
@@ -539,6 +562,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         status = faulted ? RouteStatus.HELD_FAULTED : RouteStatus.HELD;
         failureReason = reason;
         setChanged();
+        syncClientState();
     }
 
     public void resumePlayback() {
@@ -546,6 +570,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         status = RouteStatus.RUNNING;
         failureReason = Optional.empty();
         setChanged();
+        syncClientState();
     }
 
     public void stopPlayback() {
@@ -553,6 +578,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         status = recordedRoute.isPresent() ? RouteStatus.RECORDED : RouteStatus.IDLE;
         failureReason = Optional.empty();
         setChanged();
+        syncClientState();
     }
 
     public void failPlayback(FailureReason reason) {
@@ -560,12 +586,14 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         status = statusForFailure(reason);
         failureReason = Optional.of(reason);
         setChanged();
+        syncClientState();
     }
 
     public void setFailure(FailureReason reason) {
         status = statusForFailure(reason);
         failureReason = Optional.of(reason);
         setChanged();
+        syncClientState();
     }
 
     public void failRecording(FailureReason reason) {
@@ -576,6 +604,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         status = statusForFailure(reason);
         failureReason = Optional.of(reason);
         setChanged();
+        syncClientState();
     }
 
     @Override
@@ -583,8 +612,13 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         super.setChanged();
         if (level != null && !level.isClientSide) {
             registerStationSnapshot();
-            RouteSegmentRegistry.replaceForStartStation(stationId, routeSegments);
-            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+            RouteSegmentRegistry.replaceForStartStation(stationId, routeSegmentsOwnedByThisStation());
+        }
+    }
+
+    public void syncClientState() {
+        if (level instanceof ServerLevel serverLevel) {
+            serverLevel.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
         }
     }
 
@@ -800,7 +834,13 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         if (level instanceof ServerLevel serverLevel) {
             IdentityDirectorySavedData.upsertStation(serverLevel.getServer(), snapshot);
         }
-        RouteSegmentRegistry.replaceForStartStation(stationId, routeSegments);
+        RouteSegmentRegistry.replaceForStartStation(stationId, routeSegmentsOwnedByThisStation());
+    }
+
+    private List<RouteSegment> routeSegmentsOwnedByThisStation() {
+        return routeSegments.stream()
+                .filter(segment -> segment.startStationId().equals(stationId))
+                .toList();
     }
 
     private @Nullable LinkedCargoSummary readLinkedCargoSummary(CompoundTag tag) {

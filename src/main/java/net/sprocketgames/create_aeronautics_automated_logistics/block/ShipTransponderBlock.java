@@ -37,6 +37,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.identity.Identit
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.ShipTransponderMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.FailureReason;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
@@ -164,6 +165,8 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
                 transponder.recordingDestinationStationId().ifPresent(buffer::writeUUID);
                 buffer.writeEnum(transponder.runtimeStatus());
                 buffer.writeBoolean(transponder.dockOutputActive());
+                buffer.writeBoolean(transponder.hasOwnedStops());
+                buffer.writeNbt(AirshipScheduleNbtSerializer.write(transponder.ownedSchedule()));
                 ShipTransponderMenu.writeCargoRevision(buffer, transponder.linkedCargoRevision());
                 ShipTransponderMenu.writeCargoSummary(buffer, transponder.linkedCargoSummary());
                 ShipTransponderMenu.writeLinkedCargoEntries(buffer, transponder.linkedCargo());

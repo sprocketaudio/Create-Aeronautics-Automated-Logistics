@@ -172,6 +172,9 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         if (route.points().stream().anyMatch(point -> !point.dimension().equals(route.dimension()))) {
             return PlaybackOperationResult.failure(PlaybackFailure.INVALID_ROUTE);
         }
+        if (!withinActiveVehicleLimit(route.ownerId())) {
+            return PlaybackOperationResult.failure(PlaybackFailure.MAX_ACTIVE_VEHICLES_REACHED);
+        }
         Optional<AirshipStationBlockEntity> station = stationAt(level, stationPos);
         if (station.isEmpty()) {
             return PlaybackOperationResult.failure(PlaybackFailure.STATION_MISSING);
@@ -359,6 +362,9 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         if (route.points().stream().anyMatch(point -> !point.dimension().equals(route.dimension()))) {
             return PlaybackOperationResult.failure(PlaybackFailure.INVALID_ROUTE);
         }
+        if (!withinActiveVehicleLimit(route.ownerId())) {
+            return PlaybackOperationResult.failure(PlaybackFailure.MAX_ACTIVE_VEHICLES_REACHED);
+        }
         Optional<VehicleController> controller = VehicleControllerResolver.resolve(level, route.linkedController());
         if (controller.isEmpty()) {
             return PlaybackOperationResult.failure(PlaybackFailure.VEHICLE_MISSING);
@@ -383,6 +389,24 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
 
     public boolean isHeld(RouteId routeId) {
         return Optional.ofNullable(activePlaybacks.get(routeId)).map(ActivePlayback::isPaused).orElse(false);
+    }
+
+    private boolean withinActiveVehicleLimit(Optional<UUID> ownerId) {
+        int limit = AutomatedLogisticsConfig.MAX_ACTIVE_VEHICLES_PER_PLAYER.get();
+        if (limit <= 0 || ownerId.isEmpty()) {
+            return true;
+        }
+        return activeVehicleCount(ownerId.get()) < limit;
+    }
+
+    private int activeVehicleCount(UUID ownerId) {
+        int count = 0;
+        for (ActivePlayback activePlayback : activePlaybacks.values()) {
+            if (activePlayback.route().ownerId().filter(ownerId::equals).isPresent()) {
+                count++;
+            }
+        }
+        return count;
     }
 
     public Optional<PlaybackFailure> heldFailure(RouteId routeId) {

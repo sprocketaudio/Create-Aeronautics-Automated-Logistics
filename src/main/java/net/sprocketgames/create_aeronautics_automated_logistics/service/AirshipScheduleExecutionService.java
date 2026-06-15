@@ -164,7 +164,6 @@ public class AirshipScheduleExecutionService {
         Objects.requireNonNull(schedule, "schedule");
 
         transponder.pruneInvalidOwnedSchedule(player.serverLevel());
-        schedule = transponder.ownedSchedule();
 
         if (schedule.entries().isEmpty()) {
             station.setFailure(FailureReason.INVALID_ROUTE_DATA);
@@ -640,6 +639,20 @@ public class AirshipScheduleExecutionService {
         return Optional.ofNullable(activeSchedules.get(transponderId)).map(ActiveAirshipSchedule::entryIndex);
     }
 
+    public Optional<Integer> currentEntryIndex(UUID transponderId, AirshipSchedule displaySchedule) {
+        ActiveAirshipSchedule active = activeSchedules.get(transponderId);
+        if (active == null || active.isFinished() || displaySchedule == null || displaySchedule.entries().isEmpty()) {
+            return Optional.empty();
+        }
+        AirshipScheduleEntry activeEntry = active.currentEntry();
+        for (int i = 0; i < displaySchedule.entries().size(); i++) {
+            if (sameScheduledLeg(displaySchedule.entries().get(i), activeEntry)) {
+                return Optional.of(i);
+            }
+        }
+        return Optional.of(Math.max(0, Math.min(active.entryIndex(), displaySchedule.entries().size() - 1)));
+    }
+
     public Optional<PlaybackFailure> playbackBlocker(ServerLevel level, RouteId routeId) {
         Optional<ActiveAirshipSchedule> active = activeSchedules.values().stream()
                 .filter(candidate -> candidate.activeRouteId().filter(routeId::equals).isPresent())
@@ -1090,11 +1103,10 @@ public class AirshipScheduleExecutionService {
     }
 
     private void syncTransponderClientState(ShipTransponderBlockEntity transponder) {
-        if (!(transponder.getLevel() instanceof ServerLevel serverLevel)) {
+        if (!(transponder.getLevel() instanceof ServerLevel)) {
             return;
         }
-        transponder.setChanged();
-        serverLevel.sendBlockUpdated(transponder.getBlockPos(), transponder.getBlockState(), transponder.getBlockState(), 3);
+        transponder.syncClientState();
     }
 
     public void clearLastFailure(UUID transponderId) {

@@ -9,11 +9,11 @@ public final class IdentityNames {
     }
 
     public static String defaultStationName(UUID id) {
-        return "Airship Station " + shortId(id);
+        return "Station " + shortId(id);
     }
 
     public static String defaultShipName(UUID id) {
-        return "Unnamed Ship " + shortId(id);
+        return "Ship " + shortId(id);
     }
 
     public static String shortId(UUID id) {

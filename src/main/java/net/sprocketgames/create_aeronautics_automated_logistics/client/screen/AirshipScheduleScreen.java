@@ -542,7 +542,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         blit(guiGraphics, CREATE_SCHEDULE_SHEET, x + 4, y + 28, 1, 239, 11, 16);
         Component actionText = Component.translatable(
                 "gui.create_aeronautics_automated_logistics.airship_schedule.entry.travel",
-                entry.displayStationName()
+                displayStationName(entry)
         );
         int actionFieldWidth = Math.min(ACTION_FIELD_MAX_WIDTH, Math.max(100, this.font.width(actionText) + 36));
         renderScheduleInput(guiGraphics, x + 26, y + 5, actionFieldWidth, false, actionText, ModItems.AIRSHIP_STATION.get().getDefaultInstance());
@@ -1036,7 +1036,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         }
         AirshipScheduleEntry entry = currentSchedule().entries().get(pendingDeleteStopIndex);
         List<Component> lines = new ArrayList<>();
-        lines.add(Component.literal(entry.displayStationName()));
+        lines.add(Component.literal(displayStationName(entry)));
         lines.add(Component.translatable(
                 "gui.create_aeronautics_automated_logistics.airship_schedule.delete_stop.routes",
                 deletedRouteCountForStop(currentSchedule(), pendingDeleteStopIndex)
@@ -1233,7 +1233,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                 return List.of(
                         Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.route_choice").withStyle(ChatFormatting.GOLD),
                         Component.literal(routeDisplayName(segment)),
-                        Component.literal(segment.shipName()).withStyle(ChatFormatting.GRAY),
+                        Component.literal(resolveShipName(segment)).withStyle(ChatFormatting.GRAY),
                         Component.literal(routeMetaTextRaw(segment)).withStyle(ChatFormatting.DARK_AQUA)
                 );
             }
@@ -1339,7 +1339,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         AirshipScheduleEntry entry = currentSchedule().entries().get(entryIndex);
         return List.of(
                 Component.translatable("gui.create_aeronautics_automated_logistics.airship_schedule.next_stop").withStyle(ChatFormatting.GOLD),
-                Component.literal("\"" + entry.displayStationName() + "\"")
+                Component.literal("\"" + displayStationName(entry) + "\"")
         );
     }
 
@@ -1847,7 +1847,6 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
 
     private boolean skipStopButtonVisible() {
         return this.menu.openedFromTransponder()
-                && isScheduleReadOnly()
                 && !this.noRoutePopupOpen
                 && this.pendingDeleteStopIndex == null;
     }
@@ -2917,7 +2916,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         return new AirshipScheduleEntry(
                 entry.type(),
                 entry.targetStationId(),
-                entry.targetStationName(),
+                displayStationName(entry),
                 primaryWait,
                 entry.waitUnit(),
                 entry.pinnedSegmentId(),
@@ -3060,7 +3059,6 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             return;
         }
         this.selectedIndex = entryIndex;
-        removeSelectedLocally(currentSchedule());
         pressAction(AirshipScheduleMenu.ACTION_REMOVE);
         if (this.editorMode == EditorMode.STATION && this.editorEntryIndex == entryIndex) {
             closeEditor();
@@ -3306,7 +3304,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         for (int i = entryIndex - 1; i >= 0; i--) {
             AirshipScheduleEntry entry = entries.get(i);
             if (entry.targetStationId().isPresent()) {
-                return entry.displayStationName();
+                return displayStationName(entry);
             }
         }
         return "Unknown";
@@ -3342,6 +3340,19 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
                 .map(AirshipStationSnapshot::stationName)
                 .filter(name -> !name.isBlank())
                 .orElse(fallbackName);
+    }
+
+    private String displayStationName(AirshipScheduleEntry entry) {
+        return entry.targetStationId()
+                .map(stationId -> resolveStationName(stationId, entry.displayStationName()))
+                .orElseGet(entry::displayStationName);
+    }
+
+    private String resolveShipName(RouteSegment segment) {
+        return ShipTransponderRegistry.snapshot(segment.transponderId())
+                .map(ShipTransponderSnapshot::shipName)
+                .filter(name -> !name.isBlank())
+                .orElse(segment.shipName());
     }
 
     private boolean hasSelectedShip() {

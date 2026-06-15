@@ -55,9 +55,6 @@ public class VehicleRouteRecordingService implements RouteRecordingService {
         if (station.get().isRecording()) {
             return RouteOperationResult.failure(RecordingFailure.STATION_BUSY);
         }
-        if (activeCount(player.getUUID()) >= AutomatedLogisticsConfig.MAX_ACTIVE_VEHICLES_PER_PLAYER.get()) {
-            return RouteOperationResult.failure(RecordingFailure.MAX_ACTIVE_VEHICLES_REACHED);
-        }
         if (!controller.dimension().equals(level.dimension())) {
             return RouteOperationResult.failure(RecordingFailure.DIMENSION_MISMATCH);
         }
@@ -608,16 +605,6 @@ public class VehicleRouteRecordingService implements RouteRecordingService {
             return Optional.of(station);
         }
         return Optional.empty();
-    }
-
-    private int activeCount(UUID playerId) {
-        int count = 0;
-        for (ActiveRecording activeRecording : activeRecordings.values()) {
-            if (activeRecording.session().playerId().equals(playerId)) {
-                count++;
-            }
-        }
-        return count;
     }
 
     private Optional<ActiveRecording> activeRecordingFor(UUID playerId) {

@@ -226,8 +226,8 @@ public class SableSubLevelVehicleController implements VehicleController {
         Vec3 desiredVelocity = distance < 1.0E-6D
                 ? Vec3.ZERO
                 : delta.normalize().scale(Math.min(maxOneTickTravelSpeed, maxSpeedBlocksPerSecond));
-        Vector3dc currentVelocity = handle.getLinearVelocity();
-        Vector3dc currentAngularVelocity = handle.getAngularVelocity();
+        Vector3dc currentVelocity = handle.getLinearVelocity(new Vector3d());
+        Vector3dc currentAngularVelocity = handle.getAngularVelocity(new Vector3d());
         Vector3d velocityChange = new Vector3d(
                 desiredVelocity.x - currentVelocity.x(),
                 desiredVelocity.y - currentVelocity.y(),
@@ -265,8 +265,8 @@ public class SableSubLevelVehicleController implements VehicleController {
         if (handle == null || !handle.isValid()) {
             return;
         }
-        Vector3dc linearVelocity = handle.getLinearVelocity();
-        Vector3dc angularVelocity = handle.getAngularVelocity();
+        Vector3dc linearVelocity = handle.getLinearVelocity(new Vector3d());
+        Vector3dc angularVelocity = handle.getAngularVelocity(new Vector3d());
         handle.addLinearAndAngularVelocity(
                 new Vector3d(-linearVelocity.x(), -linearVelocity.y(), -linearVelocity.z()),
                 new Vector3d(-angularVelocity.x(), -angularVelocity.y(), -angularVelocity.z())
@@ -297,8 +297,8 @@ public class SableSubLevelVehicleController implements VehicleController {
             Optional<RouteRotation> holdRotation
     ) {
         Vec3 positionError = holdPosition.subtract(position());
-        Vector3dc currentVelocity = handle.getLinearVelocity();
-        Vector3dc currentAngularVelocity = handle.getAngularVelocity();
+        Vector3dc currentVelocity = handle.getLinearVelocity(new Vector3d());
+        Vector3dc currentAngularVelocity = handle.getAngularVelocity(new Vector3d());
 
         Vector3d horizontalCorrection = new Vector3d(
                 positionError.x * HOLD_HORIZONTAL_POSITION_GAIN - currentVelocity.x() * HOLD_HORIZONTAL_VELOCITY_DAMPING,

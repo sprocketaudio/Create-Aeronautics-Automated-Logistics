@@ -259,6 +259,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         linkedCargo.addAll(CargoLinkDiscovery.discover(level, worldPosition));
         linkedCargoRevision++;
         setChanged();
+        syncClientState();
         return linkedCargoSummary();
     }
 
@@ -284,6 +285,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
             linkedCargoRevision++;
             setChanged();
             persistLinkedCargo();
+            syncClientState();
             CreateAeronauticsAutomatedLogistics.debugLog(
                     "Transponder addLinkedCargoEntries saved id={} pos={} added={} newCount={}",
                     transponderId,
@@ -310,6 +312,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         linkedCargoRevision++;
         setChanged();
         persistLinkedCargo();
+        syncClientState();
         CreateAeronauticsAutomatedLogistics.debugLog(
                 "Transponder clearLinkedCargo cleared id={} pos={}",
                 transponderId,
@@ -326,6 +329,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         setChanged();
         syncPoweredBlockState();
         notifyRedstoneNeighbors();
+        syncClientState();
     }
 
     public void setAppendToSchedule(boolean appendToSchedule) {
@@ -334,6 +338,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         }
         this.appendToSchedule = appendToSchedule;
         setChanged();
+        syncClientState();
     }
 
     public void setRecordingDestinationStationId(Optional<UUID> recordingDestinationStationId) {
@@ -343,6 +348,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         }
         this.recordingDestinationStationId = normalized;
         setChanged();
+        syncClientState();
     }
 
     public void setRuntimeStatus(RouteStatus runtimeStatus) {
@@ -352,6 +358,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         }
         this.runtimeStatus = normalized;
         setChanged();
+        syncClientState();
     }
 
     public void setShipName(String shipName) {
@@ -363,6 +370,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
             ShipTransponderRegistry.register(snapshot);
             IdentityDirectorySavedData.upsertShip(serverLevel.getServer(), snapshot);
         }
+        syncClientState();
     }
 
     public Optional<VehicleControllerRef> controllerRef(ServerLevel level) {
@@ -414,6 +422,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
             shipDockPos = Optional.empty();
         }
         setChanged();
+        syncClientState();
         return result;
     }
 
@@ -423,17 +432,20 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
             shipDockPos = Optional.empty();
             shipDockStatus = DockLinkStatus.INVALID;
             setChanged();
+            syncClientState();
             return DockDiscoveryResult.invalid();
         }
         if (!dockBelongsToResolvedShip(level, dockPos)) {
             shipDockPos = Optional.empty();
             shipDockStatus = DockLinkStatus.INVALID;
             setChanged();
+            syncClientState();
             return DockDiscoveryResult.invalid();
         }
         shipDockPos = Optional.of(dockPos.immutable());
         shipDockStatus = DockLinkStatus.LINKED;
         setChanged();
+        syncClientState();
         return DockDiscoveryResult.linked(dockPos.immutable());
     }
 
@@ -441,6 +453,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         shipDockPos = Optional.empty();
         shipDockStatus = DockLinkStatus.MISSING;
         setChanged();
+        syncClientState();
     }
 
     private DockDiscoveryResult validateShipDockLink(ServerLevel level) {
@@ -523,6 +536,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         }
         ownedSchedule = normalized;
         setChanged();
+        syncClientState();
     }
 
     public int pruneInvalidOwnedSchedule(ServerLevel level) {
@@ -568,8 +582,11 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     @Override
     public void setChanged() {
         super.setChanged();
-        if (level != null && !level.isClientSide) {
-            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+    }
+
+    public void syncClientState() {
+        if (level instanceof ServerLevel serverLevel) {
+            serverLevel.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
         }
     }
 

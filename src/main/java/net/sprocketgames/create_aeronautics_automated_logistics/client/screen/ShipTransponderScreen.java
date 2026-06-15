@@ -70,10 +70,10 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     private static final int DOCK_LABEL_Y = 110;
     private static final int CARGO_LABEL_X = 36;
     private static final int CARGO_LABEL_Y = 124;
-    private static final int DOCK_BUTTON_RIGHT_X = 142;
-    private static final int DOCK_BUTTON_LEFT_X = 128;
-    private static final int CARGO_BUTTON_RIGHT_X = 142;
-    private static final int CARGO_BUTTON_LEFT_X = 128;
+    private static final int DOCK_BUTTON_RIGHT_X = 143;
+    private static final int DOCK_BUTTON_LEFT_X = 129;
+    private static final int CARGO_BUTTON_RIGHT_X = 143;
+    private static final int CARGO_BUTTON_LEFT_X = 129;
     private static final int STATUS_FOOTER_X = 60;
     private static final int STATUS_FOOTER_Y = 159;
     private static final int STATUS_FOOTER_WIDTH = 118;

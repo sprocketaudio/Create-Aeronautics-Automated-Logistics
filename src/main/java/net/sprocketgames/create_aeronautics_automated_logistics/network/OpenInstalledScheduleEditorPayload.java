@@ -12,6 +12,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronautic
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipScheduleMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.TransponderPermissionService;
 
 public record OpenInstalledScheduleEditorPayload(BlockPos transponderPos, boolean returnToRecordingMode) implements CustomPacketPayload {
@@ -60,6 +61,7 @@ public record OpenInstalledScheduleEditorPayload(BlockPos transponderPos, boolea
                     buffer.writeBoolean(true);
                     buffer.writeBlockPos(payload.transponderPos());
                     buffer.writeBoolean(payload.returnToRecordingMode());
+                    buffer.writeNbt(AirshipScheduleNbtSerializer.write(schedule));
                 }
         );
     }

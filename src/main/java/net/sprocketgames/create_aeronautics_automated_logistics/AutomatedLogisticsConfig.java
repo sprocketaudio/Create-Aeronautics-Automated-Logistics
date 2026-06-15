@@ -13,20 +13,15 @@ public class AutomatedLogisticsConfig {
     public static final ModConfigSpec.EnumValue<PlaybackMode> PLAYBACK_MODE;
     public static final ModConfigSpec.DoubleValue MAX_SPEED_MULTIPLIER;
     public static final ModConfigSpec.DoubleValue MAX_START_JOIN_DISTANCE;
+    public static final ModConfigSpec.BooleanValue ALLOW_ONE_WAY_ROUTE_PLANS;
     public static final ModConfigSpec.BooleanValue STOP_ON_COLLISION;
-    public static final ModConfigSpec.BooleanValue STOP_ON_ERROR;
     public static final ModConfigSpec.DoubleValue SEGMENT_OVERRUN_MULTIPLIER;
     public static final ModConfigSpec.DoubleValue MIN_MEANINGFUL_PROGRESS_DISTANCE;
     public static final ModConfigSpec.IntValue STUCK_TIMEOUT_TICKS;
 
-    public static final ModConfigSpec.BooleanValue SHOW_ROUTE_PREVIEW;
-    public static final ModConfigSpec.IntValue PREVIEW_RANGE;
-
     public static final ModConfigSpec.IntValue STATION_DOCK_SEARCH_RADIUS;
-    public static final ModConfigSpec.IntValue SHIP_DOCK_SEARCH_RADIUS;
     public static final ModConfigSpec.IntValue DOCK_LOCK_TIMEOUT_TICKS;
     public static final ModConfigSpec.IntValue DOCK_IDLE_TIMEOUT_TICKS;
-    public static final ModConfigSpec.IntValue DOCK_CARGO_TIMEOUT_TICKS;
 
     public static final ModConfigSpec.IntValue MAX_ACTIVE_VEHICLES_PER_PLAYER;
     public static final ModConfigSpec.BooleanValue RESTRICT_TRANSPONDER_CONTROL_TO_OWNER;
@@ -58,12 +53,12 @@ public class AutomatedLogisticsConfig {
         MAX_START_JOIN_DISTANCE = BUILDER
                 .comment("Maximum distance from the nearest route endpoint allowed when beginning playback.")
                 .defineInRange("maxStartJoinDistance", 24.0D, 0.0D, 512.0D);
+        ALLOW_ONE_WAY_ROUTE_PLANS = BUILDER
+                .comment("Allow a single recorded leg / single stop plan to count as a valid runnable route.")
+                .define("allowOneWayRoutePlans", false);
         STOP_ON_COLLISION = BUILDER
                 .comment("Stop automated playback when collision is detected.")
                 .define("stopOnCollision", true);
-        STOP_ON_ERROR = BUILDER
-                .comment("Stop automated playback when an unrecoverable error is detected.")
-                .define("stopOnError", true);
         SEGMENT_OVERRUN_MULTIPLIER = BUILDER
                 .comment("How many times longer than the recorded segment duration playback may take before overdue stuck monitoring begins.")
                 .defineInRange("segmentOverrunMultiplier", 3.0D, 1.0D, 20.0D);
@@ -75,31 +70,16 @@ public class AutomatedLogisticsConfig {
                 .defineInRange("stuckTimeoutTicks", 200, 20, 20 * 60 * 30);
         BUILDER.pop();
 
-        BUILDER.push("visuals");
-        SHOW_ROUTE_PREVIEW = BUILDER
-                .comment("Show route previews while viewing or editing a route.")
-                .define("showRoutePreview", true);
-        PREVIEW_RANGE = BUILDER
-                .comment("Maximum route preview range in blocks.")
-                .defineInRange("previewRange", 128, 0, 1024);
-        BUILDER.pop();
-
         BUILDER.push("docking");
         STATION_DOCK_SEARCH_RADIUS = BUILDER
                 .comment("Search radius in blocks for finding exactly one ground-side Docking Connector near an Airship Station.")
                 .defineInRange("stationDockSearchRadius", 24, 1, 128);
-        SHIP_DOCK_SEARCH_RADIUS = BUILDER
-                .comment("Search radius in blocks for finding exactly one ship-side Docking Connector near a Ship Transponder on an assembled ship.")
-                .defineInRange("shipDockSearchRadius", 24, 1, 128);
         DOCK_LOCK_TIMEOUT_TICKS = BUILDER
                 .comment("Maximum ticks to wait for station and ship Docking Connectors to lock after a docking stop starts.")
                 .defineInRange("dockLockTimeoutTicks", 20 * 10, 20, 20 * 60 * 10);
         DOCK_IDLE_TIMEOUT_TICKS = BUILDER
                 .comment("Maximum ticks to wait for dock transfer activity to become idle before continuing.")
                 .defineInRange("dockIdleTimeoutTicks", 20 * 120, 20, 20 * 60 * 30);
-        DOCK_CARGO_TIMEOUT_TICKS = BUILDER
-                .comment("Maximum ticks to wait for dock-visible cargo threshold conditions before failing playback.")
-                .defineInRange("dockCargoTimeoutTicks", 20 * 120, 20, 20 * 60 * 30);
         BUILDER.pop();
 
         BUILDER.push("limits");
@@ -129,6 +109,10 @@ public class AutomatedLogisticsConfig {
 
     public static boolean requireCrouchToBreakRouteBlocks() {
         return REQUIRE_CROUCH_TO_BREAK_ROUTE_BLOCKS.get();
+    }
+
+    public static boolean allowOneWayRoutePlans() {
+        return ALLOW_ONE_WAY_ROUTE_PLANS.get();
     }
 
 }

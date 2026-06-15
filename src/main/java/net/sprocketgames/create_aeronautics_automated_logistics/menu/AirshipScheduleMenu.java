@@ -26,6 +26,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModItem
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModMenus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleEntry;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentResolver;
@@ -58,6 +59,7 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
     private int selectedIndex;
     private final BlockPos originTransponderPos;
     private final boolean returnToRecordingMode;
+    private final AirshipSchedule initialSchedule;
 
     public AirshipScheduleMenu(int containerId, Inventory playerInventory, FriendlyByteBuf buffer) {
         this(containerId, playerInventory, readContext(buffer));
@@ -68,30 +70,42 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
     }
 
     private AirshipScheduleMenu(int containerId, Inventory playerInventory, OpenContext context) {
-        this(containerId, playerInventory, context.originTransponderPos(), context.returnToRecordingMode());
+        this(containerId, playerInventory, context.originTransponderPos(), context.returnToRecordingMode(), context.initialSchedule());
     }
 
     public AirshipScheduleMenu(int containerId, Inventory playerInventory, BlockPos originTransponderPos, boolean returnToRecordingMode) {
+        this(containerId, playerInventory, originTransponderPos, returnToRecordingMode, AirshipSchedule.empty());
+    }
+
+    public AirshipScheduleMenu(int containerId, Inventory playerInventory, BlockPos originTransponderPos, boolean returnToRecordingMode, AirshipSchedule initialSchedule) {
         super(ModMenus.AIRSHIP_SCHEDULE.get(), containerId);
         this.originTransponderPos = originTransponderPos;
         this.returnToRecordingMode = returnToRecordingMode;
+        this.initialSchedule = initialSchedule == null ? AirshipSchedule.empty() : initialSchedule;
         addPlayerInventory(playerInventory);
     }
 
     private static OpenContext readContext(FriendlyByteBuf buffer) {
         if (buffer == null || buffer.readableBytes() <= 0) {
-            return new OpenContext(null, false);
+            return new OpenContext(null, false, AirshipSchedule.empty());
         }
         boolean fromTransponder = buffer.readBoolean();
         if (!fromTransponder || buffer.readableBytes() < 9) {
-            return new OpenContext(null, false);
+            return new OpenContext(null, false, AirshipSchedule.empty());
         }
         BlockPos originPos = buffer.readBlockPos();
         boolean returnToRecordingMode = buffer.readBoolean();
-        return new OpenContext(originPos, returnToRecordingMode);
+        AirshipSchedule initialSchedule = AirshipSchedule.empty();
+        if (buffer.readableBytes() > 0) {
+            var tag = buffer.readNbt();
+            if (tag != null) {
+                initialSchedule = AirshipScheduleNbtSerializer.read(tag);
+            }
+        }
+        return new OpenContext(originPos, returnToRecordingMode, initialSchedule);
     }
 
-    private record OpenContext(BlockPos originTransponderPos, boolean returnToRecordingMode) {
+    private record OpenContext(BlockPos originTransponderPos, boolean returnToRecordingMode, AirshipSchedule initialSchedule) {
     }
 
     @Override
@@ -109,6 +123,9 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
     }
 
     public AirshipSchedule schedule(Player player) {
+        if (player.level().isClientSide && openedFromTransponder()) {
+            return initialSchedule;
+        }
         return editableTransponder(player)
                 .map(ShipTransponderBlockEntity::ownedSchedule)
                 .or(() -> editableScheduleStack(player).map(AirshipScheduleItem::readSchedule))
@@ -120,7 +137,7 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         Optional<ShipTransponderBlockEntity> transponder = editableTransponder(player);
         if (transponder.isPresent()) {
             Optional<Integer> currentEntryIndex = net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES
-                    .currentEntryIndex(transponder.get().transponderId());
+                    .currentEntryIndex(transponder.get().transponderId(), schedule);
             if (currentEntryIndex.isPresent() && !schedule.entries().isEmpty()) {
                 return Math.max(0, Math.min(currentEntryIndex.get(), schedule.entries().size() - 1));
             }
@@ -138,7 +155,7 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         return Component.translatable(
                 "gui.create_aeronautics_automated_logistics.airship_schedule.selected_entry",
                 selectedIndex + 1,
-                entry.displayStationName()
+                displayStationName(entry)
         );
     }
 
@@ -298,7 +315,7 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         }
         actionBar(player, Component.translatable(
                 "message.create_aeronautics_automated_logistics.airship_schedule.stop_deleted_with_routes",
-                schedule.entries().get(removedIndex).displayStationName(),
+                displayStationName(schedule.entries().get(removedIndex)),
                 segmentsToDelete.size()
         ));
         PacketDistributor.sendToPlayer(
@@ -492,10 +509,25 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         entries.set(selectedIndex, current.withPinnedSegment(Optional.of(segment.get().id())));
         actionBar(player, Component.translatable(
                 "message.create_aeronautics_automated_logistics.airship_schedule.segment_pinned",
-                segment.get().startStationName(),
-                segment.get().endStationName()
+                stationName(segment.get().startStationId(), segment.get().startStationName()),
+                stationName(segment.get().endStationId(), segment.get().endStationName())
         ));
         return schedule.withEntries(entries);
+    }
+
+    private String displayStationName(AirshipScheduleEntry entry) {
+        return entry.targetStationId()
+                .flatMap(AirshipStationRegistry::snapshot)
+                .map(AirshipStationSnapshot::stationName)
+                .filter(name -> !name.isBlank())
+                .orElseGet(entry::displayStationName);
+    }
+
+    private String stationName(UUID stationId, String fallbackName) {
+        return AirshipStationRegistry.snapshot(stationId)
+                .map(AirshipStationSnapshot::stationName)
+                .filter(name -> !name.isBlank())
+                .orElse(fallbackName);
     }
 
     private AirshipSchedule select(AirshipSchedule schedule, int direction) {

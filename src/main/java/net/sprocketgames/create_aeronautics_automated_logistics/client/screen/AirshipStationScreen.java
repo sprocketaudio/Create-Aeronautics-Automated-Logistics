@@ -26,6 +26,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.Ca
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.DockLinkPromptClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.LogisticsClientOverlays;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationRegistry;
+import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationSnapshot;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipStationMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.UpdateIdentityNamePayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
@@ -42,6 +43,11 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     private static final int SHIP_BOX_Y = 65;
     private static final int SHIP_BOX_WIDTH = 120;
     private static final int SHIP_BOX_HEIGHT = 20;
+    private static final int SHIP_DROPDOWN_MAX_VISIBLE_ROWS = 8;
+    private static final int SHIP_DROPDOWN_ROW_HEIGHT = 13;
+    private static final int SHIP_DROPDOWN_SCROLLBAR_WIDTH = 3;
+    private static final int SHIP_DROPDOWN_FADE_HEIGHT = 14;
+    private static final long SHIP_TYPEAHEAD_TIMEOUT_MS = 1000L;
     private static final int STATUS_FOOTER_X = 82;
     private static final int STATUS_FOOTER_Y = 216;
     private static final int STATUS_FOOTER_WIDTH = 74;
@@ -84,6 +90,9 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     private MiniIconButton cargoLinkButton;
     private MiniIconButton cargoClearButton;
     private boolean shipDropdownOpen;
+    private int shipDropdownScroll;
+    private String shipTypeaheadBuffer = "";
+    private long shipTypeaheadExpiryMs;
     private boolean routesOpen;
     private int routeScroll;
     private UUID previewedRouteId;
@@ -100,6 +109,8 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     private int cargoValueY;
     private int cargoValueWidth;
     private int cargoValueHeight;
+    private int lastMouseX;
+    private int lastMouseY;
     private List<Component> statusTooltipLines = List.of();
 
     public AirshipStationScreen(AirshipStationMenu menu, Inventory playerInventory, Component title) {
@@ -127,7 +138,9 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         addRenderableWidget(nameBox);
 
         int controlsY = y + SHIP_BOX_Y + SHIP_BOX_HEIGHT + 8;
-        int controlsStartX = x + 109;
+        int shipSelectorRight = x + SHIP_BOX_X + SHIP_BOX_WIDTH;
+        int controlsStopX = shipSelectorRight - 18;
+        int controlsStartX = controlsStopX - 26;
         runButton = addIconButton(
                 controlsStartX,
                 controlsY,
@@ -144,7 +157,7 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
                 Component.translatable("tooltip.create_aeronautics_automated_logistics.schedule_stop.warning_2")
         );
         routesButton = addIconButton(
-                controlsStartX + 26,
+                controlsStopX,
                 controlsY + 27,
                 AllIcons.I_VIEW_SCHEDULE,
                 () -> {
@@ -184,36 +197,40 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
                 Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.close.tooltip")
         );
         int dockButtonsY = y + DOCK_ROW_Y + 1;
+        int clearButtonX = shipSelectorRight - 12;
+        int linkButtonX = clearButtonX - 14;
         dockLinkButton = addMiniIconButton(
-                x + 127,
+                linkButtonX,
                 dockButtonsY,
                 AllIcons.I_ADD,
                 () -> pressAction(AirshipStationMenu.ACTION_BEGIN_LINK_DOCK),
                 Component.translatable("gui.create_aeronautics_automated_logistics.dock.link")
         );
         dockClearButton = addMiniIconButton(
-                x + 141,
+                clearButtonX,
                 dockButtonsY,
                 AllIcons.I_MTD_CLOSE,
                 () -> pressAction(AirshipStationMenu.ACTION_CLEAR_DOCK_LINK),
                 Component.translatable("gui.create_aeronautics_automated_logistics.dock.clear")
         );
         cargoLinkButton = addMiniIconButton(
-                x + 127,
+                linkButtonX,
                 dockButtonsY + 14,
                 AllIcons.I_ADD,
                 () -> pressAction(AirshipStationMenu.ACTION_LINK_CARGO),
                 Component.translatable("gui.create_aeronautics_automated_logistics.cargo.link")
         );
         cargoClearButton = addMiniIconButton(
-                x + 141,
+                clearButtonX,
                 dockButtonsY + 14,
                 AllIcons.I_MTD_CLOSE,
                 () -> pressAction(AirshipStationMenu.ACTION_CLEAR_CARGO),
                 Component.translatable("gui.create_aeronautics_automated_logistics.cargo.clear")
         );
 
-        if (this.minecraft != null && this.minecraft.player != null) {
+        if (this.minecraft != null
+                && this.minecraft.player != null
+                && !menu.hasSelectedShip(this.minecraft.player)) {
             pressAction(AirshipStationMenu.ACTION_AUTO_SELECT_CLOSEST_SHIP);
         }
     }
@@ -249,6 +266,8 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
 
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+        lastMouseX = mouseX;
+        lastMouseY = mouseY;
         renderBackground(guiGraphics, mouseX, mouseY, partialTick);
         if (landingAreaButton != null) {
             landingAreaButton.green = LogisticsClientOverlays.isLandingAreaVisible(this.menu.stationPos());
@@ -286,11 +305,11 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
             boolean running = menu.selectedShipScheduleRunning(this.minecraft.player);
             boolean held = menu.selectedShipScheduleHeld(this.minecraft.player);
             if (runButton != null) {
-                runButton.active = !running || held;
+                runButton.active = menu.canRunSelectedShip(this.minecraft.player);
                 runButton.green = running;
             }
             if (stopButton != null) {
-                stopButton.active = running;
+                stopButton.active = menu.canStopSelectedShip(this.minecraft.player);
             }
             if (routesButton != null) {
                 routesButton.active = menu.canControlStationLocally(this.minecraft.player);
@@ -304,7 +323,7 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         renderShipSelector(guiGraphics, mouseX, mouseY);
         renderMainStatus(guiGraphics);
         if (shipDropdownOpen) {
-            renderShipDropdown(guiGraphics);
+            renderShipDropdown(guiGraphics, mouseX, mouseY);
         }
         if (routesOpen) {
             renderRoutesPopup(guiGraphics, mouseX, mouseY);
@@ -375,38 +394,100 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         }
     }
 
-    private void renderShipDropdown(GuiGraphics guiGraphics) {
+    private void renderShipDropdown(GuiGraphics guiGraphics, int mouseX, int mouseY) {
         if (this.minecraft == null || this.minecraft.player == null) {
             return;
         }
         var options = this.menu.shipChoices(this.minecraft.player);
         int x = this.leftPos + SHIP_BOX_X;
         int y = this.topPos + SHIP_BOX_Y + SHIP_BOX_HEIGHT + 2;
-        int rowHeight = 13;
-        int visible = Math.min(6, options.size());
-        int height = Math.max(1, visible) * rowHeight + 4;
+        int visible = Math.min(SHIP_DROPDOWN_MAX_VISIBLE_ROWS, options.size());
+        int height = Math.max(1, visible) * SHIP_DROPDOWN_ROW_HEIGHT + 4;
+        boolean scrollable = options.size() > visible;
+        int contentRight = x + SHIP_BOX_WIDTH - (scrollable ? SHIP_DROPDOWN_SCROLLBAR_WIDTH + 4 : 4);
         guiGraphics.fill(x, y, x + SHIP_BOX_WIDTH, y + height, 0xF018101C);
         guiGraphics.fill(x + 1, y + 1, x + SHIP_BOX_WIDTH - 1, y + height - 1, 0xF02B2130);
         if (options.isEmpty()) {
             guiGraphics.drawString(this.font, "No ships found", x + 5, y + 5, 0xD8DDE6, false);
             return;
         }
+        int maxScroll = Math.max(0, options.size() - visible);
+        shipDropdownScroll = Math.max(0, Math.min(maxScroll, shipDropdownScroll));
         for (int i = 0; i < visible; i++) {
-            AirshipStationMenu.ShipChoice option = options.get(i);
-            int labelColor = option.selected() ? 0xFFFFE27A : 0xFFD8DDE6;
+            int optionIndex = shipDropdownScroll + i;
+            if (optionIndex >= options.size()) {
+                break;
+            }
+            AirshipStationMenu.ShipChoice option = options.get(optionIndex);
+            int rowY = y + 4 + i * SHIP_DROPDOWN_ROW_HEIGHT;
+            boolean hovered = isInside(mouseX, mouseY, x + 2, rowY - 1, contentRight - x - 2, SHIP_DROPDOWN_ROW_HEIGHT);
+            int highlightTop = rowY - 1;
+            int highlightBottom = rowY + this.font.lineHeight + 1;
+            if (hovered) {
+                guiGraphics.fill(x + 4, highlightTop, contentRight, highlightBottom, 0x7A525963);
+            }
+            if (option.selected()) {
+                int outlineColor = hovered ? 0xFFE8EEF6 : 0xB8B9C4D0;
+                int outlineLeft = x + 3;
+                int outlineRight = contentRight;
+                int outlineTop = highlightTop - 1;
+                int outlineBottom = highlightBottom - 1;
+                guiGraphics.hLine(outlineLeft, outlineRight, outlineTop, outlineColor);
+                guiGraphics.hLine(outlineLeft, outlineRight, outlineBottom, outlineColor);
+                guiGraphics.vLine(outlineLeft, outlineTop, outlineBottom, outlineColor);
+                guiGraphics.vLine(outlineRight, outlineTop, outlineBottom, outlineColor);
+            }
+            int labelColor = 0xFFD8DDE6;
             String status = option.statusText().getString();
             int statusWidth = this.font.width(status) + 8;
-            String clipped = this.font.plainSubstrByWidth(option.shipName().getString(), SHIP_BOX_WIDTH - 10 - statusWidth);
-            int rowY = y + 4 + i * rowHeight;
+            String clipped = this.font.plainSubstrByWidth(option.shipName().getString(), contentRight - (x + 5) - statusWidth - 2);
             guiGraphics.drawString(this.font, clipped, x + 5, rowY, labelColor, false);
             guiGraphics.drawString(
                     this.font,
                     status,
-                    x + SHIP_BOX_WIDTH - this.font.width(status) - 6,
+                    contentRight - this.font.width(status) - 2,
                     rowY,
                     option.statusColor(),
                     false
             );
+        }
+        if (shipDropdownScroll > 0) {
+            guiGraphics.fillGradient(
+                    x + 1,
+                    y + 1,
+                    x + SHIP_BOX_WIDTH - 1,
+                    y + 1 + SHIP_DROPDOWN_FADE_HEIGHT,
+                    0xF0333840,
+                    0x00333943
+            );
+        }
+        if (shipDropdownScroll < maxScroll) {
+            guiGraphics.fillGradient(
+                    x + 1,
+                    y + height - 1 - SHIP_DROPDOWN_FADE_HEIGHT,
+                    x + SHIP_BOX_WIDTH - 1,
+                    y + height - 1,
+                    0x00333943,
+                    0xF0333840
+            );
+        }
+        if (scrollable) {
+            int trackLeft = x + SHIP_BOX_WIDTH - SHIP_DROPDOWN_SCROLLBAR_WIDTH - 2;
+            int trackRight = x + SHIP_BOX_WIDTH - 2;
+            int trackTop = y + 3;
+            int trackBottom = y + height - 3;
+            int trackHeight = trackBottom - trackTop;
+            guiGraphics.fill(trackLeft, trackTop, trackRight, trackBottom, 0xAA20242A);
+
+            int knobHeight = Math.max(12, Math.round((visible / (float) options.size()) * trackHeight));
+            int knobTravel = Math.max(0, trackHeight - knobHeight);
+            int knobTop = trackTop + (maxScroll <= 0 ? 0 : Math.round((shipDropdownScroll / (float) maxScroll) * knobTravel));
+            int knobBottom = knobTop + knobHeight;
+            guiGraphics.fill(trackLeft, knobTop + 1, trackRight, knobBottom - 1, 0xFF7A818C);
+            guiGraphics.hLine(trackLeft + 1, trackRight - 1, knobTop, 0xFFB9C4D0);
+            guiGraphics.hLine(trackLeft + 1, trackRight - 1, knobBottom - 1, 0xFF535A64);
+            guiGraphics.vLine(trackLeft, knobTop + 1, knobBottom - 2, 0xFF929AA6);
+            guiGraphics.vLine(trackRight - 1, knobTop + 1, knobBottom - 2, 0xFF535A64);
         }
     }
 
@@ -542,8 +623,8 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
                 rowColor = hovered ? 0xAA8A6A45 : 0x887A5B3D;
             }
             guiGraphics.fill(x + 5, ry, x + width - 5, ry + ROUTES_ROW_FILL_H, rowColor);
-            guiGraphics.drawString(this.font, shortText(Component.literal("From: " + route.startStationName()), 158), x + 9, ry + ROUTES_ROW_TEXT_1_Y, 0xFFFFFFFF, false);
-            guiGraphics.drawString(this.font, shortText(Component.literal("To: " + route.endStationName()), 158), x + 9, ry + ROUTES_ROW_TEXT_2_Y, 0xFFFFFFFF, false);
+            guiGraphics.drawString(this.font, shortText(Component.literal("From: " + stationName(route.startStationId(), route.startStationName())), 158), x + 9, ry + ROUTES_ROW_TEXT_1_Y, 0xFFFFFFFF, false);
+            guiGraphics.drawString(this.font, shortText(Component.literal("To: " + stationName(route.endStationId(), route.endStationName())), 158), x + 9, ry + ROUTES_ROW_TEXT_2_Y, 0xFFFFFFFF, false);
             String meta = ROUTE_TIME_FORMAT.format(Instant.ofEpochMilli(route.createdEpochMillis()))
                     + " | " + route.points().size() + " pts";
             guiGraphics.drawString(this.font, this.font.plainSubstrByWidth(meta, 158), x + 9, ry + ROUTES_ROW_TEXT_3_Y, 0xFFB9C4D0, false);
@@ -650,7 +731,9 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
             var routes = menu.routeChoices(this.minecraft.player);
             if (hoveredRouteIndex < routes.size()) {
                 RouteSegment route = routes.get(hoveredRouteIndex);
-                String fullName = route.startStationName() + " -> " + route.endStationName();
+                String fullName = stationName(route.startStationId(), route.startStationName())
+                        + " -> "
+                        + stationName(route.endStationId(), route.endStationName());
                 Component invalid = routeInvalidReason(route, this.minecraft.player.level())
                         .map(reason -> Component.literal("Invalid: " + reason))
                         .orElse(Component.empty());
@@ -664,6 +747,13 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
             return Component.literal("Mouse wheel to scroll");
         }
         return null;
+    }
+
+    private String stationName(UUID stationId, String fallbackName) {
+        return AirshipStationRegistry.snapshot(stationId)
+                .map(AirshipStationSnapshot::stationName)
+                .filter(name -> !name.isBlank())
+                .orElse(fallbackName);
     }
 
     @Override
@@ -683,15 +773,18 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         }
         if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT
                 && isInside(mouseX, mouseY, this.leftPos + SHIP_BOX_X, this.topPos + SHIP_BOX_Y, SHIP_BOX_WIDTH, SHIP_BOX_HEIGHT)) {
-            shipDropdownOpen = !shipDropdownOpen;
-            routesOpen = false;
+            if (shipDropdownOpen) {
+                closeShipDropdown();
+            } else {
+                openShipDropdown();
+            }
             return true;
         }
         if (shipDropdownOpen && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             if (handleShipDropdownClick(mouseX, mouseY)) {
                 return true;
             }
-            shipDropdownOpen = false;
+            closeShipDropdown();
             return true;
         }
         if (shipDropdownOpen) {
@@ -752,16 +845,19 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         var options = this.menu.shipChoices(this.minecraft.player);
         int x = this.leftPos + SHIP_BOX_X;
         int y = this.topPos + SHIP_BOX_Y + SHIP_BOX_HEIGHT + 2;
-        int rowHeight = 13;
-        int visible = Math.min(6, options.size());
-        int height = Math.max(1, visible) * rowHeight + 4;
+        int visible = Math.min(SHIP_DROPDOWN_MAX_VISIBLE_ROWS, options.size());
+        int height = Math.max(1, visible) * SHIP_DROPDOWN_ROW_HEIGHT + 4;
         if (!isInside(mouseX, mouseY, x, y, SHIP_BOX_WIDTH, height)) {
             return false;
         }
-        int row = (int) ((mouseY - y - 3) / rowHeight);
+        int row = (int) ((mouseY - y - 3) / SHIP_DROPDOWN_ROW_HEIGHT);
         if (row >= 0 && row < visible) {
-            pressAction(AirshipStationMenu.ACTION_SELECT_SHIP_BASE + row);
-            shipDropdownOpen = false;
+            int optionIndex = shipDropdownScroll + row;
+            if (optionIndex >= options.size()) {
+                return false;
+            }
+            pressAction(AirshipStationMenu.ACTION_SELECT_SHIP_BASE + optionIndex);
+            closeShipDropdown();
             return true;
         }
         return false;
@@ -781,8 +877,24 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
                 return true;
             }
         }
-        if (isInside(mouseX, mouseY, this.leftPos + SHIP_BOX_X, this.topPos + SHIP_BOX_Y, SHIP_BOX_WIDTH, SHIP_BOX_HEIGHT)) {
-            pressAction(AirshipStationMenu.ACTION_SELECT_SHIP);
+        if (shipDropdownOpen && this.minecraft != null && this.minecraft.player != null) {
+            var options = menu.shipChoices(this.minecraft.player);
+            int visible = Math.min(SHIP_DROPDOWN_MAX_VISIBLE_ROWS, options.size());
+            int maxScroll = Math.max(0, options.size() - visible);
+            int x = this.leftPos + SHIP_BOX_X;
+            int y = this.topPos + SHIP_BOX_Y + SHIP_BOX_HEIGHT + 2;
+            int height = Math.max(1, visible) * SHIP_DROPDOWN_ROW_HEIGHT + 4;
+            if (isInside(mouseX, mouseY, x, y, SHIP_BOX_WIDTH, height)) {
+                if (maxScroll > 0) {
+                    shipDropdownScroll = Math.max(0, Math.min(maxScroll, shipDropdownScroll + (scrollY < 0 ? 1 : -1)));
+                }
+                return true;
+            }
+        }
+        if (isShipSelectorHovered(mouseX, mouseY)) {
+            pressAction(scrollY < 0
+                    ? AirshipStationMenu.ACTION_SELECT_SHIP
+                    : AirshipStationMenu.ACTION_SELECT_PREVIOUS_SHIP);
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
@@ -803,7 +915,30 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
                 return true;
             }
             if (shipDropdownOpen) {
-                shipDropdownOpen = false;
+                closeShipDropdown();
+                return true;
+            }
+        }
+        if (shipDropdownOpen && this.minecraft != null && this.minecraft.player != null) {
+            var options = menu.shipChoices(this.minecraft.player);
+            int visible = Math.min(SHIP_DROPDOWN_MAX_VISIBLE_ROWS, options.size());
+            int maxScroll = Math.max(0, options.size() - visible);
+            if (keyCode == GLFW.GLFW_KEY_UP) {
+                if (shipDropdownScroll > 0) {
+                    shipDropdownScroll--;
+                }
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_DOWN) {
+                if (shipDropdownScroll < maxScroll) {
+                    shipDropdownScroll++;
+                }
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                return true;
+            }
+            if (keyCode != GLFW.GLFW_KEY_ESCAPE) {
                 return true;
             }
         }
@@ -815,6 +950,15 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
 
     @Override
     public boolean charTyped(char codePoint, int modifiers) {
+        boolean selectorReady = this.nameBox == null || !this.nameBox.isFocused();
+        boolean selectorHovered = isShipSelectorHovered(lastMouseX, lastMouseY);
+        if (selectorReady
+                && Character.isLetterOrDigit(codePoint)
+                && ((shipDropdownOpen && this.minecraft != null && this.minecraft.player != null)
+                || (!shipDropdownOpen && selectorHovered))
+                && handleShipTypeahead(codePoint)) {
+            return true;
+        }
         if (this.nameBox != null && this.nameBox.isFocused() && this.nameBox.charTyped(codePoint, modifiers)) {
             return true;
         }
@@ -953,6 +1097,100 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
 
     private boolean isInside(double mouseX, double mouseY, int x, int y, int width, int height) {
         return mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
+    }
+
+    private boolean isShipSelectorHovered(double mouseX, double mouseY) {
+        return isInside(mouseX, mouseY, this.leftPos + SHIP_BOX_X, this.topPos + SHIP_BOX_Y, SHIP_BOX_WIDTH, SHIP_BOX_HEIGHT);
+    }
+
+    private void openShipDropdown() {
+        shipDropdownOpen = true;
+        routesOpen = false;
+        shipTypeaheadBuffer = "";
+        shipTypeaheadExpiryMs = 0L;
+        ensureSelectedShipVisible();
+    }
+
+    private void closeShipDropdown() {
+        shipDropdownOpen = false;
+        shipTypeaheadBuffer = "";
+        shipTypeaheadExpiryMs = 0L;
+    }
+
+    private void ensureSelectedShipVisible() {
+        if (this.minecraft == null || this.minecraft.player == null) {
+            shipDropdownScroll = 0;
+            return;
+        }
+        var options = menu.shipChoices(this.minecraft.player);
+        int selectedIndex = -1;
+        for (int i = 0; i < options.size(); i++) {
+            if (options.get(i).selected()) {
+                selectedIndex = i;
+                break;
+            }
+        }
+        int visible = Math.min(SHIP_DROPDOWN_MAX_VISIBLE_ROWS, options.size());
+        int maxScroll = Math.max(0, options.size() - visible);
+        if (selectedIndex < 0) {
+            shipDropdownScroll = Math.max(0, Math.min(maxScroll, shipDropdownScroll));
+            return;
+        }
+        if (selectedIndex < shipDropdownScroll) {
+            shipDropdownScroll = selectedIndex;
+        } else if (selectedIndex >= shipDropdownScroll + visible) {
+            shipDropdownScroll = selectedIndex - visible + 1;
+        }
+        shipDropdownScroll = Math.max(0, Math.min(maxScroll, shipDropdownScroll));
+    }
+
+    private boolean handleShipTypeahead(char codePoint) {
+        if (!Character.isLetterOrDigit(codePoint) || this.minecraft == null || this.minecraft.player == null) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        if (now > shipTypeaheadExpiryMs) {
+            shipTypeaheadBuffer = "";
+        }
+        shipTypeaheadBuffer += Character.toLowerCase(codePoint);
+        shipTypeaheadExpiryMs = now + SHIP_TYPEAHEAD_TIMEOUT_MS;
+
+        var options = menu.shipChoices(this.minecraft.player);
+        int matchIndex = -1;
+        for (int i = 0; i < options.size(); i++) {
+            String shipName = options.get(i).shipName().getString().toLowerCase();
+            if (shipName.startsWith(shipTypeaheadBuffer)) {
+                matchIndex = i;
+                break;
+            }
+        }
+        if (matchIndex < 0 && shipTypeaheadBuffer.length() > 1) {
+            shipTypeaheadBuffer = Character.toString(Character.toLowerCase(codePoint));
+            shipTypeaheadExpiryMs = now + SHIP_TYPEAHEAD_TIMEOUT_MS;
+            for (int i = 0; i < options.size(); i++) {
+                String shipName = options.get(i).shipName().getString().toLowerCase();
+                if (shipName.startsWith(shipTypeaheadBuffer)) {
+                    matchIndex = i;
+                    break;
+                }
+            }
+        }
+        if (matchIndex < 0) {
+            return true;
+        }
+        pressAction(AirshipStationMenu.ACTION_SELECT_SHIP_BASE + matchIndex);
+        if (!shipDropdownOpen) {
+            return true;
+        }
+        int visible = Math.min(SHIP_DROPDOWN_MAX_VISIBLE_ROWS, options.size());
+        int maxScroll = Math.max(0, options.size() - visible);
+        if (matchIndex < shipDropdownScroll) {
+            shipDropdownScroll = matchIndex;
+        } else if (matchIndex >= shipDropdownScroll + visible) {
+            shipDropdownScroll = matchIndex - visible + 1;
+        }
+        shipDropdownScroll = Math.max(0, Math.min(maxScroll, shipDropdownScroll));
+        return true;
     }
 
     private void renderScaledIcon(GuiGraphics guiGraphics, AllIcons icon, int x, int y, float scale) {

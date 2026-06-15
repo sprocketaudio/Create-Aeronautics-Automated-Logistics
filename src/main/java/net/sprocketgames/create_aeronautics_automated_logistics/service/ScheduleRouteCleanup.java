@@ -100,6 +100,9 @@ public final class ScheduleRouteCleanup {
     public static int pruneInvalidRouteSegments(ServerLevel level, AirshipStationBlockEntity station) {
         List<UUID> invalidSegmentIds = station.routeSegments().stream()
                 .filter(segment -> !segment.dimension().equals(level.dimension())
+                        || RouteSegmentRegistry.byId(segment.id())
+                                .filter(candidate -> candidate.equals(segment))
+                                .isEmpty()
                         || shipMissing(level, segment.transponderId())
                         || stationMissing(level, segment.startStationId())
                         || stationMissing(level, segment.endStationId()))

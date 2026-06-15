@@ -138,6 +138,9 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
         );
         serverPlayer.openMenu(station, buffer -> {
             buffer.writeBlockPos(pos);
+            buffer.writeBoolean(station.selectedTransponderId().isPresent());
+            station.selectedTransponderId().ifPresent(buffer::writeUUID);
+            buffer.writeUtf(station.selectedShipName(), 64);
             ShipTransponderMenu.writeCargoRevision(buffer, station.linkedCargoRevision());
             ShipTransponderMenu.writeCargoSummary(buffer, station.linkedCargoSummary());
             ShipTransponderMenu.writeLinkedCargoEntries(buffer, station.linkedCargo());

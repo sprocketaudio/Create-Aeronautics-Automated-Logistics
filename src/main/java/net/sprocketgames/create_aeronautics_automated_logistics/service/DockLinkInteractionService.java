@@ -25,6 +25,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockingConn
 
 public final class DockLinkInteractionService {
     private static final long LINK_TIMEOUT_TICKS = 20L * 30L;
+    private static final int SHIP_LINK_PROMPT_SEARCH_RADIUS = 24;
     private static final Map<UUID, PendingDockLink> PENDING = new ConcurrentHashMap<>();
 
     private DockLinkInteractionService() {
@@ -37,7 +38,7 @@ public final class DockLinkInteractionService {
 
     public static void beginTransponderLink(ServerPlayer player, BlockPos transponderPos) {
         PENDING.put(player.getUUID(), new PendingDockLink(LinkTarget.TRANSPONDER, transponderPos.immutable(), player.level().dimension(), player.level().getGameTime() + LINK_TIMEOUT_TICKS));
-        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(true, true, transponderPos.immutable(), discoverCandidates(player, transponderPos, AutomatedLogisticsConfig.SHIP_DOCK_SEARCH_RADIUS.get())));
+        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(true, true, transponderPos.immutable(), discoverCandidates(player, transponderPos, SHIP_LINK_PROMPT_SEARCH_RADIUS)));
     }
 
     public static void clearPending(ServerPlayer player) {
@@ -136,7 +137,7 @@ public final class DockLinkInteractionService {
                     dockPos.getY(),
                     dockPos.getZ()
             ));
-            AllSoundEvents.DEPOT_PLOP.playOnServer(player.level(), stationPos, 0.4f, 1.15f);
+            AllSoundEvents.CONFIRM.playOnServer(player.level(), stationPos, 0.6f, 1.0f);
             return true;
         }
         actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.dock_link.station_invalid"));
@@ -154,7 +155,7 @@ public final class DockLinkInteractionService {
         DockDiscoveryResult result = transponder.setShipDockLink(player.serverLevel(), dockPos);
         if (result.status() == DockLinkStatus.LINKED) {
             actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.dock_link.transponder_saved"));
-            AllSoundEvents.DEPOT_PLOP.playOnServer(player.level(), transponderPos, 0.4f, 1.15f);
+            AllSoundEvents.CONFIRM.playOnServer(player.level(), transponderPos, 0.6f, 1.0f);
             return true;
         }
         actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.dock_link.transponder_invalid"));
