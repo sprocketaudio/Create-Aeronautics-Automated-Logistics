@@ -1282,6 +1282,18 @@ Compatibility:
 
 ### Phase 5 - Extract Route Motion Runner
 
+Status:
+
+- Complete on 2026-06-18.
+- Loaded physical route motion, route-leg validation, hold-at-target behavior,
+  and motion priming are now routed through a dedicated `RouteMotionRunner`
+  seam inside `VehicleRoutePlaybackService`.
+- Schedule/runtime ownership, route persistence, wait semantics, UI
+  projection, runtime save/load, and Sable materialization policy were left
+  unchanged for this phase.
+- Existing playback entry points now call the motion runner for loaded movement
+  instead of embedding that logic directly in the service tick body.
+
 Goal:
 
 - Separate loaded physical movement from schedule runtime.
@@ -1333,6 +1345,18 @@ Compatibility:
 - Behavior-compatible.
 
 ### Phase 6 - Extract Wait Runtime
+
+Status:
+
+- Complete on 2026-06-18.
+- Stop-wait progression, grouped wait-condition evaluation, wait start/end, and
+  unloaded non-physical wait completion now run through a dedicated
+  `WaitRuntime` seam inside `VehicleRoutePlaybackService`.
+- Dock, cargo, redstone, time-of-day, timed, and grouped AND/OR wait behavior
+  remains on the existing logic path, now called through the new adapter.
+- Route persistence, schedule cleanup, runtime save/load semantics, UI
+  projection, and Sable materialization policy were left unchanged for this
+  phase.
 
 Goal:
 
