@@ -1555,6 +1555,27 @@ Compatibility:
 
 ### Phase 9 - Runtime Restore Coordinator
 
+Status:
+
+- Complete on 2026-06-18.
+- Added `RuntimeRestoreCoordinator` as the saved runtime apply path.
+- `AutomationRuntimeSavedData` now routes restore through the coordinator, with
+  the previous direct schedule/playback loader kept behind a migration flag for
+  this phase.
+- Restore now loads raw schedule and playback snapshots first, rebuilds the
+  loaded route segment cache from persistent station data, rebinds schedule
+  runtimes to their playback records, logs orphan playback records, submits
+  pending playback materialization/restore, then rechecks schedule runtime
+  state.
+- `VehicleRoutePlaybackService` can load pending playback runtime without
+  immediately materializing it, and exposes restore diagnostics for active and
+  pending route playback records.
+- `AirshipScheduleExecutionService` logs each restored transponder runtime and
+  transitions corrupt entry indices or missing playback records into
+  inspectable fault states instead of deleting route or schedule data.
+- Route cache rebuild is explicit and read-only; missing loaded station BEs
+  remain non-fatal and do not invalidate persistent routes.
+
 Goal:
 
 - Make save/load deterministic and multi-ship safe.

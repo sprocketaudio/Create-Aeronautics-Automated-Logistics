@@ -29,6 +29,7 @@ public record RuntimeSnapshot(
                 && !pendingPlayback
                 && state != RuntimeState.PAUSED_MANUAL
                 && state != RuntimeState.PAUSED_FAULT
+                && state != RuntimeState.ORPHAN_PLAYBACK
                 && state != RuntimeState.MISSING_PLAYBACK
                 && state != RuntimeState.MISSING_CONTROLLER
                 && state != RuntimeState.ROUTE_MISSING

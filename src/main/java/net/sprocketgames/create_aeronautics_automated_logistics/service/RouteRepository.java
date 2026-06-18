@@ -140,6 +140,17 @@ public final class RouteRepository {
         RouteSegmentRegistry.unregister(segmentId);
     }
 
+    public int rebuildLoadedRouteIndex(MinecraftServer server) {
+        Objects.requireNonNull(server, "server");
+        List<RouteSegment> loadedSegments = allSegments(server, false);
+        RouteSegmentRegistry.replaceAll(loadedSegments);
+        CreateAeronauticsAutomatedLogistics.debugPlayback(
+                "Runtime restore rebuilt route segment cache from loaded persistent stations segments={}",
+                loadedSegments.size()
+        );
+        return loadedSegments.size();
+    }
+
     public List<StoredSegmentRecord> storedSegmentsConnectedToStation(MinecraftServer server, UUID stationId) {
         Objects.requireNonNull(server, "server");
         Objects.requireNonNull(stationId, "stationId");

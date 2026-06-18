@@ -19,6 +19,11 @@ public final class RouteSegmentRegistry {
     private RouteSegmentRegistry() {
     }
 
+    public static void replaceAll(List<RouteSegment> segments) {
+        SEGMENTS.clear();
+        registerAll(segments);
+    }
+
     public static void registerAll(List<RouteSegment> segments) {
         for (RouteSegment segment : segments) {
             SEGMENTS.put(segment.id(), segment);

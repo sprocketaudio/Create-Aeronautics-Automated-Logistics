@@ -147,6 +147,15 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
     }
 
     public void loadRuntime(MinecraftServer server, CompoundTag tag) {
+        loadPendingRuntime(server, tag);
+        restorePendingRuntime(server);
+    }
+
+    public void loadRuntimeForRestoreCoordinator(MinecraftServer server, CompoundTag tag) {
+        loadPendingRuntime(server, tag);
+    }
+
+    private void loadPendingRuntime(MinecraftServer server, CompoundTag tag) {
         resetRuntime();
         if (tag == null || !tag.contains(ACTIVE_PLAYBACKS, Tag.TAG_LIST)) {
             CreateAeronauticsAutomatedLogistics.debugPlayback("Loaded route playback runtime: no saved active playbacks");
@@ -173,7 +182,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 "Loaded route playback runtime: {} pending active playback(s)",
                 pendingRuntimePlaybacks.size()
         );
-        restorePendingRuntime(server);
     }
 
     @Override
@@ -436,6 +444,13 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
 
     public boolean isPending(RouteId routeId) {
         return pendingRuntimePlaybacks.containsKey(routeId);
+    }
+
+    public Set<RouteId> routeIdsWithRuntimeRecords() {
+        Set<RouteId> routeIds = new HashSet<>();
+        routeIds.addAll(activePlaybacks.keySet());
+        routeIds.addAll(pendingRuntimePlaybacks.keySet());
+        return Set.copyOf(routeIds);
     }
 
     public Optional<PlaybackFailure> consumeTerminalRuntimeFailure(RouteId routeId) {
@@ -704,6 +719,20 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             CreateAeronauticsAutomatedLogistics.debugPlayback(
                     "Dropped orphan pending route playback {} because it is not owned by an active schedule",
                     entry.getKey().value()
+            );
+        }
+    }
+
+    public void logPendingPlaybackRebinds(Set<RouteId> scheduledRouteIds) {
+        Objects.requireNonNull(scheduledRouteIds, "scheduledRouteIds");
+        for (RouteId routeId : routeIdsWithRuntimeRecords()) {
+            CreateAeronauticsAutomatedLogistics.debugPlayback(
+                    "Runtime restore playback rebind route={} scheduled={} pending={} active={} held={}",
+                    routeId.value(),
+                    scheduledRouteIds.contains(routeId),
+                    isPending(routeId),
+                    isRunning(routeId),
+                    isHeld(routeId)
             );
         }
     }
@@ -1724,7 +1753,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         }
     }
 
-    private void restorePendingRuntime(MinecraftServer server) {
+    public void restorePendingRuntime(MinecraftServer server) {
         Iterator<Map.Entry<RouteId, CompoundTag>> iterator = pendingRuntimePlaybacks.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<RouteId, CompoundTag> entry = iterator.next();

@@ -254,15 +254,29 @@ public final class AutomatedLogisticsCommands {
     }
 
     private static int killRuntimePlayback(CommandSourceStack source, String runtimeIdText) {
-        UUID transponderId = parseUuid(source, runtimeIdText, "runtime id");
-        if (transponderId == null) {
+        UUID runtimeId = parseUuid(source, runtimeIdText, "runtime id");
+        if (runtimeId == null) {
             return 0;
         }
 
-        RuntimeSnapshot snapshot = findVisibleRuntime(source, transponderId);
+        RuntimeSnapshot snapshot = findVisibleRuntime(source, runtimeId);
         if (snapshot == null) {
             source.sendFailure(Component.literal("No runtime route found for " + runtimeIdText + "."));
             return 0;
+        }
+
+        if (snapshot.state() == RuntimeState.ORPHAN_PLAYBACK && snapshot.activeRouteId().isPresent()) {
+            boolean stopped = AutomatedLogisticsServices.PLAYBACK.stopRuntimePlayback(
+                    source.getServer(),
+                    snapshot.activeRouteId().get(),
+                    FailureReason.NONE
+            );
+            if (!stopped) {
+                source.sendFailure(Component.literal("Could not kill orphan playback " + runtimeIdText + "."));
+                return 0;
+            }
+            source.sendSuccess(() -> Component.literal("Killed orphan playback " + runtimeIdText + " and released ship physics."), true);
+            return 1;
         }
 
         ServerLevel level = source.getServer().getLevel(snapshot.dimension());
@@ -271,7 +285,7 @@ public final class AutomatedLogisticsCommands {
             return 0;
         }
         AirshipScheduleExecutionService schedules = AutomatedLogisticsServices.SCHEDULES;
-        if (!schedules.killRuntime(level, transponderId, "command_kill")) {
+        if (!schedules.killRuntime(level, runtimeId, "command_kill")) {
             source.sendFailure(Component.literal("Could not kill runtime " + runtimeIdText + "."));
             return 0;
         }

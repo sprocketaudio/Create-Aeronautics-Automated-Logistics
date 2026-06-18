@@ -14,6 +14,7 @@ public class AutomationRuntimeSavedData extends SavedData {
     private static final String SCHEDULES = "Schedules";
     private static final String ACTIVE_PLAYBACKS = "activePlaybacks";
     private static final String ACTIVE_SCHEDULES = "activeSchedules";
+    private static final boolean USE_RESTORE_COORDINATOR = true;
 
     private CompoundTag playbackTag = new CompoundTag();
     private CompoundTag scheduleTag = new CompoundTag();
@@ -61,6 +62,10 @@ public class AutomationRuntimeSavedData extends SavedData {
 
     public void apply(MinecraftServer server) {
         logSnapshot("applying to server", true);
+        if (USE_RESTORE_COORDINATOR) {
+            RuntimeRestoreCoordinator.restore(server, scheduleTag, playbackTag);
+            return;
+        }
         AutomatedLogisticsServices.SCHEDULES.loadRuntime(server, scheduleTag);
         AutomatedLogisticsServices.PLAYBACK.loadRuntime(server, playbackTag);
     }
