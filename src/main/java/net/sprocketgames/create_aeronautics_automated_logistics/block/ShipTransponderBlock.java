@@ -151,10 +151,9 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
             }
             transponder.refreshRuntimeShip((ServerLevel) level);
             transponder.refreshShipDockLink((ServerLevel) level);
-            AutomatedLogisticsServices.SCHEDULES.reconcileRuntimeStatus((ServerLevel) level, transponder);
-            if (!AutomatedLogisticsServices.SCHEDULES.hasActiveRuntime((ServerLevel) level, transponder.transponderId())) {
-                AutomatedLogisticsServices.SCHEDULES.reconcileRuntimeStatus((ServerLevel) level, transponder);
-            }
+            RouteStatus projectedRuntimeStatus = AutomatedLogisticsServices.SCHEDULES.projectedRuntimeStatus((ServerLevel) level, transponder);
+            boolean projectedScheduleActive = AutomatedLogisticsServices.SCHEDULES.projectedScheduleActive((ServerLevel) level, transponder);
+            boolean projectedScheduleHeld = AutomatedLogisticsServices.SCHEDULES.projectedScheduleHeld((ServerLevel) level, transponder);
             ShipTransponderMenu.InitialRecordingState recordingState =
                     ShipTransponderMenu.resolveInitialRecordingState(serverPlayer, transponder, false);
             ShipTransponderMenu statusMenu = new ShipTransponderMenu(
@@ -165,7 +164,7 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
                     recordingState.recordingSessionActive(),
                     recordingState.appendToSchedule(),
                     transponder.recordingDestinationStationId(),
-                    transponder.runtimeStatus(),
+                    projectedRuntimeStatus,
                     transponder.dockOutputActive(),
                     transponder.hasOwnedStops(),
                     transponder.ownedSchedule(),
@@ -183,9 +182,9 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
                     pos,
                     serverPlayer.getName().getString(),
                     serverPlayer.isSpectator(),
-                    transponder.runtimeStatus(),
-                    transponder.scheduleActive(),
-                    transponder.scheduleHeld(),
+                    projectedRuntimeStatus,
+                    projectedScheduleActive,
+                    projectedScheduleHeld,
                     transponder.dockOutputActive(),
                     transponder.hasOwnedStops(),
                     transponder.ownedSchedule().entries().size(),
@@ -201,7 +200,7 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
                 buffer.writeBoolean(recordingState.appendToSchedule());
                 buffer.writeBoolean(transponder.recordingDestinationStationId().isPresent());
                 transponder.recordingDestinationStationId().ifPresent(buffer::writeUUID);
-                buffer.writeEnum(transponder.runtimeStatus());
+                buffer.writeEnum(projectedRuntimeStatus);
                 buffer.writeBoolean(transponder.dockOutputActive());
                 buffer.writeBoolean(transponder.hasOwnedStops());
                 buffer.writeNbt(AirshipScheduleNbtSerializer.write(transponder.ownedSchedule()));

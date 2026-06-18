@@ -160,6 +160,13 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                         pendingRuntimePlaybacks.put(routeId, playbackTag.copy());
                         pendingRuntimeRestoreCooldowns.put(routeId, 0);
                     });
+            if (routeIdFromRuntimeTag(playbackTag).isEmpty()) {
+                CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                        "Skipped unreadable route playback runtime entry index={} keys={}",
+                        i,
+                        playbackTag.getAllKeys()
+                );
+            }
         }
         CreateAeronauticsAutomatedLogistics.debugPlayback(
                 "Loaded route playback runtime: {} pending active playback(s)",
@@ -1717,10 +1724,17 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
     ) {
         station.waitPlayback(activePlayback.route());
         CreateAeronauticsAutomatedLogistics.debugPlayback(
-                "Playback {} waiting at stop {} for {} ticks",
+                "Playback {} wait start stop={} point={} waitTicks={} conditions={} position={} target={} guidance={}",
                 activePlayback.route().id().value(),
                 activePlayback.waitingStop().map(RouteStop::name).orElse("unknown"),
-                activePlayback.waitTicksRemaining()
+                activePlayback.targetIndex(),
+                activePlayback.waitTicksRemaining(),
+                activePlayback.waitingStop()
+                        .map(VehicleRoutePlaybackService::routeStopConditionSummary)
+                        .orElse("none"),
+                controller.position(),
+                targetPosition,
+                activePlayback.guidancePosition()
         );
         if (activePlayback.requiresDockLock()) {
             Optional<AirshipStationBlockEntity> dockingStation = dockingStation(level, station, activePlayback);
@@ -2347,8 +2361,9 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                     continue;
                 }
                 CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
-                        "Route playback {} is still pending restore; controller or level is not ready. {}",
+                        "Route playback {} is still pending restore; controller or level is not ready. routeDiag={} {}",
                         entry.getKey().value(),
+                        pendingRouteDiagnostic(entry.getValue()),
                         pendingStoredShipDiagnostic(server, entry.getValue())
                 );
                 pendingRuntimeRestoreCooldowns.put(entry.getKey(), 20);
@@ -2479,6 +2494,21 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             return "Pending route has no linked Sable vehicle id.";
         }
         return ShipRecoveryService.describeStoredShip(server, route.get().dimension(), shipId.get());
+    }
+
+    private String pendingRouteDiagnostic(CompoundTag playbackTag) {
+        if (!playbackTag.contains(ROUTE, Tag.TAG_COMPOUND)) {
+            return "route=missing";
+        }
+        Optional<Route> route = RouteNbtSerializer.read(playbackTag.getCompound(ROUTE));
+        if (route.isEmpty()) {
+            return "route=undecodable";
+        }
+        Route value = route.get();
+        return "routeId=" + value.id().value()
+                + ", dimension=" + value.dimension().location()
+                + ", points=" + value.points().size()
+                + ", controller=" + value.linkedController();
     }
 
     private Optional<PlaybackFailure> pendingRuntimeTerminalFailure(MinecraftServer server, CompoundTag playbackTag) {

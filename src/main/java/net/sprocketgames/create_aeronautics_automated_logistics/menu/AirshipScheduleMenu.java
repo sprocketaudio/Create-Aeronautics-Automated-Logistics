@@ -29,11 +29,11 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSch
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleEntry;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
-import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentResolver;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitCondition;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.TransponderPermissionService;
 
@@ -303,12 +303,7 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         if (segmentsToDelete.isEmpty()) {
             return;
         }
-        for (RouteSegment segment : segmentsToDelete) {
-            removeRouteFromLoadedStation(level, segment.startStationId(), segment.id().value());
-            removeRouteFromLoadedStation(level, segment.endStationId(), segment.id().value());
-            RouteSegmentRegistry.unregister(segment.id());
-        }
-        ScheduleRouteCleanup.pruneLoadedSchedulesForChangedRoutes(level);
+        ScheduleRouteCleanup.removeRoutesForDeletedStop(level, List.copyOf(segmentsToDelete));
         actionBar(player, Component.translatable(
                 "message.create_aeronautics_automated_logistics.airship_schedule.stop_deleted_with_routes",
                 displayStationName(schedule.entries().get(removedIndex)),
@@ -334,14 +329,15 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
             return Optional.empty();
         }
         Optional<RouteSegment> pinned = entry.pinnedSegmentId()
-                .flatMap(RouteSegmentRegistry::byId)
+                .flatMap(segmentId -> AutomatedLogisticsServices.ROUTES.byId(level.getServer(), segmentId))
                 .filter(segment -> segment.transponderId().equals(transponderId))
                 .filter(segment -> segment.dimension().equals(level.dimension()));
         if (pinned.isPresent()) {
             return pinned;
         }
         if (entryIndex == 0) {
-            return RouteSegmentRegistry.endingAt(
+            return AutomatedLogisticsServices.ROUTES.endingAt(
+                    level.getServer(),
                     entry.targetStationId().get(),
                     level.dimension(),
                     Optional.of(transponderId)
@@ -352,21 +348,12 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
             return Optional.empty();
         }
         return RouteSegmentResolver.newestFor(
+                level.getServer(),
                 previous.targetStationId().get(),
                 entry.targetStationId().get(),
                 level.dimension(),
                 Optional.of(transponderId)
         );
-    }
-
-    private void removeRouteFromLoadedStation(ServerLevel level, UUID stationId, UUID segmentId) {
-        AirshipStationRegistry.snapshot(stationId)
-                .filter(snapshot -> snapshot.dimension().equals(level.dimension()))
-                .map(AirshipStationSnapshot::stationPos)
-                .map(level::getBlockEntity)
-                .filter(net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity.class::isInstance)
-                .map(net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity.class::cast)
-                .ifPresent(station -> station.removeRouteSegment(segmentId));
     }
 
     private AirshipSchedule duplicateSelected(AirshipSchedule schedule) {
@@ -490,12 +477,20 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
             return schedule;
         }
 
-        Optional<RouteSegment> segment = RouteSegmentResolver.newestFor(
-                previous.targetStationId().get(),
-                current.targetStationId().get(),
-                player.level().dimension(),
-                Optional.empty()
-        );
+        Optional<RouteSegment> segment = player instanceof ServerPlayer serverPlayer
+                ? RouteSegmentResolver.newestFor(
+                        serverPlayer.serverLevel().getServer(),
+                        previous.targetStationId().get(),
+                        current.targetStationId().get(),
+                        player.level().dimension(),
+                        Optional.empty()
+                )
+                : RouteSegmentResolver.newestFor(
+                        previous.targetStationId().get(),
+                        current.targetStationId().get(),
+                        player.level().dimension(),
+                        Optional.empty()
+                );
         if (segment.isEmpty()) {
             actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.no_segment_to_pin"));
             return schedule;

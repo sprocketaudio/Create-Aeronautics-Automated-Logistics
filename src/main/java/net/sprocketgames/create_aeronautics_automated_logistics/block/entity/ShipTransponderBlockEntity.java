@@ -149,7 +149,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
             refreshRuntimeShip(serverLevel);
             refreshShipDockLink(serverLevel);
             migrateLegacyInstalledSchedule();
-            AutomatedLogisticsServices.SCHEDULES.reconcileRuntimeStatus(serverLevel, this);
+            RouteStatus projectedRuntimeStatus = AutomatedLogisticsServices.SCHEDULES.projectedRuntimeStatus(serverLevel, this);
             ShipTransponderMenu.InitialRecordingState recordingState =
                     player instanceof ServerPlayer serverPlayer
                             ? ShipTransponderMenu.resolveInitialRecordingState(serverPlayer, this, false)
@@ -162,7 +162,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                     recordingState.recordingSessionActive(),
                     recordingState.appendToSchedule(),
                     recordingDestinationStationId(),
-                    runtimeStatus(),
+                    projectedRuntimeStatus,
                     dockOutputActive(),
                     hasOwnedStops(),
                     ownedSchedule(),
@@ -182,7 +182,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                         recordingState.recordingSessionActive(),
                         recordingState.appendToSchedule(),
                         recordingDestinationStationId(),
-                        runtimeStatus(),
+                        projectedRuntimeStatus,
                         dockOutputActive(),
                         hasOwnedStops(),
                         ownedSchedule(),

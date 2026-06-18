@@ -976,6 +976,13 @@ Files/classes likely affected:
 
 #### Phase 1A - Minimal diagnostics
 
+Status:
+
+- Complete on 2026-06-18.
+- Added targeted runtime/load/restore diagnostics in schedule execution and
+  playback restore paths to explain unreadable runtime entries, invalid pinned
+  routes, and pending playback restore failures without per-tick spam.
+
 - Add minimal debug channels if needed: `runtime`, `materialization`,
   `persistence`.
 - Log only the critical lifecycle points needed to explain route loss:
@@ -992,17 +999,39 @@ Files/classes likely affected:
 
 #### Phase 1B - Route repository boundary
 
+Status:
+
+- Complete on 2026-06-18.
+- Added `RouteRepository` as a persistent route facade backed by station-owned
+  route segments, registered in `AutomatedLogisticsServices`, and routed
+  schedule/menu validation lookups through it.
+
 - Introduce the persistent `RouteRepository` facade.
 - Route all schedule validation/status queries through it.
 - Keep the facade backed by the existing station route segments at first.
 
 #### Phase 1C - Stop automatic cleanup
 
+Status:
+
+- Complete on 2026-06-18.
+- Removed automatic route pruning from station tick and menu-open paths while
+  keeping explicit delete cleanup behavior.
+
 - Stop automatic cleanup from tick/menu-open paths.
 - Keep cleanup explicit and intentional so a UI refresh or tick path cannot
   silently erase persistent route truth.
 
 #### Phase 1D - Expand transition diagnostics
+
+Status:
+
+- Complete on 2026-06-18.
+- Added explicit transition diagnostics for schedule start, leg start, leg
+  complete, schedule completion/loop restart, wait start/end, unloaded transit,
+  materialization request/result, runtime restore, and route index rebuild.
+- Existing validation/load/restore diagnostics remain in place to explain
+  unreadable runtime entries and route-resolution failures.
 
 - Once the boundary is stable, add transition logging for:
   - schedule start
@@ -1038,6 +1067,22 @@ Compatibility:
 - Behavior-compatible.
 
 ### Phase 2 - Freeze Persistent Route Model Ownership
+
+Status:
+
+- Complete on 2026-06-18.
+- Route validation and server-side route/status reads now go through
+  `RouteRepository`/`RouteSegmentResolver` instead of treating
+  `RouteSegmentRegistry` as route truth.
+- Server-side route index mutations now go through the repository/cache facade.
+- Added a persistent route segment directory plus pending-deletion queue so
+  explicit station/transponder/stop delete cleanup can discover affected route
+  segment identities even when holder station block entities are unloaded.
+- Deferred route deletions are applied on later station load/register, then the
+  stored route list and cache/index are updated.
+- `RouteSegmentRegistry` is explicitly documented and used as an index/cache,
+  while explicit station/transponder delete cleanup remains intact without
+  making registry misses invalidate route truth.
 
 Goal:
 

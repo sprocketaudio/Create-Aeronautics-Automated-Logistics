@@ -51,7 +51,6 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteNbtSe
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RoutePoint;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentNbtSerializer;
-import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStop;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
@@ -128,7 +127,6 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         }
         if (level.getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
             station.refreshGroundDockLink(serverLevel);
-            ScheduleRouteCleanup.pruneInvalidRouteSegments(serverLevel, station);
         }
     }
 
@@ -160,7 +158,6 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     public AbstractContainerMenu createMenu(int containerId, Inventory playerInventory, Player player) {
         registerStationSnapshot();
         if (level instanceof ServerLevel serverLevel) {
-            ScheduleRouteCleanup.pruneInvalidRouteSegments(serverLevel, this);
             refreshGroundDockLink(serverLevel);
             selectedTransponderId.ifPresent(transponderId ->
                     AutomatedLogisticsServices.SCHEDULES.reconcileRuntimeStatus(serverLevel, transponderId));
@@ -464,7 +461,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     public void addRouteSegment(RouteSegment segment) {
         routeSegments.add(segment);
         pruneSegmentHistory(segment, 5);
-        RouteSegmentRegistry.replaceForStartStation(stationId, routeSegmentsOwnedByThisStation());
+        syncRoutePersistence();
         setChanged();
         syncClientState();
     }
@@ -472,7 +469,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     public boolean removeRouteSegment(UUID segmentId) {
         boolean removed = routeSegments.removeIf(segment -> segment.id().value().equals(segmentId));
         if (removed) {
-            RouteSegmentRegistry.replaceForStartStation(stationId, routeSegmentsOwnedByThisStation());
+            syncRoutePersistence();
             setChanged();
             syncClientState();
         }
@@ -655,7 +652,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         super.setChanged();
         if (level != null && !level.isClientSide) {
             registerStationSnapshot();
-            RouteSegmentRegistry.replaceForStartStation(stationId, routeSegmentsOwnedByThisStation());
+            syncRoutePersistence();
         }
     }
 
@@ -879,8 +876,28 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         if (level instanceof ServerLevel serverLevel) {
             IdentityDirectorySavedData.upsertStation(serverLevel.getServer(), snapshot);
             StationChunkLoadingService.track(serverLevel, stationId, worldPosition);
-            RouteSegmentRegistry.replaceForStartStation(stationId, routeSegmentsOwnedByThisStation());
+            int deferredDeletionsApplied = AutomatedLogisticsServices.ROUTES.applyPendingDeletions(serverLevel, this);
+            List<RouteSegment> ownedSegments = routeSegmentsOwnedByThisStation();
+            AutomatedLogisticsServices.ROUTES.refreshIndexForStartStation(stationId, ownedSegments);
+            AutomatedLogisticsServices.ROUTES.syncStoredSegments(serverLevel.getServer(), stationId, routeSegments());
+            CreateAeronauticsAutomatedLogistics.debugPlayback(
+                    "Route index rebuild station={} pos={} dimension={} ownedSegments={} storedSegments={} deferredDeletionsApplied={}",
+                    stationId,
+                    worldPosition.toShortString(),
+                    serverLevel.dimension().location(),
+                    ownedSegments.size(),
+                    routeSegments.size(),
+                    deferredDeletionsApplied
+            );
         }
+    }
+
+    private void syncRoutePersistence() {
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        AutomatedLogisticsServices.ROUTES.refreshIndexForStartStation(stationId, routeSegmentsOwnedByThisStation());
+        AutomatedLogisticsServices.ROUTES.syncStoredSegments(serverLevel.getServer(), stationId, routeSegments());
     }
 
     private List<RouteSegment> routeSegmentsOwnedByThisStation() {

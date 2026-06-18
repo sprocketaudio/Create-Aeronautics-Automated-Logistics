@@ -15,8 +15,8 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSch
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleEntry;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentId;
-import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentResolver;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteSegmentDirectorySavedData.StoredSegmentRecord;
 
 public final class ScheduleRouteCleanup {
     private ScheduleRouteCleanup() {
@@ -74,19 +74,26 @@ public final class ScheduleRouteCleanup {
     }
 
     public static void removeRoutesForDeletedStation(ServerLevel level, UUID stationId) {
-        List<RouteSegment> affected = RouteSegmentRegistry.connectedToStation(stationId);
+        List<StoredSegmentRecord> affected = AutomatedLogisticsServices.ROUTES.storedSegmentsConnectedToStation(level.getServer(), stationId);
+        logExplicitCleanupRequest("station_delete", "stationId=" + stationId, affected);
         if (affected.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                    "Explicit cleanup refused source=station_delete stationId={} reason=no_persistent_route_proof",
+                    stationId
+            );
             return;
         }
-        for (RouteSegment segment : affected) {
-            removeSegmentFromLoadedStations(level, stationId, segment);
-            RouteSegmentRegistry.unregister(segment.id());
+        for (StoredSegmentRecord record : affected) {
+            applyImmediateOrDeferredDeletion(level, record, "station_delete", "stationId=" + stationId);
         }
+        AutomatedLogisticsServices.ROUTES.removeStoredSegmentsForHolder(level.getServer(), stationId);
+        AutomatedLogisticsServices.ROUTES.clearPendingDeletionsForHolder(level.getServer(), stationId);
         pruneLoadedTransponderSchedules(level);
     }
 
     public static void removeRoutesForDeletedTransponder(ServerLevel level, UUID transponderId) {
-        List<RouteSegment> affected = RouteSegmentRegistry.forTransponder(transponderId);
+        List<StoredSegmentRecord> affected = AutomatedLogisticsServices.ROUTES.storedSegmentsForTransponder(level.getServer(), transponderId);
+        logExplicitCleanupRequest("transponder_delete", "transponderId=" + transponderId, affected);
         for (var snapshot : AirshipStationRegistry.knownStations(level.dimension())) {
             if (!(level.getBlockEntity(snapshot.stationPos()) instanceof AirshipStationBlockEntity station)) {
                 continue;
@@ -96,11 +103,43 @@ public final class ScheduleRouteCleanup {
             }
         }
         if (affected.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                    "Explicit cleanup refused source=transponder_delete transponderId={} reason=no_persistent_route_proof",
+                    transponderId
+            );
             return;
         }
-        for (RouteSegment segment : affected) {
-            removeSegmentFromLoadedStations(level, null, segment);
-            RouteSegmentRegistry.unregister(segment.id());
+        for (StoredSegmentRecord record : affected) {
+            applyImmediateOrDeferredDeletion(level, record, "transponder_delete", "transponderId=" + transponderId);
+        }
+        pruneLoadedTransponderSchedules(level);
+    }
+
+    public static void removeRoutesForDeletedStop(ServerLevel level, List<RouteSegment> segments) {
+        if (segments.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                    "Explicit cleanup refused source=stop_delete reason=no_segments_resolved"
+            );
+            return;
+        }
+        List<StoredSegmentRecord> affected = new ArrayList<>();
+        for (RouteSegment segment : segments) {
+            affected.addAll(AutomatedLogisticsServices.ROUTES.storedCopiesForSegment(level.getServer(), segment.id()));
+        }
+        logExplicitCleanupRequest(
+                "stop_delete",
+                "segmentIds=" + segments.stream().map(segment -> segment.id().value()).toList(),
+                affected
+        );
+        if (affected.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                    "Explicit cleanup refused source=stop_delete segmentIds={} reason=no_persistent_route_proof",
+                    segments.stream().map(segment -> segment.id().value()).toList()
+            );
+            return;
+        }
+        for (StoredSegmentRecord record : affected) {
+            applyImmediateOrDeferredDeletion(level, record, "stop_delete", "segmentId=" + record.segmentId().value());
         }
         pruneLoadedTransponderSchedules(level);
     }
@@ -141,25 +180,72 @@ public final class ScheduleRouteCleanup {
         }
     }
 
-    private static void removeSegmentFromLoadedStations(ServerLevel level, UUID deletedStationId, RouteSegment segment) {
-        removeSegmentFromLoadedStation(level, deletedStationId, segment.startStationId(), segment.id());
-        removeSegmentFromLoadedStation(level, deletedStationId, segment.endStationId(), segment.id());
-    }
-
-    private static void removeSegmentFromLoadedStation(
+    private static void applyImmediateOrDeferredDeletion(
             ServerLevel level,
-            UUID deletedStationId,
-            UUID stationId,
-            RouteSegmentId segmentId
+            StoredSegmentRecord record,
+            String source,
+            String subject
     ) {
-        if (deletedStationId != null && deletedStationId.equals(stationId)) {
+        Optional<AirshipStationBlockEntity> holderStation = loadedHolderStation(level, record.holderStationId());
+        boolean holderLoaded = holderStation.isPresent();
+        if (holderLoaded) {
+            boolean removed = holderStation.get().removeRouteSegment(record.segmentId().value());
+            AutomatedLogisticsServices.ROUTES.clearPendingDeletion(level.getServer(), record.holderStationId(), record.segmentId());
+            if (removed) {
+                CreateAeronauticsAutomatedLogistics.debugPlayback(
+                        "Explicit cleanup applied source={} {} segment={} holderStation={} ownerStation={} targetStation={} holderLoaded=true deferred=false",
+                        source,
+                        subject,
+                        record.segmentId().value(),
+                        record.holderStationId(),
+                        record.startStationId(),
+                        record.endStationId()
+                );
+            } else {
+                AutomatedLogisticsServices.ROUTES.removeStoredSegmentRecord(level.getServer(), record.holderStationId(), record.segmentId());
+                CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                        "Explicit cleanup found missing stored segment source={} {} segment={} holderStation={} ownerStation={} targetStation={} holderLoaded=true deferred=false",
+                        source,
+                        subject,
+                        record.segmentId().value(),
+                        record.holderStationId(),
+                        record.startStationId(),
+                        record.endStationId()
+                );
+            }
+            AutomatedLogisticsServices.ROUTES.evictIndexedSegment(record.segmentId());
             return;
         }
-        AirshipStationRegistry.snapshot(stationId)
-                .map(snapshot -> level.getBlockEntity(snapshot.stationPos()))
+        boolean deferred = AutomatedLogisticsServices.ROUTES.queuePendingDeletion(level.getServer(), record.holderStationId(), record.segmentId());
+        CreateAeronauticsAutomatedLogistics.debugPlayback(
+                "Explicit cleanup deferred source={} {} segment={} holderStation={} ownerStation={} targetStation={} holderLoaded=false deferred={}",
+                source,
+                subject,
+                record.segmentId().value(),
+                record.holderStationId(),
+                record.startStationId(),
+                record.endStationId(),
+                deferred
+        );
+        AutomatedLogisticsServices.ROUTES.evictIndexedSegment(record.segmentId());
+    }
+
+    private static Optional<AirshipStationBlockEntity> loadedHolderStation(ServerLevel level, UUID holderStationId) {
+        return IdentityDirectorySavedData.get(level.getServer()).station(holderStationId)
+                .filter(identity -> identity.dimension().equals(level.dimension()))
+                .map(identity -> level.getBlockEntity(identity.stationPos()))
                 .filter(AirshipStationBlockEntity.class::isInstance)
-                .map(AirshipStationBlockEntity.class::cast)
-                .ifPresent(station -> station.removeRouteSegment(segmentId.value()));
+                .map(AirshipStationBlockEntity.class::cast);
+    }
+
+    private static void logExplicitCleanupRequest(String source, String subject, List<StoredSegmentRecord> affected) {
+        CreateAeronauticsAutomatedLogistics.debugPlayback(
+                "Explicit cleanup request source={} {} affectedEntries={} affectedSegments={}",
+                source,
+                subject,
+                affected.size(),
+                affected.stream().map(record -> record.segmentId().value()).distinct().toList()
+        );
     }
 
     private static Optional<UUID> deriveStartStationId(
@@ -176,7 +262,7 @@ public final class ScheduleRouteCleanup {
         }
         UUID firstTarget = firstEntry.targetStationId().get();
         Optional<UUID> pinnedStart = firstEntry.pinnedSegmentId()
-                .flatMap(RouteSegmentRegistry::byId)
+                .flatMap(segmentId -> AutomatedLogisticsServices.ROUTES.byId(level.getServer(), segmentId))
                 .filter(segment -> segment.dimension().equals(level.dimension()))
                 .filter(segment -> segment.transponderId().equals(transponderId))
                 .filter(segment -> segment.endStationId().equals(firstTarget))
@@ -185,7 +271,12 @@ public final class ScheduleRouteCleanup {
         if (pinnedStart.isPresent()) {
             return pinnedStart;
         }
-        return RouteSegmentRegistry.endingAt(firstTarget, level.dimension(), Optional.of(transponderId)).stream()
+        return AutomatedLogisticsServices.ROUTES.endingAt(
+                        level.getServer(),
+                        firstTarget,
+                        level.dimension(),
+                        Optional.of(transponderId)
+                ).stream()
                 .filter(segment -> !stationMissing(level, segment.startStationId()))
                 .map(RouteSegment::startStationId)
                 .findFirst();
@@ -199,7 +290,7 @@ public final class ScheduleRouteCleanup {
             UUID transponderId
     ) {
         return pinnedSegmentId
-                .flatMap(RouteSegmentRegistry::byId)
+                .flatMap(segmentId -> AutomatedLogisticsServices.ROUTES.byId(level.getServer(), segmentId))
                 .filter(candidate -> candidate.startStationId().equals(startStationId))
                 .filter(candidate -> candidate.endStationId().equals(targetStationId))
                 .filter(candidate -> candidate.dimension().equals(level.dimension()))
@@ -207,6 +298,7 @@ public final class ScheduleRouteCleanup {
                 .filter(candidate -> !stationMissing(level, candidate.startStationId()))
                 .filter(candidate -> !stationMissing(level, candidate.endStationId()))
                 .or(() -> RouteSegmentResolver.newestFor(
+                        level.getServer(),
                         startStationId,
                         targetStationId,
                         level.dimension(),
