@@ -17,10 +17,9 @@ public final class RouteSegmentResolver {
             ResourceKey<Level> dimension,
             Optional<UUID> transponderId
     ) {
-        return station.routeSegments().stream()
+        return RouteSegmentRegistry.matchingAnyStart(station.stationId(), dimension, transponderId).stream()
                 .filter(segment -> segment.dimension().equals(dimension))
                 .filter(segment -> segment.startStationId().equals(station.stationId()))
-                .filter(segment -> transponderId.map(id -> id.equals(segment.transponderId())).orElse(true))
                 .sorted(newestFirst())
                 .toList();
     }
@@ -30,10 +29,8 @@ public final class RouteSegmentResolver {
             ResourceKey<Level> dimension,
             Optional<UUID> transponderId
     ) {
-        return station.routeSegments().stream()
+        return RouteSegmentRegistry.connectedToStation(station.stationId()).stream()
                 .filter(segment -> segment.dimension().equals(dimension))
-                .filter(segment -> segment.startStationId().equals(station.stationId())
-                        || segment.endStationId().equals(station.stationId()))
                 .filter(segment -> transponderId.map(id -> id.equals(segment.transponderId())).orElse(true))
                 .sorted(newestFirst())
                 .toList();

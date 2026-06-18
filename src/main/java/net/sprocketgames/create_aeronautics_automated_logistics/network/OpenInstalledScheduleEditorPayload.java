@@ -1,5 +1,6 @@
 package net.sprocketgames.create_aeronautics_automated_logistics.network;
 
+import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -41,12 +42,35 @@ public record OpenInstalledScheduleEditorPayload(BlockPos transponderPos, boolea
             return;
         }
         if (!(player.level().getBlockEntity(payload.transponderPos()) instanceof ShipTransponderBlockEntity transponder)) {
+            CreateAeronauticsAutomatedLogistics.debugUi(
+                    "OpenInstalledScheduleEditor rejected missing transponder pos={} player={} spectator={}",
+                    payload.transponderPos(),
+                    player.getName().getString(),
+                    player.isSpectator()
+            );
             return;
         }
         if (!TransponderPermissionService.ensureCanControl(player, transponder)) {
+            CreateAeronauticsAutomatedLogistics.debugUi(
+                    "OpenInstalledScheduleEditor rejected permission pos={} id={} player={} spectator={} owner={}",
+                    payload.transponderPos(),
+                    transponder.transponderId(),
+                    player.getName().getString(),
+                    player.isSpectator(),
+                    transponder.ownerId().map(UUID::toString).orElse("<none>")
+            );
             return;
         }
         AirshipSchedule schedule = transponder.ownedSchedule();
+        CreateAeronauticsAutomatedLogistics.debugUi(
+                "OpenInstalledScheduleEditor opening pos={} id={} player={} spectator={} entries={} title='{}'",
+                payload.transponderPos(),
+                transponder.transponderId(),
+                player.getName().getString(),
+                player.isSpectator(),
+                schedule.entries().size(),
+                schedule.title()
+        );
         player.openMenu(
                 new SimpleMenuProvider(
                         (containerId, inventory, ignoredPlayer) -> new AirshipScheduleMenu(

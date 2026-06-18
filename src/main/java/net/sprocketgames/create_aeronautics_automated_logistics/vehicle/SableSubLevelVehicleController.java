@@ -31,9 +31,9 @@ import org.joml.Vector3d;
 import org.joml.Vector3dc;
 
 public class SableSubLevelVehicleController implements VehicleController {
-    private static final double ANGULAR_DAMPING = 0.9D;
-    private static final double ROTATION_ALIGNMENT_GAIN = 0.18D;
-    private static final double MAX_ALIGNMENT_ANGULAR_CHANGE = 0.06D;
+    private static final double ANGULAR_DAMPING = 0.75D;
+    private static final double ROTATION_ALIGNMENT_GAIN = 0.85D;
+    private static final double MAX_ALIGNMENT_ANGULAR_CHANGE = 0.55D;
     private static final double HOLD_HORIZONTAL_POSITION_GAIN = 0.45D;
     private static final double HOLD_HORIZONTAL_VELOCITY_DAMPING = 1.1D;
     private static final double MAX_HOLD_HORIZONTAL_CHANGE = 0.18D;
@@ -60,15 +60,16 @@ public class SableSubLevelVehicleController implements VehicleController {
     }
 
     public static Optional<SableSubLevelVehicleController> resolve(ServerLevel level, VehicleControllerRef controllerRef) {
-        CreateAeronauticsAutomatedLogistics.debugLog("Resolving Sable controller from {}", controllerRef);
+        CreateAeronauticsAutomatedLogistics.debugVehicle("Resolving Sable controller from {}", controllerRef);
         Optional<ServerSubLevel> byId = controllerRef.vehicleId().flatMap(vehicleId -> findSubLevel(level, vehicleId));
         if (byId.isPresent()) {
             BlockPos localPos = resolveControllerLocalPos(byId.get(), controllerRef.controllerPos())
                     .orElseGet(() -> BlockPos.containing(0, 0, 0));
-            CreateAeronauticsAutomatedLogistics.debugLog(
-                    "Resolved Sable controller by id {} at local {}",
+            CreateAeronauticsAutomatedLogistics.debugVehicle(
+                    "Resolved Sable controller by id {} at storedLocal={} worldAnchor={}",
                     byId.get().getUniqueId(),
-                    localPos
+                    localPos,
+                    byId.get().logicalPose().transformPosition(Vec3.atCenterOf(localPos))
             );
             return Optional.of(new SableSubLevelVehicleController(byId.get(), localPos, Vec3.atCenterOf(localPos)));
         }
@@ -76,7 +77,12 @@ public class SableSubLevelVehicleController implements VehicleController {
         Optional<SableSubLevelVehicleController> resolved = controllerRef.controllerPos()
                 .flatMap(controllerPos -> findSubLevelContainingController(level, controllerPos, ModBlocks.SHIP_TRANSPONDER.get(), true));
         if (resolved.isEmpty()) {
-            CreateAeronauticsAutomatedLogistics.debugWarn("Could not resolve linked Sable controller from {}", controllerRef);
+            CreateAeronauticsAutomatedLogistics.debugVehicleWarn(
+                    "Could not resolve linked Sable controller from {}. storedLocalController={} vehicleId={}",
+                    controllerRef,
+                    controllerRef.controllerPos().map(BlockPos::toShortString).orElse("missing"),
+                    controllerRef.vehicleId().map(UUID::toString).orElse("missing")
+            );
         }
         return resolved;
     }
@@ -236,7 +242,7 @@ public class SableSubLevelVehicleController implements VehicleController {
         Vector3d angularCorrection = computeAngularCorrection(targetRotation, currentAngularVelocity);
         if (movementLogCooldown-- <= 0) {
             movementLogCooldown = MOVEMENT_LOG_INTERVAL_TICKS;
-            CreateAeronauticsAutomatedLogistics.debugLog(
+            CreateAeronauticsAutomatedLogistics.debugVehicle(
                     "Sable playback {} local={} distance={} desiredSpeed={} desiredVelocity={} currentVelocity=({}, {}, {}) angularVelocity=({}, {}, {}) targetRotation={} angularCorrection=({}, {}, {})",
                     subLevel.getUniqueId(),
                     localControllerPos,
@@ -288,7 +294,19 @@ public class SableSubLevelVehicleController implements VehicleController {
         if (handle == null || !handle.isValid()) {
             return;
         }
+        Quaterniond orientation = targetRotation
+                .map(RouteRotation::toQuaterniond)
+                .orElseGet(() -> new Quaterniond(subLevel.logicalPose().orientation()));
+        Vector3d rotatedAnchorOffset = new Vector3d(localAnchor.x, localAnchor.y, localAnchor.z)
+                .sub(subLevel.logicalPose().rotationPoint());
+        orientation.transform(rotatedAnchorOffset);
+        Vector3d posePosition = new Vector3d(
+                targetPosition.x - rotatedAnchorOffset.x,
+                targetPosition.y - rotatedAnchorOffset.y,
+                targetPosition.z - rotatedAnchorOffset.z
+        );
         stop(level);
+        handle.teleport(posePosition, orientation);
     }
 
     private void applyHoldStabilization(
@@ -415,14 +433,14 @@ public class SableSubLevelVehicleController implements VehicleController {
         ServerSubLevelContainer container = SubLevelContainer.getContainer(level);
         if (container == null) {
             if (logFailures) {
-                CreateAeronauticsAutomatedLogistics.debugWarn("No Sable sublevel container while resolving controller at {}", controllerPos);
+                CreateAeronauticsAutomatedLogistics.debugVehicleWarn("No Sable sublevel container while resolving controller at {}", controllerPos);
             }
             return Optional.empty();
         }
 
         if (logFailures) {
-            CreateAeronauticsAutomatedLogistics.debugLog(
-                    "Searching {} Sable sublevels for controller at {}",
+            CreateAeronauticsAutomatedLogistics.debugVehicle(
+                    "Searching {} Sable sublevels for controller reference {}",
                     container.getAllSubLevels().size(),
                     controllerPos
             );
@@ -430,7 +448,7 @@ public class SableSubLevelVehicleController implements VehicleController {
         Optional<SableSubLevelVehicleController> bySableHelper = findBySableHelper(level, controllerPos, expectedBlock, logFailures);
         if (bySableHelper.isPresent()) {
             if (logFailures) {
-                CreateAeronauticsAutomatedLogistics.debugLog("Resolved controller at {} using Sable helper", controllerPos);
+                CreateAeronauticsAutomatedLogistics.debugVehicle("Resolved controller at {} using Sable helper", controllerPos);
             }
             return bySableHelper;
         }
@@ -443,7 +461,7 @@ public class SableSubLevelVehicleController implements VehicleController {
             Optional<SableSubLevelVehicleController> byPlotStoragePos = findByPlotStoragePos(subLevel, controllerPos, expectedBlock);
             if (byPlotStoragePos.isPresent()) {
                 if (logFailures) {
-                    CreateAeronauticsAutomatedLogistics.debugLog(
+                    CreateAeronauticsAutomatedLogistics.debugVehicle(
                             "Resolved controller at {} using plot storage in Sable sublevel {}",
                             controllerPos,
                             subLevel.getUniqueId()
@@ -455,7 +473,7 @@ public class SableSubLevelVehicleController implements VehicleController {
             Optional<SableSubLevelVehicleController> byWorldPos = findByWorldPos(subLevel, controllerPos, expectedBlock);
             if (byWorldPos.isPresent()) {
                 if (logFailures) {
-                    CreateAeronauticsAutomatedLogistics.debugLog(
+                    CreateAeronauticsAutomatedLogistics.debugVehicle(
                             "Resolved controller at {} using world position in Sable sublevel {}",
                             controllerPos,
                             subLevel.getUniqueId()
@@ -477,15 +495,15 @@ public class SableSubLevelVehicleController implements VehicleController {
         SubLevel containing = Sable.HELPER.getContaining(level, controllerPos);
         if (!(containing instanceof ServerSubLevel subLevel) || subLevel.isRemoved()) {
             if (logFailures) {
-                CreateAeronauticsAutomatedLogistics.debugLog("Sable helper did not find a sublevel containing {}", controllerPos);
+                CreateAeronauticsAutomatedLogistics.debugVehicle("Sable helper did not find a sublevel containing {}", controllerPos);
             }
             return Optional.empty();
         }
 
         if (!isInsideStorageBounds(subLevel, controllerPos)) {
             if (logFailures) {
-                CreateAeronauticsAutomatedLogistics.debugLog(
-                        "Sable helper found sublevel {} for {}, but the controller was outside plot bounds {}",
+                CreateAeronauticsAutomatedLogistics.debugVehicle(
+                        "Sable helper found sublevel {} for storedLocalController={}, but the controller was outside plot bounds {}",
                         subLevel.getUniqueId(),
                         controllerPos,
                         subLevel.getPlot().getBoundingBox()
@@ -496,10 +514,9 @@ public class SableSubLevelVehicleController implements VehicleController {
 
         if (!hasControllerBlockAtStorage(subLevel, controllerPos, expectedBlock)) {
             if (logFailures) {
-                CreateAeronauticsAutomatedLogistics.debugWarn(
-                        "Using linked Sable sublevel {} at {} even though the controller block was not readable at storage position {}",
+                CreateAeronauticsAutomatedLogistics.debugVehicleWarn(
+                        "Using linked Sable sublevel {} at storedLocalController={} even though the controller block was not readable at that storage position",
                         subLevel.getUniqueId(),
-                        controllerPos,
                         controllerPos
                 );
             } else {

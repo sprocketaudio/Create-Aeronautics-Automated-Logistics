@@ -28,6 +28,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.Lo
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationSnapshot;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipStationMenu;
+import net.sprocketgames.create_aeronautics_automated_logistics.network.AirshipStationMenuActionPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.UpdateIdentityNamePayload;
 import org.lwjgl.glfw.GLFW;
 
@@ -78,6 +79,7 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
 
     private final List<ButtonTooltip> buttonTooltips = new ArrayList<>();
     private EditBox nameBox;
+    private String pendingSubmittedName;
     private IconButton runButton;
     private IconButton stopButton;
     private IconButton landingAreaButton;
@@ -243,6 +245,14 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         super.containerTick();
         if (nameBox != null && !nameBox.isFocused()) {
             String authoritativeName = stationName();
+            if (pendingSubmittedName != null) {
+                if (pendingSubmittedName.equals(authoritativeName)) {
+                    pendingSubmittedName = null;
+                } else {
+                    centerNameBox();
+                    return;
+                }
+            }
             if (!nameBox.getValue().equals(authoritativeName)) {
                 nameBox.setValue(authoritativeName);
             }
@@ -276,7 +286,7 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
             landingAreaButton.green = LogisticsClientOverlays.isLandingAreaVisible(this.menu.stationPos());
         }
         if (dockPreviewButton != null && this.minecraft != null && this.minecraft.player != null) {
-            boolean hasLinkedDock = menu.dockPreviewPos(this.minecraft.player).isPresent();
+            boolean hasLinkedDock = menu.hasLinkedDock(this.minecraft.player);
             if (!hasLinkedDock) {
                 LogisticsClientOverlays.clearDock();
             }
@@ -287,7 +297,7 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         }
         if (dockClearButton != null && this.minecraft != null && this.minecraft.player != null) {
             boolean pendingDockLink = DockLinkPromptClientState.isPendingForStation(this.menu.stationPos());
-            dockClearButton.active = pendingDockLink || menu.dockPreviewPos(this.minecraft.player).isPresent();
+            dockClearButton.active = pendingDockLink || menu.hasLinkedDock(this.minecraft.player);
             dockClearButton.green = pendingDockLink;
         }
         if (cargoPreviewButton != null && this.minecraft != null && this.minecraft.player != null) {
@@ -295,7 +305,7 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
             if (cargoPreview.isEmpty()) {
                 LogisticsClientOverlays.clearCargo();
             }
-            cargoPreviewButton.active = !cargoPreview.isEmpty();
+            cargoPreviewButton.active = menu.hasLinkedCargo(this.minecraft.player);
             cargoPreviewButton.green = LogisticsClientOverlays.isCargoVisibleGroups(cargoPreview);
         }
         if (cargoClearButton != null && this.minecraft != null && this.minecraft.player != null) {
@@ -569,6 +579,10 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         var routes = menu.routeChoiceSummaries(this.minecraft.player);
         if (previewedRouteId == null) {
             previewedRouteId = LogisticsClientOverlays.previewedRouteId().orElse(null);
+        }
+        if (previewedRouteId != null && routes.stream().noneMatch(route -> route.id().equals(previewedRouteId))) {
+            LogisticsClientOverlays.clearFlightPath();
+            previewedRouteId = null;
         }
         int x = this.leftPos + ROUTES_POPUP_X;
         int y = this.topPos + ROUTES_POPUP_Y;
@@ -975,14 +989,30 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     }
 
     private void pressAction(int actionId) {
-        if (this.minecraft != null && this.minecraft.gameMode != null) {
+        if (this.minecraft == null || this.minecraft.player == null) {
+            return;
+        }
+        if (this.minecraft.player.isSpectator()) {
+            PacketDistributor.sendToServer(new AirshipStationMenuActionPayload(
+                    this.menu.containerId,
+                    this.menu.stationPos(),
+                    actionId
+            ));
+            return;
+        }
+        if (this.minecraft.gameMode != null) {
             this.minecraft.gameMode.handleInventoryButtonClick(this.menu.containerId, actionId);
         }
     }
 
+    public void clearPreviewedRouteSelection() {
+        previewedRouteId = null;
+    }
+
     private void saveName() {
         if (this.minecraft != null && this.nameBox != null) {
-            PacketDistributor.sendToServer(new UpdateIdentityNamePayload(this.menu.stationPos(), this.nameBox.getValue()));
+            pendingSubmittedName = this.nameBox.getValue();
+            PacketDistributor.sendToServer(new UpdateIdentityNamePayload(this.menu.stationPos(), pendingSubmittedName));
         }
     }
 

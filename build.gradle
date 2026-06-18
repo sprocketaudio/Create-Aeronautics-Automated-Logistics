@@ -354,6 +354,28 @@ tasks.withType(ProcessResources).configureEach {
 }
 
 def ideaResourceOutputDir = layout.projectDirectory.dir('resources/main')
+def compiledClassesDir = layout.buildDirectory.dir('classes/java/main')
+
+tasks.register('pruneGeneratedClassArtifacts') {
+    group = 'build'
+    description = 'Removes invalid generated class artifacts left behind by interrupted or duplicated local builds.'
+    outputs.upToDateWhen { false }
+
+    doLast {
+        def classesDir = compiledClassesDir.get().asFile
+        if (!classesDir.exists()) {
+            return
+        }
+
+        fileTree(classesDir).matching {
+            include '**/*.class'
+        }.files.findAll { File file ->
+            file.length() == 0L || (file.name ==~ /.* \(\d+\)\.class$/)
+        }.each { File stale ->
+            stale.delete()
+        }
+    }
+}
 
 tasks.register('syncIdeaResources', Sync) {
     group = 'ide'
@@ -426,6 +448,7 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 tasks.named('compileJava').configure {
+    dependsOn tasks.named('pruneGeneratedClassArtifacts')
     dependsOn tasks.named('extractLocalModJarJars')
 }
 

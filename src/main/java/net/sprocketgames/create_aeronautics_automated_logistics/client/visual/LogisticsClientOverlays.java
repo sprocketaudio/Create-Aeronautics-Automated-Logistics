@@ -10,12 +10,15 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.ArrayList;
 import java.util.Set;
+import java.util.Collection;
 import net.createmod.catnip.outliner.Outliner;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry;
 
 public final class LogisticsClientOverlays {
     private static final int LANDING_COLOR = 0x95E06C;
@@ -31,6 +34,7 @@ public final class LogisticsClientOverlays {
     private static final int END_COLOR = 0xFFD36C;
     private static final int DOCK_COLOR = 0x7AD7FF;
     private static final int CARGO_COLOR = 0x9BEA8B;
+    private static final int TRANSPONDER_COLOR = 0xBFEFFF;
     private static final int[] LINK_CANDIDATE_COLORS = new int[]{0xFFE37A, 0xFFC84D};
     private static final int LANDING_SEGMENTS = 48;
     private static final int LATITUDE_RINGS = 5;
@@ -38,6 +42,7 @@ public final class LogisticsClientOverlays {
 
     private static Optional<LandingAreaOverlay> landingAreaOverlay = Optional.empty();
     private static Optional<BlockPos> dockOverlay = Optional.empty();
+    private static Optional<BlockPos> shipTransponderOverlay = Optional.empty();
     private static List<BlockPos> dockLinkCandidates = List.of();
     private static List<BlockPos> cargoOverlay = List.of();
     private static List<List<BlockPos>> cargoOverlayGroups = List.of();
@@ -45,6 +50,7 @@ public final class LogisticsClientOverlays {
     private static List<Vec3> flightPath = List.of();
     private static List<Integer> flightPathLegEnds = List.of();
     private static Optional<UUID> previewedRouteId = Optional.empty();
+    private static Optional<BlockPos> previewedTransponderPos = Optional.empty();
 
     private LogisticsClientOverlays() {
     }
@@ -79,6 +85,32 @@ public final class LogisticsClientOverlays {
     public static void clearDock() {
         dockOverlay.ifPresent(LogisticsClientOverlays::removeDock);
         dockOverlay = Optional.empty();
+    }
+
+    public static void clearDockIfMatches(Optional<BlockPos> dockPos) {
+        if (dockPos.isPresent() && dockOverlay.filter(dockPos.get()::equals).isPresent()) {
+            clearDock();
+        }
+    }
+
+    public static void setShipTransponderHighlight(BlockPos transponderPos) {
+        Optional<BlockPos> normalized = Optional.of(transponderPos.immutable());
+        if (shipTransponderOverlay.equals(normalized)) {
+            return;
+        }
+        clearShipTransponderHighlight();
+        shipTransponderOverlay = normalized;
+    }
+
+    public static void clearShipTransponderHighlight() {
+        shipTransponderOverlay.ifPresent(LogisticsClientOverlays::removeShipTransponderHighlight);
+        shipTransponderOverlay = Optional.empty();
+    }
+
+    public static void clearShipTransponderHighlightIfMatches(BlockPos transponderPos) {
+        if (shipTransponderOverlay.filter(transponderPos::equals).isPresent()) {
+            clearShipTransponderHighlight();
+        }
     }
 
     public static void setDockLinkCandidates(List<BlockPos> candidatePositions) {
@@ -140,6 +172,13 @@ public final class LogisticsClientOverlays {
         cargoOverlayGroups = List.of();
     }
 
+    public static void clearCargoIfMatches(List<List<BlockPos>> cargoPositionGroups) {
+        List<List<BlockPos>> normalized = normalizeCargoGroups(cargoPositionGroups);
+        if (!normalized.isEmpty() && cargoOverlayGroups.equals(normalized)) {
+            clearCargo();
+        }
+    }
+
     public static void setCargoLinkCandidates(List<List<BlockPos>> candidateGroups) {
         List<List<BlockPos>> normalized = normalizeCargoGroups(candidateGroups);
         if (cargoLinkCandidates.equals(normalized)) {
@@ -163,10 +202,11 @@ public final class LogisticsClientOverlays {
         return cargoOverlayGroups.equals(normalized) && !cargoOverlayGroups.isEmpty();
     }
 
-    public static void setFlightPath(List<Vec3> points, List<Integer> legEndIndices) {
+    public static void setFlightPath(List<Vec3> points, List<Integer> legEndIndices, BlockPos transponderPos) {
         removeFlightPath(flightPath);
         flightPath = List.copyOf(points);
         flightPathLegEnds = List.copyOf(legEndIndices);
+        previewedTransponderPos = Optional.ofNullable(transponderPos).map(BlockPos::immutable);
     }
 
     public static void setPreviewedRouteId(UUID routeId) {
@@ -177,11 +217,62 @@ public final class LogisticsClientOverlays {
         return previewedRouteId;
     }
 
+    public static Optional<BlockPos> previewedTransponderPos() {
+        return previewedTransponderPos;
+    }
+
     public static void clearFlightPath() {
         removeFlightPath(flightPath);
         flightPath = List.of();
         flightPathLegEnds = List.of();
         previewedRouteId = Optional.empty();
+        previewedTransponderPos = Optional.empty();
+    }
+
+    public static void clearFlightPathIfPreviewingTransponder(BlockPos transponderPos) {
+        if (previewedTransponderPos.filter(transponderPos::equals).isPresent()) {
+            clearFlightPath();
+        }
+    }
+
+    public static void clearFlightPathIfPreviewingRoutes(Collection<RouteSegment> routes) {
+        if (previewedRouteId.isEmpty()) {
+            return;
+        }
+        boolean matches = routes.stream().map(route -> route.id().value()).anyMatch(previewedRouteId.get()::equals);
+        if (matches) {
+            clearFlightPath();
+        }
+    }
+
+    public static void clearFlightPathIfPreviewingTransponderRoutes(UUID transponderId) {
+        if (previewedRouteId.isEmpty()) {
+            return;
+        }
+        boolean matches = RouteSegmentRegistry.forTransponder(transponderId).stream()
+                .map(route -> route.id().value())
+                .anyMatch(previewedRouteId.get()::equals);
+        if (matches) {
+            clearFlightPath();
+        }
+    }
+
+    public static void clearFlightPathIfPreviewingStationRoutes(UUID stationId) {
+        if (previewedRouteId.isEmpty()) {
+            return;
+        }
+        boolean matches = RouteSegmentRegistry.connectedToStation(stationId).stream()
+                .map(route -> route.id().value())
+                .anyMatch(previewedRouteId.get()::equals);
+        if (matches) {
+            clearFlightPath();
+        }
+    }
+
+    public static void clearLandingAreaIfMatches(BlockPos stationPos) {
+        if (landingAreaOverlay.filter(overlay -> overlay.stationPos().equals(stationPos)).isPresent()) {
+            clearLandingArea();
+        }
     }
 
     public static boolean hasFlightPath() {
@@ -194,6 +285,7 @@ public final class LogisticsClientOverlays {
             showDockLinkCandidates(dockLinkCandidates);
         }
         dockOverlay.ifPresent(LogisticsClientOverlays::showDock);
+        shipTransponderOverlay.ifPresent(LogisticsClientOverlays::showShipTransponderHighlight);
         if (!cargoLinkCandidates.isEmpty()) {
             showCargoCandidates(cargoLinkCandidates);
         }
@@ -266,6 +358,19 @@ public final class LogisticsClientOverlays {
 
     private static void removeDock(BlockPos dockPos) {
         Outliner.getInstance().remove(Pair.of("dock_overlay", dockPos));
+    }
+
+    private static void showShipTransponderHighlight(BlockPos transponderPos) {
+        Outliner.getInstance()
+                .showAABB(Pair.of("ship_transponder_overlay", transponderPos), AABB.ofSize(Vec3.atCenterOf(transponderPos), 1.08D, 1.08D, 1.08D))
+                .colored(TRANSPONDER_COLOR)
+                .lineWidth(1 / 10f)
+                .disableLineNormals()
+                .withFaceTexture(AllSpecialTextures.SELECTION);
+    }
+
+    private static void removeShipTransponderHighlight(BlockPos transponderPos) {
+        Outliner.getInstance().remove(Pair.of("ship_transponder_overlay", transponderPos));
     }
 
     private static void showDockLinkCandidates(List<BlockPos> dockPositions) {

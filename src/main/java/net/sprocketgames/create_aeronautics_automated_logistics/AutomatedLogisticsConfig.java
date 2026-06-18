@@ -22,11 +22,17 @@ public class AutomatedLogisticsConfig {
     public static final ModConfigSpec.IntValue STATION_DOCK_SEARCH_RADIUS;
     public static final ModConfigSpec.IntValue DOCK_LOCK_TIMEOUT_TICKS;
     public static final ModConfigSpec.IntValue DOCK_IDLE_TIMEOUT_TICKS;
+    public static final ModConfigSpec.BooleanValue FORCE_LOAD_STATION_CHUNKS;
 
     public static final ModConfigSpec.IntValue MAX_ACTIVE_VEHICLES_PER_PLAYER;
     public static final ModConfigSpec.BooleanValue RESTRICT_TRANSPONDER_CONTROL_TO_OWNER;
     public static final ModConfigSpec.BooleanValue REQUIRE_CROUCH_TO_BREAK_ROUTE_BLOCKS;
     public static final ModConfigSpec.BooleanValue DEBUG_LOGGING;
+    public static final ModConfigSpec.BooleanValue DEBUG_PLAYBACK;
+    public static final ModConfigSpec.BooleanValue DEBUG_VEHICLE;
+    public static final ModConfigSpec.BooleanValue DEBUG_DOCKING;
+    public static final ModConfigSpec.BooleanValue DEBUG_CARGO;
+    public static final ModConfigSpec.BooleanValue DEBUG_UI_SYNC;
 
     static final ModConfigSpec SPEC;
 
@@ -80,6 +86,10 @@ public class AutomatedLogisticsConfig {
         DOCK_IDLE_TIMEOUT_TICKS = BUILDER
                 .comment("Maximum ticks to wait for dock transfer activity to become idle before continuing.")
                 .defineInRange("dockIdleTimeoutTicks", 20 * 120, 20, 20 * 60 * 30);
+        FORCE_LOAD_STATION_CHUNKS = BUILDER
+                .comment("Keep Airship Station chunks force-loaded so route starts, docking, and stop context remain available even when players move away.")
+                .comment("Disable this if you prefer to manage loading with another chunk-loader mod.")
+                .define("forceLoadStationChunks", true);
         BUILDER.pop();
 
         BUILDER.push("limits");
@@ -96,8 +106,23 @@ public class AutomatedLogisticsConfig {
 
         BUILDER.push("debug");
         DEBUG_LOGGING = BUILDER
-                .comment("Enable verbose automated logistics debug logging.")
+                .comment("Enable automated logistics debug logging.")
                 .define("debugLogging", false);
+        DEBUG_PLAYBACK = BUILDER
+                .comment("Enable playback/runtime debug logs, including unloaded-transit progress and restore.")
+                .define("playback", true);
+        DEBUG_VEHICLE = BUILDER
+                .comment("Enable low-level vehicle/Sable controller debug logs.")
+                .define("vehicle", true);
+        DEBUG_DOCKING = BUILDER
+                .comment("Enable docking connector discovery and docking-runtime debug logs.")
+                .define("docking", true);
+        DEBUG_CARGO = BUILDER
+                .comment("Enable cargo endpoint, cargo wait, and cargo saved-data debug logs.")
+                .define("cargo", true);
+        DEBUG_UI_SYNC = BUILDER
+                .comment("Enable station/transponder menu, sync, and state-refresh debug logs.")
+                .define("uiSync", true);
         BUILDER.pop();
 
         SPEC = BUILDER.build();
@@ -107,12 +132,36 @@ public class AutomatedLogisticsConfig {
         return DEBUG_LOGGING.get();
     }
 
+    public static boolean debugPlayback() {
+        return DEBUG_PLAYBACK.get();
+    }
+
+    public static boolean debugVehicle() {
+        return DEBUG_VEHICLE.get();
+    }
+
+    public static boolean debugDocking() {
+        return DEBUG_DOCKING.get();
+    }
+
+    public static boolean debugCargo() {
+        return DEBUG_CARGO.get();
+    }
+
+    public static boolean debugUiSync() {
+        return DEBUG_UI_SYNC.get();
+    }
+
     public static boolean requireCrouchToBreakRouteBlocks() {
         return REQUIRE_CROUCH_TO_BREAK_ROUTE_BLOCKS.get();
     }
 
     public static boolean allowOneWayRoutePlans() {
         return ALLOW_ONE_WAY_ROUTE_PLANS.get();
+    }
+
+    public static boolean forceLoadStationChunks() {
+        return FORCE_LOAD_STATION_CHUNKS.get();
     }
 
 }

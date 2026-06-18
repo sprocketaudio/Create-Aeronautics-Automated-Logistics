@@ -27,7 +27,7 @@ public final class ScheduleRouteCleanup {
         AirshipSchedule cleaned = pruneInvalidEntries(level, transponder.transponderId(), current);
         int removed = current.entries().size() - cleaned.entries().size();
         if (removed > 0) {
-            CreateAeronauticsAutomatedLogistics.debugLog(
+            CreateAeronauticsAutomatedLogistics.debugPlayback(
                     "Pruned {} stale schedule entr(y/ies) from transponder {}",
                     removed,
                     transponder.transponderId()
@@ -87,6 +87,14 @@ public final class ScheduleRouteCleanup {
 
     public static void removeRoutesForDeletedTransponder(ServerLevel level, UUID transponderId) {
         List<RouteSegment> affected = RouteSegmentRegistry.forTransponder(transponderId);
+        for (var snapshot : AirshipStationRegistry.knownStations(level.dimension())) {
+            if (!(level.getBlockEntity(snapshot.stationPos()) instanceof AirshipStationBlockEntity station)) {
+                continue;
+            }
+            if (station.selectedTransponderId().filter(transponderId::equals).isPresent()) {
+                station.clearSelectedShip();
+            }
+        }
         if (affected.isEmpty()) {
             return;
         }
@@ -97,17 +105,27 @@ public final class ScheduleRouteCleanup {
         pruneLoadedTransponderSchedules(level);
     }
 
+    public static void pruneLoadedSchedulesForChangedRoutes(ServerLevel level) {
+        pruneLoadedTransponderSchedules(level);
+    }
+
     public static int pruneInvalidRouteSegments(ServerLevel level, AirshipStationBlockEntity station) {
         List<UUID> invalidSegmentIds = station.routeSegments().stream()
                 .filter(segment -> !segment.dimension().equals(level.dimension())
-                        || RouteSegmentRegistry.byId(segment.id())
-                                .filter(candidate -> candidate.equals(segment))
-                                .isEmpty()
-                        || shipMissing(level, segment.transponderId())
                         || stationMissing(level, segment.startStationId())
-                        || stationMissing(level, segment.endStationId()))
+                        || stationMissing(level, segment.endStationId())
+                        || transponderMissing(level, segment.transponderId()))
                 .map(segment -> segment.id().value())
                 .toList();
+        if (!invalidSegmentIds.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugPlayback(
+                "Pruning {} invalid route segment(s) from station {} at {} ids={}",
+                    invalidSegmentIds.size(),
+                    station.stationId(),
+                    station.getBlockPos(),
+                    invalidSegmentIds
+            );
+        }
         invalidSegmentIds.forEach(station::removeRouteSegment);
         return invalidSegmentIds.size();
     }
@@ -188,22 +206,21 @@ public final class ScheduleRouteCleanup {
                 .filter(candidate -> candidate.transponderId().equals(transponderId))
                 .filter(candidate -> !stationMissing(level, candidate.startStationId()))
                 .filter(candidate -> !stationMissing(level, candidate.endStationId()))
-                .filter(candidate -> !shipMissing(level, candidate.transponderId()))
                 .or(() -> RouteSegmentResolver.newestFor(
                         startStationId,
                         targetStationId,
                         level.dimension(),
                         Optional.of(transponderId)
                 ).filter(candidate -> !stationMissing(level, candidate.startStationId()))
-                        .filter(candidate -> !stationMissing(level, candidate.endStationId()))
-                        .filter(candidate -> !shipMissing(level, candidate.transponderId())));
+                        .filter(candidate -> !stationMissing(level, candidate.endStationId())));
     }
 
     private static boolean stationMissing(ServerLevel level, UUID stationId) {
         return IdentityDirectorySavedData.get(level.getServer()).station(stationId).isEmpty();
     }
 
-    private static boolean shipMissing(ServerLevel level, UUID transponderId) {
+    private static boolean transponderMissing(ServerLevel level, UUID transponderId) {
         return IdentityDirectorySavedData.get(level.getServer()).ship(transponderId).isEmpty();
     }
+
 }

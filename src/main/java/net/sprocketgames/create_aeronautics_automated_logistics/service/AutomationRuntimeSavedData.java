@@ -81,7 +81,7 @@ public class AutomationRuntimeSavedData extends SavedData {
         }
         lastLoggedPlaybackCount = playbackCount;
         lastLoggedScheduleCount = scheduleCount;
-        CreateAeronauticsAutomatedLogistics.debugLog(
+        CreateAeronauticsAutomatedLogistics.debugPlayback(
                 "Automation runtime {}: {} active playback(s), {} active schedule(s)",
                 action,
                 playbackCount,

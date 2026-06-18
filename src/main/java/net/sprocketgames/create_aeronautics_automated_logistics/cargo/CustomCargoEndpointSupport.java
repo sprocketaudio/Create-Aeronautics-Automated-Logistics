@@ -319,7 +319,7 @@ final class CustomCargoEndpointSupport {
     private static @Nullable EndpointCapture captureRs2Exporter(BlockEntity blockEntity) {
         Object storageComponent = resolveRs2StorageComponent(blockEntity);
         if (storageComponent == null) {
-            CreateAeronauticsAutomatedLogistics.debugLog(
+            CreateAeronauticsAutomatedLogistics.debugCargo(
                     "RS2 exporter capture failed at {}: no storage component",
                     blockEntity.getBlockPos()
             );
@@ -331,7 +331,7 @@ final class CustomCargoEndpointSupport {
         Object simulateAction = enumConstant(RS2_ACTION, "SIMULATE");
         Object emptyActor = staticFieldValue(RS2_ACTOR, "EMPTY");
         if (simulateAction == null || emptyActor == null) {
-            CreateAeronauticsAutomatedLogistics.debugLog(
+            CreateAeronauticsAutomatedLogistics.debugCargo(
                     "RS2 exporter capture failed at {}: simulateAction={} emptyActor={}",
                     blockEntity.getBlockPos(),
                     simulateAction != null,

@@ -18,6 +18,7 @@ import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
@@ -30,9 +31,11 @@ import net.sprocketgames.create_aeronautics_automated_logistics.AutomatedLogisti
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.AirshipStationBlock;
 import net.sprocketgames.create_aeronautics_automated_logistics.cargo.CargoLinkDiscovery;
+import net.sprocketgames.create_aeronautics_automated_logistics.cargo.CargoLinkSupport;
 import net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry;
 import net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoSummary;
 import net.sprocketgames.create_aeronautics_automated_logistics.cargo.StationCargoSavedData;
+import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.LogisticsClientOverlays;
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockDiscoveryResult;
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockLinkStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockingConnectorDiscovery;
@@ -56,6 +59,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipStat
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RecordingSession;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.StationChunkLoadingService;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerRef;
 
 public class AirshipStationBlockEntity extends BlockEntity implements MenuProvider {
@@ -112,6 +116,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     private final List<LinkedCargoEntry> linkedCargo = new ArrayList<>();
     private @Nullable LinkedCargoSummary syncedLinkedCargoSummary;
     private int linkedCargoRevision;
+    private boolean linkedCargoRestoreMissLogged;
 
     public AirshipStationBlockEntity(BlockPos pos, BlockState blockState) {
         super(ModBlockEntities.AIRSHIP_STATION.get(), pos, blockState);
@@ -130,7 +135,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     @Override
     public void onLoad() {
         super.onLoad();
-        CreateAeronauticsAutomatedLogistics.debugLog(
+        CreateAeronauticsAutomatedLogistics.debugUi(
                 "Station onLoad id={} pos={} linkedCargoCount={} levelClient={}",
                 stationId,
                 worldPosition,
@@ -159,8 +164,35 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
             refreshGroundDockLink(serverLevel);
             selectedTransponderId.ifPresent(transponderId ->
                     AutomatedLogisticsServices.SCHEDULES.reconcileRuntimeStatus(serverLevel, transponderId));
+            if (player instanceof ServerPlayer serverPlayer) {
+                AirshipStationMenu menu = new AirshipStationMenu(
+                        containerId,
+                        playerInventory,
+                        worldPosition,
+                        selectedTransponderId(),
+                        selectedShipName(),
+                        linkedCargoRevision(),
+                        linkedCargoSummary(),
+                        linkedCargo(),
+                        selectedTransponderId().flatMap(AutomatedLogisticsServices.SCHEDULES::lastCargoFailureContext),
+                        AirshipStationMenu.buildRouteChoiceSummaries(serverPlayer, this)
+                );
+                menu.setClientState(AirshipStationMenu.buildClientState(serverPlayer, this));
+                return menu;
+            }
         }
-        return new AirshipStationMenu(containerId, playerInventory, worldPosition);
+        return new AirshipStationMenu(
+                containerId,
+                playerInventory,
+                worldPosition,
+                selectedTransponderId(),
+                selectedShipName(),
+                linkedCargoRevision(),
+                linkedCargoSummary(),
+                linkedCargo(),
+                Optional.empty(),
+                List.of()
+        );
     }
 
     public RouteStatus status() {
@@ -239,6 +271,17 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         syncClientState();
     }
 
+    public void clearSelectedShip() {
+        if (selectedTransponderId.isEmpty() && (selectedShipName == null || selectedShipName.isBlank())) {
+            return;
+        }
+        selectedTransponderId = Optional.empty();
+        selectedShipName = "";
+        failureReason = Optional.empty();
+        setChanged();
+        syncClientState();
+    }
+
     public Optional<BlockPos> groundDockPos() {
         return groundDockPos;
     }
@@ -285,7 +328,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
 
     public int addLinkedCargoEntries(List<LinkedCargoEntry> entries) {
         ensureLinkedCargoLoaded();
-        CreateAeronauticsAutomatedLogistics.debugLog(
+        CreateAeronauticsAutomatedLogistics.debugUi(
                 "Station addLinkedCargoEntries start id={} pos={} existingCount={} incomingCount={}",
                 stationId,
                 worldPosition,
@@ -306,7 +349,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
             setChanged();
             persistLinkedCargo();
             syncClientState();
-            CreateAeronauticsAutomatedLogistics.debugLog(
+            CreateAeronauticsAutomatedLogistics.debugUi(
                     "Station addLinkedCargoEntries saved id={} pos={} added={} newCount={}",
                     stationId,
                     worldPosition,
@@ -321,7 +364,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         ensureLinkedCargoLoaded();
         if (linkedCargo.isEmpty()) {
             persistLinkedCargo();
-            CreateAeronauticsAutomatedLogistics.debugLog(
+            CreateAeronauticsAutomatedLogistics.debugUi(
                     "Station clearLinkedCargo no-op id={} pos={} count=0",
                     stationId,
                     worldPosition
@@ -333,7 +376,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         setChanged();
         persistLinkedCargo();
         syncClientState();
-        CreateAeronauticsAutomatedLogistics.debugLog(
+        CreateAeronauticsAutomatedLogistics.debugUi(
                 "Station clearLinkedCargo cleared id={} pos={}",
                 stationId,
                 worldPosition
@@ -636,6 +679,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         );
         AirshipStationRegistry.register(snapshot);
         IdentityDirectorySavedData.upsertStation(((ServerLevel) level).getServer(), snapshot);
+        StationChunkLoadingService.track((ServerLevel) level, stationId, worldPosition);
     }
 
     private RouteStatus statusForFailure(FailureReason reason) {
@@ -683,11 +727,12 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         tag.putInt(LINKED_CARGO_ITEM_COUNT, summary.itemLinks());
         tag.putInt(LINKED_CARGO_FLUID_COUNT, summary.fluidLinks());
         tag.putInt(LINKED_CARGO_REVISION, linkedCargoRevision);
-        CreateAeronauticsAutomatedLogistics.debugLog(
-                "Station writeStationData id={} pos={} linkedCargoCount={} includeFailure={} liveSync={}",
+        CreateAeronauticsAutomatedLogistics.debugUi(
+                "Station writeStationData id={} pos={} linkedCargoCount={} routeSegmentCount={} includeFailure={} liveSync={}",
                 stationId,
                 worldPosition,
                 linkedCargo.size(),
+                routeSegments.size(),
                 includeFailure,
                 tag.getBoolean(LIVE_SYNC)
         );
@@ -795,11 +840,12 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         }
         syncedLinkedCargoSummary = readLinkedCargoSummary(tag);
         linkedCargoRevision = tag.getInt(LINKED_CARGO_REVISION);
-        CreateAeronauticsAutomatedLogistics.debugLog(
-                "Station loadAdditional id={} pos={} linkedCargoCount={} hadLinkedCargoTag={} liveSync={}",
+        CreateAeronauticsAutomatedLogistics.debugUi(
+                "Station loadAdditional id={} pos={} linkedCargoCount={} routeSegmentCount={} hadLinkedCargoTag={} liveSync={}",
                 stationId,
                 worldPosition,
                 linkedCargo.size(),
+                routeSegments.size(),
                 tag.contains(LINKED_CARGO, Tag.TAG_LIST),
                 liveSync
         );
@@ -814,10 +860,6 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
 
     @Override
     public void setRemoved() {
-        if (level != null && !level.isClientSide) {
-            AirshipStationRegistry.unregister(stationId);
-            RouteSegmentRegistry.unregisterStartStation(stationId);
-        }
         super.setRemoved();
     }
 
@@ -836,6 +878,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         AirshipStationRegistry.register(snapshot);
         if (level instanceof ServerLevel serverLevel) {
             IdentityDirectorySavedData.upsertStation(serverLevel.getServer(), snapshot);
+            StationChunkLoadingService.track(serverLevel, stationId, worldPosition);
             RouteSegmentRegistry.replaceForStartStation(stationId, routeSegmentsOwnedByThisStation());
         }
     }
@@ -903,11 +946,6 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         if (!linkedCargo.isEmpty() || !(level instanceof ServerLevel serverLevel)) {
             return;
         }
-        CreateAeronauticsAutomatedLogistics.debugLog(
-                "Station ensureLinkedCargoLoaded attempting restore id={} pos={}",
-                stationId,
-                worldPosition
-        );
         loadLinkedCargoFromSavedData(serverLevel);
     }
 
@@ -917,17 +955,21 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         }
         List<LinkedCargoEntry> restored = StationCargoSavedData.entries(level.getServer(), stationId, worldPosition);
         if (restored.isEmpty()) {
-            CreateAeronauticsAutomatedLogistics.debugLog(
-                    "Station loadLinkedCargoFromSavedData miss id={} pos={}",
-                    stationId,
-                    worldPosition
-            );
+            if (!linkedCargoRestoreMissLogged) {
+                CreateAeronauticsAutomatedLogistics.debugUi(
+                        "Station loadLinkedCargoFromSavedData miss id={} pos={}",
+                        stationId,
+                        worldPosition
+                );
+                linkedCargoRestoreMissLogged = true;
+            }
             return false;
         }
         linkedCargo.clear();
         linkedCargo.addAll(restored);
+        linkedCargoRestoreMissLogged = false;
         StationCargoSavedData.put(level.getServer(), stationId, worldPosition, linkedCargo);
-        CreateAeronauticsAutomatedLogistics.debugLog(
+        CreateAeronauticsAutomatedLogistics.debugUi(
                 "Station loadLinkedCargoFromSavedData restored id={} pos={} restoredCount={}",
                 stationId,
                 worldPosition,
@@ -943,8 +985,9 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     }
 
     private void persistLinkedCargo(ServerLevel level) {
+        linkedCargoRestoreMissLogged = false;
         if (linkedCargo.isEmpty()) {
-            CreateAeronauticsAutomatedLogistics.debugLog(
+            CreateAeronauticsAutomatedLogistics.debugUi(
                     "Station persistLinkedCargo remove id={} pos={}",
                     stationId,
                     worldPosition
@@ -952,7 +995,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
             StationCargoSavedData.remove(level.getServer(), stationId);
             return;
         }
-        CreateAeronauticsAutomatedLogistics.debugLog(
+        CreateAeronauticsAutomatedLogistics.debugUi(
                 "Station persistLinkedCargo put id={} pos={} count={}",
                 stationId,
                 worldPosition,

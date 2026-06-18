@@ -47,17 +47,19 @@ public record SyncTransponderOwnedSchedulePayload(BlockPos transponderPos, Compo
     public static void handle(SyncTransponderOwnedSchedulePayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             AirshipSchedule schedule = AirshipScheduleNbtSerializer.read(payload.scheduleTag());
+            BlockPos zero = BlockPos.ZERO;
             if (Minecraft.getInstance().level == null) {
                 return;
             }
             if (!(Minecraft.getInstance().level.getBlockEntity(payload.transponderPos()) instanceof ShipTransponderBlockEntity transponder)) {
                 if (Minecraft.getInstance().player != null
                         && Minecraft.getInstance().player.containerMenu instanceof ShipTransponderMenu menu
-                        && menu.transponderPos().equals(payload.transponderPos())) {
+                        && (menu.transponderPos().equals(payload.transponderPos()) || menu.transponderPos().equals(zero))) {
                     menu.setClientOwnedSchedule(schedule);
                 }
                 if (Minecraft.getInstance().screen instanceof ShipTransponderScreen screen
-                        && screen.getMenu().transponderPos().equals(payload.transponderPos())) {
+                        && (screen.getMenu().transponderPos().equals(payload.transponderPos())
+                        || screen.getMenu().transponderPos().equals(zero))) {
                     screen.getMenu().setClientOwnedSchedule(schedule);
                 }
                 return;
@@ -65,8 +67,13 @@ public record SyncTransponderOwnedSchedulePayload(BlockPos transponderPos, Compo
             transponder.setOwnedSchedule(schedule);
             if (Minecraft.getInstance().player != null
                     && Minecraft.getInstance().player.containerMenu instanceof ShipTransponderMenu menu
-                    && menu.transponderPos().equals(payload.transponderPos())) {
+                    && (menu.transponderPos().equals(payload.transponderPos()) || menu.transponderPos().equals(zero))) {
                 menu.setClientOwnedSchedule(schedule);
+            }
+            if (Minecraft.getInstance().screen instanceof ShipTransponderScreen screen
+                    && (screen.getMenu().transponderPos().equals(payload.transponderPos())
+                    || screen.getMenu().transponderPos().equals(zero))) {
+                screen.getMenu().setClientOwnedSchedule(schedule);
             }
         });
     }

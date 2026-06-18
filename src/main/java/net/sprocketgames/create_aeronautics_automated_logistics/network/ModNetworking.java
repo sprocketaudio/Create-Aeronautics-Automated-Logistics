@@ -35,6 +35,16 @@ public final class ModNetworking {
                 OpenInstalledScheduleEditorPayload::handle
         );
         registrar.playToServer(
+                ShipTransponderMenuActionPayload.TYPE,
+                ShipTransponderMenuActionPayload.STREAM_CODEC,
+                ShipTransponderMenuActionPayload::handle
+        );
+        registrar.playToServer(
+                AirshipStationMenuActionPayload.TYPE,
+                AirshipStationMenuActionPayload.STREAM_CODEC,
+                AirshipStationMenuActionPayload::handle
+        );
+        registrar.playToServer(
                 ReopenShipTransponderPayload.TYPE,
                 ReopenShipTransponderPayload.STREAM_CODEC,
                 ReopenShipTransponderPayload::handle
@@ -90,6 +100,11 @@ public final class ModNetworking {
                 SetMenuActionBarMessagePayload::handle
         );
         registrar.playToClient(
+                ShowShipTransponderHighlightPayload.TYPE,
+                ShowShipTransponderHighlightPayload.STREAM_CODEC,
+                ShowShipTransponderHighlightPayload::handle
+        );
+        registrar.playToClient(
                 SetTransponderRecordingStatePayload.TYPE,
                 SetTransponderRecordingStatePayload.STREAM_CODEC,
                 SetTransponderRecordingStatePayload::handle
@@ -98,6 +113,11 @@ public final class ModNetworking {
                 SyncTransponderOwnedSchedulePayload.TYPE,
                 SyncTransponderOwnedSchedulePayload.STREAM_CODEC,
                 SyncTransponderOwnedSchedulePayload::handle
+        );
+        registrar.playToClient(
+                SyncTransponderMenuStatePayload.TYPE,
+                SyncTransponderMenuStatePayload.STREAM_CODEC,
+                SyncTransponderMenuStatePayload::handle
         );
         registrar.playToClient(
                 SyncStationRouteChoicesPayload.TYPE,

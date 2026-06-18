@@ -41,8 +41,49 @@ public record ReopenShipTransponderPayload(BlockPos transponderPos, boolean reco
             return;
         }
         transponder.refreshRuntimeShip(player.serverLevel());
+        transponder.refreshShipDockLink(player.serverLevel());
+        net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES
+                .reconcileRuntimeStatus(player.serverLevel(), transponder);
         ShipTransponderMenu.InitialRecordingState recordingState =
                 ShipTransponderMenu.resolveInitialRecordingState(player, transponder, payload.recordingMode());
+        ShipTransponderMenu statusMenu = new ShipTransponderMenu(
+                0,
+                player.getInventory(),
+                payload.transponderPos(),
+                recordingState.recordingMode(),
+                recordingState.recordingSessionActive(),
+                recordingState.appendToSchedule(),
+                transponder.recordingDestinationStationId(),
+                transponder.runtimeStatus(),
+                transponder.dockOutputActive(),
+                transponder.hasOwnedStops(),
+                transponder.ownedSchedule(),
+                transponder.linkedCargoRevision(),
+                transponder.linkedCargoSummary(),
+                transponder.linkedCargo(),
+                net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES
+                        .lastCargoFailureContext(transponder.transponderId()),
+                net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES
+                        .lastFailure(transponder.transponderId()),
+                ShipTransponderMenu.StatusSnapshot.idle()
+        );
+        ShipTransponderMenu.StatusSnapshot statusSnapshot = statusMenu.buildStatusSnapshot(player);
+        CreateAeronauticsAutomatedLogistics.debugUi(
+                "Transponder reopenMenu id={} pos={} player={} spectator={} recordingMode={} runtimeStatus={} scheduleActive={} scheduleHeld={} dockOutput={} hasOwnedStops={} ownedStopsCount={} snapshotText='{}' snapshotColor={}",
+                transponder.transponderId(),
+                payload.transponderPos(),
+                player.getName().getString(),
+                player.isSpectator(),
+                recordingState.recordingMode(),
+                transponder.runtimeStatus(),
+                transponder.scheduleActive(),
+                transponder.scheduleHeld(),
+                transponder.dockOutputActive(),
+                transponder.hasOwnedStops(),
+                transponder.ownedSchedule().entries().size(),
+                statusSnapshot.text(),
+                Integer.toHexString(statusSnapshot.color())
+        );
         player.openMenu(transponder, buffer -> {
             buffer.writeBlockPos(payload.transponderPos());
             buffer.writeBoolean(recordingState.recordingMode());
@@ -62,6 +103,12 @@ public record ReopenShipTransponderPayload(BlockPos transponderPos, boolean reco
                     net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES
                             .lastCargoFailureContext(transponder.transponderId())
             );
+            ShipTransponderMenu.writePlaybackFailure(
+                    buffer,
+                    net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES
+                            .lastFailure(transponder.transponderId())
+            );
+            ShipTransponderMenu.writeStatusSnapshot(buffer, statusSnapshot);
         });
     }
 }

@@ -26,7 +26,7 @@ public final class DockingRuntime {
         }
         context.station().setDockOutputActive(true);
         context.transponder().setDockOutputActive(true);
-        CreateAeronauticsAutomatedLogistics.debugLog(
+        CreateAeronauticsAutomatedLogistics.debugDocking(
                 "Docking wait enabled outputs: stationDock={} shipDock={} route={}",
                 context.stationDockPos().map(BlockPos::toShortString).orElse("-"),
                 context.shipDockPos().map(BlockPos::toShortString).orElse("-"),
@@ -78,7 +78,7 @@ public final class DockingRuntime {
 
         DockingConnectorDiscovery.dockingConnector(level, stationDock).ifPresent(connector -> connector.unDock());
         DockingConnectorDiscovery.dockingConnector(level, shipDock).ifPresent(connector -> connector.unDock());
-        CreateAeronauticsAutomatedLogistics.debugLog(
+        CreateAeronauticsAutomatedLogistics.debugDocking(
                 "Docking wait reset connector pair: stationDock={} shipDock={} route={}",
                 stationDock.toShortString(),
                 shipDock.toShortString(),

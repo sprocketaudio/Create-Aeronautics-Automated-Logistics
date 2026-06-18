@@ -111,7 +111,7 @@ public class AirshipScheduleExecutionService {
     public void loadRuntime(MinecraftServer server, CompoundTag tag) {
         resetRuntime();
         if (tag == null) {
-            CreateAeronauticsAutomatedLogistics.debugLog("Loaded schedule runtime: no saved active schedules");
+            CreateAeronauticsAutomatedLogistics.debugPlayback("Loaded schedule runtime: no saved active schedules");
             return;
         }
         if (tag.contains(ACTIVE_SCHEDULES, Tag.TAG_LIST)) {
@@ -143,7 +143,7 @@ public class AirshipScheduleExecutionService {
                 }
             }
         }
-        CreateAeronauticsAutomatedLogistics.debugLog(
+        CreateAeronauticsAutomatedLogistics.debugPlayback(
                 "Loaded schedule runtime: {} active schedule(s), {} stored failure(s)",
                 activeSchedules.size(),
                 lastStartFailures.size()
@@ -162,8 +162,6 @@ public class AirshipScheduleExecutionService {
         Objects.requireNonNull(stationPos, "stationPos");
         Objects.requireNonNull(transponder, "transponder");
         Objects.requireNonNull(schedule, "schedule");
-
-        transponder.pruneInvalidOwnedSchedule(player.serverLevel());
 
         if (schedule.entries().isEmpty()) {
             station.setFailure(FailureReason.INVALID_ROUTE_DATA);
@@ -262,9 +260,6 @@ public class AirshipScheduleExecutionService {
         Objects.requireNonNull(player, "player");
         Objects.requireNonNull(transponder, "transponder");
         Objects.requireNonNull(schedule, "schedule");
-
-        transponder.pruneInvalidOwnedSchedule(player.serverLevel());
-        schedule = transponder.ownedSchedule();
 
         if (schedule.entries().isEmpty()) {
             transponder.setRuntimeStatus(RouteStatus.IDLE);
@@ -370,6 +365,66 @@ public class AirshipScheduleExecutionService {
         return nearestStartStation(level, transponder).map(AirshipStationBlockEntity::stationName);
     }
 
+    public boolean hasValidScheduleDefinition(
+            ServerLevel level,
+            ShipTransponderBlockEntity transponder,
+            AirshipSchedule schedule
+    ) {
+        if (schedule.entries().isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugUi(
+                    "Schedule definition invalid transponder={} reason=empty",
+                    transponder.transponderId()
+            );
+            return false;
+        }
+        int minimumStops = AutomatedLogisticsConfig.allowOneWayRoutePlans() ? 1 : 2;
+        if (schedule.entries().size() < minimumStops) {
+            CreateAeronauticsAutomatedLogistics.debugUi(
+                    "Schedule definition invalid transponder={} reason=too_few_entries entries={} minimum={} loop={}",
+                    transponder.transponderId(),
+                    schedule.entries().size(),
+                    minimumStops,
+                    schedule.loop()
+            );
+            return false;
+        }
+        UUID transponderId = transponder.transponderId();
+        for (AirshipScheduleEntry entry : schedule.entries()) {
+            if (entry.targetStationId().isEmpty()) {
+                CreateAeronauticsAutomatedLogistics.debugUi(
+                        "Schedule definition invalid transponder={} reason=entry_without_target schedule='{}'",
+                        transponderId,
+                        schedule.title()
+                );
+                return false;
+            }
+        }
+
+        Optional<ResolvedStartContext> startContext = resolveStartContext(level, transponder, schedule);
+        if (startContext.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugUi(
+                    "Schedule definition invalid transponder={} reason=no_runnable_start loop={} entries={}",
+                    transponderId,
+                    schedule.loop(),
+                    schedule.entries().stream()
+                            .map(entry -> entry.targetStationId().map(UUID::toString).orElse("none"))
+                            .toList()
+            );
+            return false;
+        }
+
+        CreateAeronauticsAutomatedLogistics.debugUi(
+                "Schedule definition checked transponder={} result=true startStation={} runtimeEntries={} loop={}",
+                transponderId,
+                startContext.get().stationId(),
+                startContext.get().runtimeSchedule().entries().stream()
+                        .map(entry -> entry.targetStationId().map(UUID::toString).orElse("none"))
+                        .toList(),
+                schedule.loop()
+        );
+        return true;
+    }
+
     public Optional<String> nextStopNameForCurrentStation(
             ServerLevel level,
             ShipTransponderBlockEntity transponder,
@@ -404,12 +459,18 @@ public class AirshipScheduleExecutionService {
         if (firstEntry.targetStationId().isEmpty()) {
             return Optional.empty();
         }
-        return firstEntry.pinnedSegmentId()
+        Optional<UUID> pinnedStart = firstEntry.pinnedSegmentId()
                 .flatMap(RouteSegmentRegistry::byId)
                 .filter(segment -> segment.dimension().equals(level.dimension()))
                 .filter(segment -> segment.transponderId().equals(transponderId))
                 .filter(segment -> segment.endStationId().equals(firstEntry.targetStationId().get()))
                 .map(RouteSegment::startStationId);
+        if (pinnedStart.isPresent()) {
+            return pinnedStart;
+        }
+        return RouteSegmentRegistry.endingAt(firstEntry.targetStationId().get(), level.dimension(), Optional.of(transponderId)).stream()
+                .map(RouteSegment::startStationId)
+                .findFirst();
     }
 
     private List<AirshipScheduleEntry> runtimeEntriesFromStopIndex(AirshipSchedule schedule, int stopIndex) {
@@ -462,7 +523,11 @@ public class AirshipScheduleExecutionService {
             }
             currentStationId = toStationId;
         }
-        return true;
+
+        if (schedule.loop()) {
+            return currentStationId.equals(startStationId);
+        }
+        return AutomatedLogisticsConfig.allowOneWayRoutePlans();
     }
 
     private Optional<CargoFailureContext> firstCargoStorageFailureContext(
@@ -829,11 +894,54 @@ public class AirshipScheduleExecutionService {
             }
 
             Optional<ShipTransponderBlockEntity> activeTransponder = transponderAt(level, active.transponderPos());
-            if (activeTransponder.isEmpty() || activeScheduleEntryMissing(activeTransponder.get(), active)) {
+            boolean routeStillActive = active.activeRouteId().map(this::playbackStillActive).orElse(false);
+            Optional<PlaybackFailure> terminalFailure = active.activeRouteId()
+                    .flatMap(AutomatedLogisticsServices.PLAYBACK::consumeTerminalRuntimeFailure);
+            if (terminalFailure.isPresent()) {
+                PlaybackFailure failure = terminalFailure.get();
+                stationAt(level, active.currentStationPos()).ifPresent(station -> station.failPlayback(failure.failureReason()));
+                activeTransponder.ifPresent(transponder -> {
+                    transponder.setRuntimeStatus(runtimeStatusForTerminalFailure(failure));
+                    syncTransponderClientState(transponder);
+                });
+                rememberRuntimeFailure(active.transponderId(), active.activeRouteId(), failure);
+                iterator.remove();
+                CreateAeronauticsAutomatedLogistics.LOGGER.warn(
+                        "Removing active schedule for transponder {} because route {} hit terminal runtime failure {}",
+                        active.transponderId(),
+                        active.activeRouteId().map(routeId -> routeId.value().toString()).orElse("none"),
+                        failure
+                );
+                continue;
+            }
+            if (activeTransponder.isEmpty()) {
+                if (routeStillActive) {
+                    if (server.getTickCount() % 20 == 0) {
+                        CreateAeronauticsAutomatedLogistics.debugPlayback(
+                                "Keeping active schedule for transponder {} while the transponder block entity is unloaded and route {} is still active",
+                                active.transponderId(),
+                                active.activeRouteId().map(routeId -> routeId.value().toString()).orElse("none")
+                        );
+                    }
+                    continue;
+                }
+                if (server.getTickCount() % 20 == 0) {
+                    CreateAeronauticsAutomatedLogistics.debugPlayback(
+                            "Keeping active schedule for transponder {} while the transponder block entity is unloaded and route {} is not active; waiting for loaded context before deciding whether to advance or stop",
+                            active.transponderId(),
+                            active.activeRouteId().map(routeId -> routeId.value().toString()).orElse("none")
+                    );
+                }
+                continue;
+            }
+            if (activeScheduleEntryMissing(activeTransponder.get(), active)) {
                 active.activeRouteId().ifPresent(routeId ->
-                        AutomatedLogisticsServices.PLAYBACK.holdPlayback(level, routeId, PlaybackFailure.INVALID_ROUTE));
-                activeTransponder.ifPresent(value -> value.setRuntimeStatus(RouteStatus.HELD_FAULTED));
-                rememberRuntimeFailure(active.transponderId(), active.activeRouteId(), PlaybackFailure.INVALID_ROUTE);
+                        AutomatedLogisticsServices.PLAYBACK.stopPlayback(level, routeId, FailureReason.NONE));
+                activeTransponder.ifPresent(value -> {
+                    value.setRuntimeStatus(RouteStatus.IDLE);
+                    syncTransponderClientState(value);
+                });
+                clearRememberedStartFailure(active.transponderId());
                 iterator.remove();
                 continue;
             }
@@ -844,10 +952,11 @@ public class AirshipScheduleExecutionService {
                 RouteId activeRouteId = active.activeRouteId().get();
                 Optional<PlaybackFailure> blocker = playbackBlocker(level, activeRouteId);
                 if (blocker.isPresent()) {
-                    AutomatedLogisticsServices.PLAYBACK.holdPlayback(level, activeRouteId, blocker.get());
+                    if (!AutomatedLogisticsServices.PLAYBACK.isHeld(activeRouteId)) {
+                        AutomatedLogisticsServices.PLAYBACK.holdPlayback(level, activeRouteId, blocker.get());
+                    }
                     activeTransponder.ifPresent(value -> value.setRuntimeStatus(RouteStatus.HELD_FAULTED));
                     rememberRuntimeFailure(active.transponderId(), Optional.of(activeRouteId), blocker.get());
-                    iterator.remove();
                     continue;
                 }
                 if (AutomatedLogisticsServices.PLAYBACK.isRunning(activeRouteId)
@@ -945,6 +1054,14 @@ public class AirshipScheduleExecutionService {
         }
     }
 
+    private RouteStatus runtimeStatusForTerminalFailure(PlaybackFailure failure) {
+        return switch (failure) {
+            case VEHICLE_MISSING, VEHICLE_UNLOADED, MISSING_CONTROLLER -> RouteStatus.MISSING_VEHICLE;
+            case INVALID_ROUTE, DIMENSION_MISMATCH -> RouteStatus.INVALID_ROUTE;
+            default -> RouteStatus.FAILED;
+        };
+    }
+
     private boolean activeScheduleEntryMissing(ShipTransponderBlockEntity transponder, ActiveAirshipSchedule active) {
         if (active.isFinished() || active.schedule().entries().isEmpty()) {
             return true;
@@ -969,10 +1086,13 @@ public class AirshipScheduleExecutionService {
     }
 
     private void stopLinkedOrphanPlaybacks(ServerLevel level, UUID transponderId) {
-        ShipTransponderRegistry.snapshot(transponderId)
-                .flatMap(ShipTransponderSnapshot::controllerRef)
-                .ifPresent(controllerRef ->
-                        AutomatedLogisticsServices.PLAYBACK.stopLinkedPlaybacks(level, controllerRef, FailureReason.NONE));
+        Optional<ShipTransponderSnapshot> snapshot = ShipTransponderRegistry.snapshot(transponderId);
+        AutomatedLogisticsServices.PLAYBACK.stopLinkedPlaybacks(
+                level,
+                snapshot.flatMap(ShipTransponderSnapshot::controllerRef),
+                snapshot.flatMap(ShipTransponderSnapshot::runtimeShipId),
+                FailureReason.NONE
+        );
     }
 
     public CompletionAdvanceResult advanceCompletedRoute(

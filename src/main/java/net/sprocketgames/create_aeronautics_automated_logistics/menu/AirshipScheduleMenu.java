@@ -34,6 +34,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegme
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitCondition;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.TransponderPermissionService;
 
 public class AirshipScheduleMenu extends AbstractContainerMenu {
@@ -168,14 +169,7 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
     @Override
     public boolean stillValid(Player player) {
         if (originTransponderPos != null) {
-            if (!(player.level().getBlockEntity(originTransponderPos) instanceof ShipTransponderBlockEntity transponder)) {
-                return false;
-            }
-            return player.distanceToSqr(
-                    originTransponderPos.getX() + 0.5D,
-                    originTransponderPos.getY() + 0.5D,
-                    originTransponderPos.getZ() + 0.5D
-            ) <= 64.0D;
+            return player.level().getBlockEntity(originTransponderPos) instanceof ShipTransponderBlockEntity;
         }
         return editableScheduleStack(player).isPresent();
     }
@@ -314,6 +308,7 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
             removeRouteFromLoadedStation(level, segment.endStationId(), segment.id().value());
             RouteSegmentRegistry.unregister(segment.id());
         }
+        ScheduleRouteCleanup.pruneLoadedSchedulesForChangedRoutes(level);
         actionBar(player, Component.translatable(
                 "message.create_aeronautics_automated_logistics.airship_schedule.stop_deleted_with_routes",
                 displayStationName(schedule.entries().get(removedIndex)),
@@ -321,7 +316,7 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         ));
         PacketDistributor.sendToPlayer(
                 serverPlayer,
-                new SetFlightPathPreviewPayload(false, List.of(), List.of())
+                new SetFlightPathPreviewPayload(false, List.of(), List.of(), Optional.empty())
         );
     }
 

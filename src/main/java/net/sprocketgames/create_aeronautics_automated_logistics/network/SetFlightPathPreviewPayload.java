@@ -2,6 +2,8 @@ package net.sprocketgames.create_aeronautics_automated_logistics.network;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -11,7 +13,12 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.LogisticsClientOverlays;
 
-public record SetFlightPathPreviewPayload(boolean enabled, List<Vec3> points, List<Integer> legEndIndices) implements CustomPacketPayload {
+public record SetFlightPathPreviewPayload(
+        boolean enabled,
+        List<Vec3> points,
+        List<Integer> legEndIndices,
+        Optional<BlockPos> transponderPos
+) implements CustomPacketPayload {
     public static final Type<SetFlightPathPreviewPayload> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath(CreateAeronauticsAutomatedLogistics.MOD_ID, "set_flight_path_preview")
     );
@@ -30,7 +37,10 @@ public record SetFlightPathPreviewPayload(boolean enabled, List<Vec3> points, Li
         for (int i = 0; i < legCount; i++) {
             legEndIndices.add(buffer.readVarInt());
         }
-        return new SetFlightPathPreviewPayload(enabled, points, legEndIndices);
+        Optional<BlockPos> transponderPos = buffer.readBoolean()
+                ? Optional.of(buffer.readBlockPos())
+                : Optional.empty();
+        return new SetFlightPathPreviewPayload(enabled, points, legEndIndices, transponderPos);
     }
 
     private void write(RegistryFriendlyByteBuf buffer) {
@@ -45,6 +55,8 @@ public record SetFlightPathPreviewPayload(boolean enabled, List<Vec3> points, Li
         for (Integer legEndIndex : legEndIndices) {
             buffer.writeVarInt(legEndIndex == null ? 0 : Math.max(0, legEndIndex));
         }
+        buffer.writeBoolean(transponderPos.isPresent());
+        transponderPos.ifPresent(buffer::writeBlockPos);
     }
 
     @Override
@@ -55,7 +67,11 @@ public record SetFlightPathPreviewPayload(boolean enabled, List<Vec3> points, Li
     public static void handle(SetFlightPathPreviewPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (payload.enabled()) {
-                LogisticsClientOverlays.setFlightPath(payload.points(), payload.legEndIndices());
+                LogisticsClientOverlays.setFlightPath(
+                        payload.points(),
+                        payload.legEndIndices(),
+                        payload.transponderPos().orElse(null)
+                );
             } else {
                 LogisticsClientOverlays.clearFlightPath();
             }
