@@ -14,6 +14,7 @@
   "message.create_aeronautics_automated_logistics.recording.linked_ship_missing": "Could not find an assembled Aeronautics ship containing the linked Autopilot Seat.",
   "message.create_aeronautics_automated_logistics.recording.no_selected_ship": "Select a named ship before recording a segment.",
   "message.create_aeronautics_automated_logistics.recording.selected_ship_unavailable": "Selected ship is unavailable. Make sure its Ship Transponder is loaded on an assembled ship.",
+  "message.create_aeronautics_automated_logistics.transponder.requires_valid_ship": "This Ship Transponder must be on a valid assembled ship before it can record routes, start schedules, or link ship hardware.",
   "message.create_aeronautics_automated_logistics.transponder_recording.choose_stations": "Choose an origin and destination station first.",
   "message.create_aeronautics_automated_logistics.transponder_recording.station_missing": "That station is no longer available.",
   "message.create_aeronautics_automated_logistics.transponder_recording.same_station": "Origin and destination must be different stations.",

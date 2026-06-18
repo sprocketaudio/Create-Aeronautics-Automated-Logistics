@@ -976,6 +976,13 @@ Files/classes likely affected:
 
 #### Phase 1A - Minimal diagnostics
 
+Status:
+
+- Complete on 2026-06-18.
+- Added targeted runtime/load/restore diagnostics in schedule execution and
+  playback restore paths to explain unreadable runtime entries, invalid pinned
+  routes, and pending playback restore failures without per-tick spam.
+
 - Add minimal debug channels if needed: `runtime`, `materialization`,
   `persistence`.
 - Log only the critical lifecycle points needed to explain route loss:
@@ -992,17 +999,39 @@ Files/classes likely affected:
 
 #### Phase 1B - Route repository boundary
 
+Status:
+
+- Complete on 2026-06-18.
+- Added `RouteRepository` as a persistent route facade backed by station-owned
+  route segments, registered in `AutomatedLogisticsServices`, and routed
+  schedule/menu validation lookups through it.
+
 - Introduce the persistent `RouteRepository` facade.
 - Route all schedule validation/status queries through it.
 - Keep the facade backed by the existing station route segments at first.
 
 #### Phase 1C - Stop automatic cleanup
 
+Status:
+
+- Complete on 2026-06-18.
+- Removed automatic route pruning from station tick and menu-open paths while
+  keeping explicit delete cleanup behavior.
+
 - Stop automatic cleanup from tick/menu-open paths.
 - Keep cleanup explicit and intentional so a UI refresh or tick path cannot
   silently erase persistent route truth.
 
 #### Phase 1D - Expand transition diagnostics
+
+Status:
+
+- Complete on 2026-06-18.
+- Added explicit transition diagnostics for schedule start, leg start, leg
+  complete, schedule completion/loop restart, wait start/end, unloaded transit,
+  materialization request/result, runtime restore, and route index rebuild.
+- Existing validation/load/restore diagnostics remain in place to explain
+  unreadable runtime entries and route-resolution failures.
 
 - Once the boundary is stable, add transition logging for:
   - schedule start
@@ -1038,6 +1067,26 @@ Compatibility:
 - Behavior-compatible.
 
 ### Phase 2 - Freeze Persistent Route Model Ownership
+
+Status:
+
+- Complete on 2026-06-18.
+- Route validation and server-side route/status reads now go through
+  `RouteRepository`/`RouteSegmentResolver` instead of treating
+  `RouteSegmentRegistry` as route truth.
+- Server-side route index mutations now go through the repository/cache facade.
+- Added a persistent route segment directory plus pending-deletion queue so
+  explicit station/transponder/stop delete cleanup can discover affected route
+  segment identities even when holder station block entities are unloaded.
+- Explicit delete cleanup now backfills missing or incomplete route-directory
+  records from persisted station identities before refusing cleanup, so older
+  worlds do not depend on prior station registration just to prove route
+  ownership during station/transponder/stop deletion.
+- Deferred route deletions are applied on later station load/register, then the
+  stored route list and cache/index are updated.
+- `RouteSegmentRegistry` is explicitly documented and used as an index/cache,
+  while explicit station/transponder delete cleanup remains intact without
+  making registry misses invalidate route truth.
 
 Goal:
 
@@ -1092,6 +1141,22 @@ Compatibility:
 
 ### Phase 3 - Separate Explicit Cleanup From Repair
 
+Status:
+
+- Complete on 2026-06-18.
+- Cleanup entry points are now explicit and named:
+  `deleteStationRoutes(...)`, `deleteTransponderRoutes(...)`,
+  and `deleteStopAssociatedSegments(...)`.
+- The vague `pruneInvalid...` cleanup entry points were removed from the active
+  API surface.
+- Explicit delete paths keep their auditable logs for request, refusal,
+  immediate delete, deferred delete, and later deferred application.
+- Explicit delete cleanup no longer calls broad loaded-transponder schedule
+  repair. Station deletion may only remove loaded schedule entries that directly
+  reference the deleted station id or a persistent route-directory segment
+  connected to that station. Transponder and stop deletion do not repair
+  unrelated loaded schedules.
+
 Goal:
 
 - Make cleanup safe, named, and auditable.
@@ -1110,10 +1175,11 @@ Concrete changes:
   - `deleteStationRoutes(stationId)`
   - `deleteTransponderRoutes(transponderId)`
   - `deleteStopAssociatedSegments(transponderId, scheduleBeforeDelete, index)`
-  - `repairScheduleIfRequested(...)`
 - Remove vague `pruneInvalid...` calls from automatic paths.
 - Log every deletion with reason and source event.
 - Add refused-cleanup logs when route data is missing due to index not ready.
+- Remove mutating schedule repair that deleted entries because route resolution
+  or start-station derivation failed under partial repository visibility.
 
 Behavior unchanged:
 
@@ -1141,6 +1207,26 @@ Compatibility:
 
 ### Phase 4 - Extract Runtime State Machine
 
+Status:
+
+- Complete on 2026-06-18.
+- Schedule runtime now uses explicit `RuntimeState`,
+  `ActiveScheduleRuntime`, and `RuntimeSnapshot` types.
+- Active schedule runtime identity is anchored by transponder id; route id is
+  now a referenced current leg, not the runtime identity.
+- Runtime commands now discover and target schedule runtime snapshots by
+  transponder/runtime id instead of playback-owned route summaries.
+- Runtime persistence saves and restores the explicit runtime state alongside
+  the current referenced route id.
+- Runtime status/menu projection is read-only; menu open no longer reconciles
+  or prunes active runtime state.
+- Runtime failures now transition to inspectable fault states instead of
+  removing `activeRuntimes` outside explicit kill or normal completion.
+- Invalid/corrupt saved runtime entry indices restore as `INVALID_RUNTIME` and
+  remain listable/showable/killable.
+- Command pause/kill now routes through the schedule runtime facade by stable
+  transponder/runtime id.
+
 Goal:
 
 - Make schedule runtime an explicit state machine independent of playback and
@@ -1159,11 +1245,16 @@ Concrete changes:
 
 - Add `RuntimeState` enum and `ActiveScheduleRuntime` record.
 - Replace ad hoc active schedule map operations with transition methods.
+- Log runtime transitions with stable ids, old/new state, reason, entry index,
+  current route, start/target station, playback existence, and controller
+  existence.
 - Make runtime id stable by transponder id, not route id.
 - Commands target runtime id/transponder id.
 - Schedule runtime records reference current route id but do not depend on it as
   their identity.
 - Runtime emits `RuntimeSnapshot`.
+- Skip-stop progression now advances the schedule runtime to the next leg
+  immediately instead of leaving an implicit no-route active state.
 
 Behavior unchanged:
 
@@ -1190,6 +1281,18 @@ Compatibility:
 - Behavior-compatible if facade is preserved.
 
 ### Phase 5 - Extract Route Motion Runner
+
+Status:
+
+- Complete on 2026-06-18.
+- Loaded physical route motion, route-leg validation, hold-at-target behavior,
+  and motion priming are now routed through a dedicated `RouteMotionRunner`
+  seam inside `VehicleRoutePlaybackService`.
+- Schedule/runtime ownership, route persistence, wait semantics, UI
+  projection, runtime save/load, and Sable materialization policy were left
+  unchanged for this phase.
+- Existing playback entry points now call the motion runner for loaded movement
+  instead of embedding that logic directly in the service tick body.
 
 Goal:
 
@@ -1243,6 +1346,18 @@ Compatibility:
 
 ### Phase 6 - Extract Wait Runtime
 
+Status:
+
+- Complete on 2026-06-18.
+- Stop-wait progression, grouped wait-condition evaluation, wait start/end, and
+  unloaded non-physical wait completion now run through a dedicated
+  `WaitRuntime` seam inside `VehicleRoutePlaybackService`.
+- Dock, cargo, redstone, time-of-day, timed, and grouped AND/OR wait behavior
+  remains on the existing logic path, now called through the new adapter.
+- Route persistence, schedule cleanup, runtime save/load semantics, UI
+  projection, and Sable materialization policy were left unchanged for this
+  phase.
+
 Goal:
 
 - Separate wait progression from motion and materialization.
@@ -1294,6 +1409,27 @@ Compatibility:
 - Behavior-compatible.
 
 ### Phase 7 - Extract Ship Materialization Layer
+
+Status:
+
+- Complete on 2026-06-18.
+- Added `ShipMaterializationService` as the runtime/playback-facing boundary
+  for live Sable body lookup, stored body lookup, stored-body materialization,
+  materialization diagnostics, and loaded-body stored-entry pruning.
+- Added typed materialization result categories for loaded body, stored body,
+  missing stored body, sublevel load failure, chunk/load readiness, controller
+  reference problems, unsafe relocation/materialization, Sable API
+  unavailability, startup grace, unknown failure, and successful materialize.
+- Added `SableStoredShipGarbageCollector` so startup/stale stored-body cleanup
+  is called through explicit reason-coded cleanup/prune requests.
+- `VehicleRoutePlaybackService` now asks materialization for body availability
+  and materialization results instead of directly calling broad
+  `ShipRecoveryService` restore/prune methods.
+- `VehicleRoutePlaybackService` now routes live controller/body refresh and
+  runtime restore lookup through `ShipMaterializationService` typed live lookup
+  results instead of directly resolving `VehicleControllerResolver` failures.
+- Route persistence, schedule cleanup, UI projection, route validity, and
+  runtime save/load record shape were left unchanged for this phase.
 
 Goal:
 
@@ -1352,6 +1488,22 @@ Compatibility:
 
 ### Phase 8 - Replace Direct UI Coupling With Projection Snapshots
 
+Status:
+
+- Complete on 2026-06-18.
+- Added `RuntimeProjectionService` so server menu-open and sync paths build
+  `ShipTransponderMenu.StatusSnapshot` and `AirshipStationMenu.ClientState`
+  through one projection boundary.
+- `createMenu`, block open handlers, and transponder reopen now use projection
+  snapshots without refreshing runtime ship discovery, refreshing dock links,
+  migrating schedules, or registering station snapshots during menu open.
+- Preview payloads now carry producer identity (`routeId`, `stationId`,
+  `transponderId`, `transponderPos`) so client preview state clears by explicit
+  producer identity instead of depending on route-cache scans.
+- Existing menu DTOs, colors, text, controls, and payload shapes for station
+  and transponder state were preserved apart from the preview identity
+  extension.
+
 Goal:
 
 - Finish the menu refactor from `MENU_SYSTEM_AUDIT.md` using runtime snapshots.
@@ -1402,6 +1554,27 @@ Compatibility:
 - Behavior-compatible.
 
 ### Phase 9 - Runtime Restore Coordinator
+
+Status:
+
+- Complete on 2026-06-18.
+- Added `RuntimeRestoreCoordinator` as the saved runtime apply path.
+- `AutomationRuntimeSavedData` now routes restore through the coordinator, with
+  the previous direct schedule/playback loader kept behind a migration flag for
+  this phase.
+- Restore now loads raw schedule and playback snapshots first, rebuilds the
+  loaded route segment cache from persistent station data, rebinds schedule
+  runtimes to their playback records, logs orphan playback records, submits
+  pending playback materialization/restore, then rechecks schedule runtime
+  state.
+- `VehicleRoutePlaybackService` can load pending playback runtime without
+  immediately materializing it, and exposes restore diagnostics for active and
+  pending route playback records.
+- `AirshipScheduleExecutionService` logs each restored transponder runtime and
+  transitions corrupt entry indices or missing playback records into
+  inspectable fault states instead of deleting route or schedule data.
+- Route cache rebuild is explicit and read-only; missing loaded station BEs
+  remain non-fatal and do not invalidate persistent routes.
 
 Goal:
 
@@ -1460,6 +1633,24 @@ Compatibility:
 
 ### Phase 10 - Tests, Validation Commands, And Dead-Code Removal
 
+Status:
+
+- Complete on 2026-06-18.
+- Added admin/debug commands for persistent route repository dumps, route
+  directory dumps, pending deferred deletion dumps, runtime snapshot dumps,
+  playback/motion/wait dumps, materialization snapshot dumps, restore summary
+  dumps, and loaded route index rebuild checks.
+- Removed obsolete wrapper paths that only mirrored the new projection/runtime
+  APIs, and replaced the remaining obvious server-side menu runtime-status reads
+  with the projection/runtime service path.
+- Retained compatibility fallbacks that still protect client DTO/bootstrap
+  behavior or old-world/runtime restore coverage; Phase 10 removed only code
+  proven redundant after the P2-P9 architecture split.
+- Final gameplay validation covered fresh route/schedule creation, concurrent
+  multi-ship runtime, docking/cargo behavior, reload while running/waiting,
+  unloaded transit, unload-reload rebind, restore fault inspection, and
+  recovery/kill tooling.
+
 Goal:
 
 - Lock behavior and remove old pathways only after validation.
@@ -1478,9 +1669,11 @@ Concrete changes:
   - runtime snapshot dump
   - materialization snapshot dump
   - route index rebuild check
-- Add unit-style tests for pure route/schedule validation if test framework
-  supports it.
+- Add route directory dump, pending deferred deletion dump, playback dump, and
+  restore summary dump.
 - Remove old direct registry cleanup once replaced.
+- Remove obsolete wrapper APIs once the new runtime/projection path is the only
+  authoritative server-side read path.
 
 Behavior unchanged:
 

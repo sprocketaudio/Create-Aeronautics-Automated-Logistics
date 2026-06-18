@@ -33,11 +33,6 @@ public class TransponderCargoSavedData extends SavedData {
     public static List<LinkedCargoEntry> entries(MinecraftServer server, UUID transponderId, BlockPos anchorPos) {
         StoredCargo storedCargo = get(server).cargoByTransponder.get(transponderId);
         if (storedCargo == null) {
-            CreateAeronauticsAutomatedLogistics.debugCargo(
-                    "TransponderCargoSavedData entries miss id={} anchor={}",
-                    transponderId,
-                    anchorPos
-            );
             return List.of();
         }
         CreateAeronauticsAutomatedLogistics.debugCargo(

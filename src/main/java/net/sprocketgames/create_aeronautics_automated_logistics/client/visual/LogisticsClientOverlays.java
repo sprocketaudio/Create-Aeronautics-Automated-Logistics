@@ -18,7 +18,6 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
-import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry;
 
 public final class LogisticsClientOverlays {
     private static final int LANDING_COLOR = 0x95E06C;
@@ -50,6 +49,8 @@ public final class LogisticsClientOverlays {
     private static List<Vec3> flightPath = List.of();
     private static List<Integer> flightPathLegEnds = List.of();
     private static Optional<UUID> previewedRouteId = Optional.empty();
+    private static Optional<UUID> previewedStationId = Optional.empty();
+    private static Optional<UUID> previewedTransponderId = Optional.empty();
     private static Optional<BlockPos> previewedTransponderPos = Optional.empty();
 
     private LogisticsClientOverlays() {
@@ -202,10 +203,20 @@ public final class LogisticsClientOverlays {
         return cargoOverlayGroups.equals(normalized) && !cargoOverlayGroups.isEmpty();
     }
 
-    public static void setFlightPath(List<Vec3> points, List<Integer> legEndIndices, BlockPos transponderPos) {
+    public static void setFlightPath(
+            List<Vec3> points,
+            List<Integer> legEndIndices,
+            BlockPos transponderPos,
+            UUID routeId,
+            UUID stationId,
+            UUID transponderId
+    ) {
         removeFlightPath(flightPath);
         flightPath = List.copyOf(points);
         flightPathLegEnds = List.copyOf(legEndIndices);
+        previewedRouteId = Optional.ofNullable(routeId);
+        previewedStationId = Optional.ofNullable(stationId);
+        previewedTransponderId = Optional.ofNullable(transponderId);
         previewedTransponderPos = Optional.ofNullable(transponderPos).map(BlockPos::immutable);
     }
 
@@ -221,11 +232,21 @@ public final class LogisticsClientOverlays {
         return previewedTransponderPos;
     }
 
+    public static Optional<UUID> previewedStationId() {
+        return previewedStationId;
+    }
+
+    public static Optional<UUID> previewedTransponderId() {
+        return previewedTransponderId;
+    }
+
     public static void clearFlightPath() {
         removeFlightPath(flightPath);
         flightPath = List.of();
         flightPathLegEnds = List.of();
         previewedRouteId = Optional.empty();
+        previewedStationId = Optional.empty();
+        previewedTransponderId = Optional.empty();
         previewedTransponderPos = Optional.empty();
     }
 
@@ -245,26 +266,14 @@ public final class LogisticsClientOverlays {
         }
     }
 
-    public static void clearFlightPathIfPreviewingTransponderRoutes(UUID transponderId) {
-        if (previewedRouteId.isEmpty()) {
-            return;
-        }
-        boolean matches = RouteSegmentRegistry.forTransponder(transponderId).stream()
-                .map(route -> route.id().value())
-                .anyMatch(previewedRouteId.get()::equals);
-        if (matches) {
+    public static void clearFlightPathIfPreviewingTransponderId(UUID transponderId) {
+        if (previewedTransponderId.filter(transponderId::equals).isPresent()) {
             clearFlightPath();
         }
     }
 
-    public static void clearFlightPathIfPreviewingStationRoutes(UUID stationId) {
-        if (previewedRouteId.isEmpty()) {
-            return;
-        }
-        boolean matches = RouteSegmentRegistry.connectedToStation(stationId).stream()
-                .map(route -> route.id().value())
-                .anyMatch(previewedRouteId.get()::equals);
-        if (matches) {
+    public static void clearFlightPathIfPreviewingStationId(UUID stationId) {
+        if (previewedStationId.filter(stationId::equals).isPresent()) {
             clearFlightPath();
         }
     }

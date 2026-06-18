@@ -347,6 +347,9 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(guiGraphics, mouseX, mouseY, partialTick);
         boolean showScheduleButtons = !recordingMode;
+        boolean operationalShip = this.minecraft != null
+                && this.minecraft.player != null
+                && menu.hasOperationalShip(this.minecraft.player);
         boolean scheduleRunning = this.minecraft != null
                 && this.minecraft.player != null
                 && menu.isScheduleRunning(this.minecraft.player);
@@ -356,7 +359,10 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         boolean runControlsLockedByRecording = recordingSessionActive;
         if (playButton != null) {
             playButton.visible = showScheduleButtons;
-            playButton.active = showScheduleButtons && !runControlsLockedByRecording && (!scheduleRunning || scheduleHeld);
+            playButton.active = showScheduleButtons
+                    && operationalShip
+                    && !runControlsLockedByRecording
+                    && (!scheduleRunning || scheduleHeld);
             playButton.green = showScheduleButtons && scheduleRunning;
         }
         if (stopButton != null) {
@@ -379,7 +385,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         }
         if (recordButton != null) {
             recordButton.visible = recordingMode;
-            recordButton.active = recordingMode;
+            recordButton.active = recordingMode && operationalShip;
             recordButton.setIcon(recordingSessionActive ? AllIcons.I_CONFIG_SAVE : AllIcons.I_ADD);
             recordButton.green = recordingSessionActive;
         }
@@ -398,6 +404,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         if (dockPreviewButton != null) {
             dockPreviewButton.visible = !recordingMode;
             dockPreviewButton.active = !recordingMode
+                    && operationalShip
                     && this.minecraft != null
                     && this.minecraft.player != null
                     && menu.hasLinkedDock(this.minecraft.player);
@@ -405,13 +412,14 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         if (cargoPreviewButton != null) {
             cargoPreviewButton.visible = !recordingMode;
             cargoPreviewButton.active = !recordingMode
+                    && operationalShip
                     && this.minecraft != null
                     && this.minecraft.player != null
                     && menu.hasLinkedCargo(this.minecraft.player);
         }
         if (dockLinkButton != null) {
             dockLinkButton.visible = !recordingMode;
-            dockLinkButton.active = !recordingMode;
+            dockLinkButton.active = !recordingMode && operationalShip;
         }
         if (dockClearButton != null) {
             dockClearButton.visible = !recordingMode;
@@ -422,7 +430,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         }
         if (cargoLinkButton != null) {
             cargoLinkButton.visible = !recordingMode;
-            cargoLinkButton.active = !recordingMode;
+            cargoLinkButton.active = !recordingMode && operationalShip;
         }
         if (cargoClearButton != null) {
             cargoClearButton.visible = !recordingMode;
@@ -438,7 +446,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             previewButton.green = ownsFlightPathPreview();
         }
         if (!recordingMode && dockPreviewButton != null && this.minecraft != null && this.minecraft.player != null) {
-            boolean hasLinkedDock = menu.hasLinkedDock(this.minecraft.player);
+            boolean hasLinkedDock = operationalShip && menu.hasLinkedDock(this.minecraft.player);
             if (!hasLinkedDock) {
                 LogisticsClientOverlays.clearDock();
             }
@@ -453,7 +461,9 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             dockClearButton.green = pendingDockLink;
         }
         if (!recordingMode && cargoPreviewButton != null && this.minecraft != null && this.minecraft.player != null) {
-            List<List<BlockPos>> cargoPreview = menu.cargoPreviewPositionGroups(this.minecraft.player);
+            List<List<BlockPos>> cargoPreview = operationalShip
+                    ? menu.cargoPreviewPositionGroups(this.minecraft.player)
+                    : List.of();
             if (cargoPreview.isEmpty()) {
                 CreateAeronauticsAutomatedLogistics.debugUi(
                         "Transponder cargo preview tick clear player={} spectator={} menuPos={} buttonActive={} buttonGreenBeforeClear={}",
@@ -465,7 +475,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                 );
                 LogisticsClientOverlays.clearCargo();
             }
-            cargoPreviewButton.active = menu.hasLinkedCargo(this.minecraft.player);
+            cargoPreviewButton.active = operationalShip && menu.hasLinkedCargo(this.minecraft.player);
             cargoPreviewButton.green = LogisticsClientOverlays.isCargoVisibleGroups(cargoPreview);
         }
         if (!recordingMode && cargoClearButton != null && this.minecraft != null && this.minecraft.player != null) {

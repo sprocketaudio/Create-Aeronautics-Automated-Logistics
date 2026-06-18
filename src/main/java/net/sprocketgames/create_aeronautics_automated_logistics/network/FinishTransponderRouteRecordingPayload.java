@@ -17,8 +17,6 @@ import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronautic
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationSnapshot;
-import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderRegistry;
-import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderSnapshot;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleEntry;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
@@ -90,9 +88,7 @@ public record FinishTransponderRouteRecordingPayload(BlockPos transponderPos, UU
             PacketDistributor.sendToPlayer(player, new SetTransponderRecordingStatePayload(false, Optional.empty()));
             return;
         }
-        Optional<VehicleController> controller = ShipTransponderRegistry.snapshot(transponder.transponderId())
-                .filter(ship -> ship.dimension().equals(level.dimension()))
-                .flatMap(ShipTransponderSnapshot::controllerRef)
+        Optional<VehicleController> controller = transponder.controllerRef(level)
                 .flatMap(controllerRef -> VehicleControllerResolver.resolve(level, controllerRef));
         if (controller.isEmpty()) {
             StartTransponderRouteRecordingPayload.fail(

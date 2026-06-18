@@ -9,10 +9,19 @@ import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 
+/**
+ * Client-visible route segment index/cache.
+ * Persistent route truth lives in station-owned route segment data accessed via RouteRepository.
+ */
 public final class RouteSegmentRegistry {
     private static final Map<RouteSegmentId, RouteSegment> SEGMENTS = new ConcurrentHashMap<>();
 
     private RouteSegmentRegistry() {
+    }
+
+    public static void replaceAll(List<RouteSegment> segments) {
+        SEGMENTS.clear();
+        registerAll(segments);
     }
 
     public static void registerAll(List<RouteSegment> segments) {

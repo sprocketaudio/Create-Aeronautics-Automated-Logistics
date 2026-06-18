@@ -3,6 +3,7 @@ package net.sprocketgames.create_aeronautics_automated_logistics.network;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -17,7 +18,10 @@ public record SetFlightPathPreviewPayload(
         boolean enabled,
         List<Vec3> points,
         List<Integer> legEndIndices,
-        Optional<BlockPos> transponderPos
+        Optional<BlockPos> transponderPos,
+        Optional<UUID> routeId,
+        Optional<UUID> stationId,
+        Optional<UUID> transponderId
 ) implements CustomPacketPayload {
     public static final Type<SetFlightPathPreviewPayload> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath(CreateAeronauticsAutomatedLogistics.MOD_ID, "set_flight_path_preview")
@@ -40,7 +44,10 @@ public record SetFlightPathPreviewPayload(
         Optional<BlockPos> transponderPos = buffer.readBoolean()
                 ? Optional.of(buffer.readBlockPos())
                 : Optional.empty();
-        return new SetFlightPathPreviewPayload(enabled, points, legEndIndices, transponderPos);
+        Optional<UUID> routeId = buffer.readBoolean() ? Optional.of(buffer.readUUID()) : Optional.empty();
+        Optional<UUID> stationId = buffer.readBoolean() ? Optional.of(buffer.readUUID()) : Optional.empty();
+        Optional<UUID> transponderId = buffer.readBoolean() ? Optional.of(buffer.readUUID()) : Optional.empty();
+        return new SetFlightPathPreviewPayload(enabled, points, legEndIndices, transponderPos, routeId, stationId, transponderId);
     }
 
     private void write(RegistryFriendlyByteBuf buffer) {
@@ -57,6 +64,12 @@ public record SetFlightPathPreviewPayload(
         }
         buffer.writeBoolean(transponderPos.isPresent());
         transponderPos.ifPresent(buffer::writeBlockPos);
+        buffer.writeBoolean(routeId.isPresent());
+        routeId.ifPresent(buffer::writeUUID);
+        buffer.writeBoolean(stationId.isPresent());
+        stationId.ifPresent(buffer::writeUUID);
+        buffer.writeBoolean(transponderId.isPresent());
+        transponderId.ifPresent(buffer::writeUUID);
     }
 
     @Override
@@ -70,7 +83,10 @@ public record SetFlightPathPreviewPayload(
                 LogisticsClientOverlays.setFlightPath(
                         payload.points(),
                         payload.legEndIndices(),
-                        payload.transponderPos().orElse(null)
+                        payload.transponderPos().orElse(null),
+                        payload.routeId().orElse(null),
+                        payload.stationId().orElse(null),
+                        payload.transponderId().orElse(null)
                 );
             } else {
                 LogisticsClientOverlays.clearFlightPath();

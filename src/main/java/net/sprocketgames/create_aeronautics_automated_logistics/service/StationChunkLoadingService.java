@@ -27,7 +27,11 @@ public final class StationChunkLoadingService {
     public static void onServerStarted(ServerStartedEvent event) {
         startupGraceTicks = STARTUP_SABLE_STORAGE_GRACE_TICKS;
         reconcilePending = true;
-        ShipRecoveryService.pruneDanglingStoredShipEntries(event.getServer());
+        SableStoredShipGarbageCollector.pruneDanglingStoredShipEntries(
+                event.getServer(),
+                "server_started",
+                "startup_sable_storage_grace_begin"
+        );
         CreateAeronauticsAutomatedLogistics.debugVehicle(
                 "Deferring station chunk loading reconcile for {} ticks while Sable restores holding sublevels",
                 startupGraceTicks
@@ -38,8 +42,16 @@ public final class StationChunkLoadingService {
         if (startupGraceTicks <= 0) {
             return;
         }
-        ShipRecoveryService.pruneDanglingStoredShipEntries(event.getServer());
-        ShipRecoveryService.pruneLoadedDuplicateStoredShips(event.getServer());
+        SableStoredShipGarbageCollector.pruneDanglingStoredShipEntries(
+                event.getServer(),
+                "server_tick_pre",
+                "startup_sable_storage_grace_active"
+        );
+        SableStoredShipGarbageCollector.pruneLoadedDuplicateStoredShips(
+                event.getServer(),
+                "server_tick_pre",
+                "startup_sable_storage_grace_active"
+        );
     }
 
     public static void onServerTick(ServerTickEvent.Post event) {
@@ -48,7 +60,11 @@ public final class StationChunkLoadingService {
         }
         if (startupGraceTicks <= 0 && reconcilePending) {
             reconcilePending = false;
-            ShipRecoveryService.pruneDanglingStoredShipEntries(event.getServer());
+            SableStoredShipGarbageCollector.pruneDanglingStoredShipEntries(
+                    event.getServer(),
+                    "server_tick_post",
+                    "startup_sable_storage_grace_complete"
+            );
             CreateAeronauticsAutomatedLogistics.debugVehicle(
                     "Running deferred station chunk loading reconcile"
             );
