@@ -1203,6 +1203,26 @@ Compatibility:
 
 ### Phase 4 - Extract Runtime State Machine
 
+Status:
+
+- Complete on 2026-06-18.
+- Schedule runtime now uses explicit `RuntimeState`,
+  `ActiveScheduleRuntime`, and `RuntimeSnapshot` types.
+- Active schedule runtime identity is anchored by transponder id; route id is
+  now a referenced current leg, not the runtime identity.
+- Runtime commands now discover and target schedule runtime snapshots by
+  transponder/runtime id instead of playback-owned route summaries.
+- Runtime persistence saves and restores the explicit runtime state alongside
+  the current referenced route id.
+- Runtime status/menu projection is read-only; menu open no longer reconciles
+  or prunes active runtime state.
+- Runtime failures now transition to inspectable fault states instead of
+  removing `activeRuntimes` outside explicit kill or normal completion.
+- Invalid/corrupt saved runtime entry indices restore as `INVALID_RUNTIME` and
+  remain listable/showable/killable.
+- Command pause/kill now routes through the schedule runtime facade by stable
+  transponder/runtime id.
+
 Goal:
 
 - Make schedule runtime an explicit state machine independent of playback and
@@ -1221,11 +1241,16 @@ Concrete changes:
 
 - Add `RuntimeState` enum and `ActiveScheduleRuntime` record.
 - Replace ad hoc active schedule map operations with transition methods.
+- Log runtime transitions with stable ids, old/new state, reason, entry index,
+  current route, start/target station, playback existence, and controller
+  existence.
 - Make runtime id stable by transponder id, not route id.
 - Commands target runtime id/transponder id.
 - Schedule runtime records reference current route id but do not depend on it as
   their identity.
 - Runtime emits `RuntimeSnapshot`.
+- Skip-stop progression now advances the schedule runtime to the next leg
+  immediately instead of leaving an implicit no-route active state.
 
 Behavior unchanged:
 

@@ -159,8 +159,6 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         registerStationSnapshot();
         if (level instanceof ServerLevel serverLevel) {
             refreshGroundDockLink(serverLevel);
-            selectedTransponderId.ifPresent(transponderId ->
-                    AutomatedLogisticsServices.SCHEDULES.reconcileRuntimeStatus(serverLevel, transponderId));
             if (player instanceof ServerPlayer serverPlayer) {
                 AirshipStationMenu menu = new AirshipStationMenu(
                         containerId,

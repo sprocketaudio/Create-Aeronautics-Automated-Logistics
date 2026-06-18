@@ -24,6 +24,8 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteId;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.ShipRecoveryService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AirshipScheduleExecutionService;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.RuntimeSnapshot;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.RuntimeState;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.VehicleRoutePlaybackService;
 
 public final class AutomatedLogisticsCommands {
@@ -43,9 +45,8 @@ public final class AutomatedLogisticsCommands {
             SharedSuggestionProvider.suggest(ShipRecoveryService.knownStationIds(context.getSource().getServer()), builder);
     private static final SuggestionProvider<CommandSourceStack> RUNTIME_ID_SUGGESTIONS = (context, builder) ->
             SharedSuggestionProvider.suggest(
-                    visibleRuntimeSummaries(context.getSource()).stream()
-                            .map(VehicleRoutePlaybackService.RuntimePlaybackSummary::transponderId)
-                            .flatMap(Optional::stream)
+                    visibleRuntimeSnapshots(context.getSource()).stream()
+                            .map(RuntimeSnapshot::runtimeId)
                             .map(UUID::toString)
                             .distinct(),
                     builder
@@ -167,8 +168,8 @@ public final class AutomatedLogisticsCommands {
     }
 
     private static int listRuntimePlaybacks(CommandContext<CommandSourceStack> context) {
-        List<VehicleRoutePlaybackService.RuntimePlaybackSummary> summaries = visibleRuntimeSummaries(context.getSource());
-        if (summaries.isEmpty()) {
+        List<RuntimeSnapshot> snapshots = visibleRuntimeSnapshots(context.getSource());
+        if (snapshots.isEmpty()) {
             if (commandOwnerFilter(context.getSource()).isPresent()) {
                 context.getSource().sendSuccess(() -> Component.literal("You have no active or pending runtime routes."), false);
             } else {
@@ -177,11 +178,11 @@ public final class AutomatedLogisticsCommands {
             return 1;
         }
 
-        context.getSource().sendSuccess(() -> Component.literal("Runtime routes: " + summaries.size()), false);
-        for (VehicleRoutePlaybackService.RuntimePlaybackSummary summary : summaries) {
-            context.getSource().sendSuccess(() -> runtimeSummaryLine(summary), false);
+        context.getSource().sendSuccess(() -> Component.literal("Runtime routes: " + snapshots.size()), false);
+        for (RuntimeSnapshot snapshot : snapshots) {
+            context.getSource().sendSuccess(() -> runtimeSummaryLine(snapshot), false);
         }
-        return summaries.size();
+        return snapshots.size();
     }
 
     private static int pauseRuntimePlayback(CommandSourceStack source, String runtimeIdText) {
@@ -190,17 +191,31 @@ public final class AutomatedLogisticsCommands {
             return 0;
         }
 
-        VehicleRoutePlaybackService.RuntimePlaybackSummary summary = findVisibleRuntimePlayback(source, transponderId);
-        if (summary == null) {
+        RuntimeSnapshot snapshot = findVisibleRuntime(source, transponderId);
+        if (snapshot == null) {
             source.sendFailure(Component.literal("No runtime route found for " + runtimeIdText + "."));
             return 0;
         }
-        if (summary.state().startsWith("PENDING_")) {
+        if (snapshot.state() == RuntimeState.PAUSED_MANUAL || snapshot.state() == RuntimeState.PAUSED_FAULT) {
+            source.sendFailure(Component.literal("Runtime " + runtimeIdText + " is already paused."));
+            return 0;
+        }
+        if (snapshot.pendingPlayback()) {
             source.sendFailure(Component.literal("Runtime " + runtimeIdText + " is pending restore, not actively moving."));
             return 0;
         }
+        if (!snapshot.canPause()) {
+            source.sendFailure(Component.literal("Runtime " + runtimeIdText + " cannot be paused in its current state."));
+            return 0;
+        }
 
-        boolean paused = AutomatedLogisticsServices.PLAYBACK.pauseRuntimePlayback(source.getServer(), summary.routeId());
+        ServerLevel level = source.getServer().getLevel(snapshot.dimension());
+        if (level == null) {
+            source.sendFailure(Component.literal("Could not resolve the runtime dimension for " + runtimeIdText + "."));
+            return 0;
+        }
+
+        boolean paused = AutomatedLogisticsServices.SCHEDULES.pauseRuntime(level, transponderId, "command_pause");
         if (!paused) {
             source.sendFailure(Component.literal("Could not pause runtime " + runtimeIdText + "."));
             return 0;
@@ -220,18 +235,18 @@ public final class AutomatedLogisticsCommands {
             return 0;
         }
 
-        VehicleRoutePlaybackService.RuntimePlaybackSummary summary = findVisibleRuntimePlayback(source, transponderId);
-        if (summary == null) {
+        RuntimeSnapshot snapshot = findVisibleRuntime(source, transponderId);
+        if (snapshot == null) {
             source.sendFailure(Component.literal("No runtime route found for " + runtimeIdText + "."));
             return 0;
         }
-        if (summary.transponderPos().isEmpty()) {
+        if (snapshot.transponderPos().isEmpty()) {
             source.sendFailure(Component.literal("Could not locate the transponder for runtime " + runtimeIdText + "."));
             return 0;
         }
 
         PacketDistributor.sendToPlayer(player, new ShowShipTransponderHighlightPayload(
-                summary.transponderPos().get(),
+                snapshot.transponderPos().get(),
                 SHOW_HIGHLIGHT_TICKS
         ));
         source.sendSuccess(() -> Component.literal("Highlighted transponder for runtime " + runtimeIdText + "."), false);
@@ -244,19 +259,22 @@ public final class AutomatedLogisticsCommands {
             return 0;
         }
 
-        VehicleRoutePlaybackService.RuntimePlaybackSummary summary = findVisibleRuntimePlayback(source, transponderId);
-        if (summary == null) {
+        RuntimeSnapshot snapshot = findVisibleRuntime(source, transponderId);
+        if (snapshot == null) {
             source.sendFailure(Component.literal("No runtime route found for " + runtimeIdText + "."));
             return 0;
         }
 
-        ServerLevel level = source.getServer().getLevel(summary.dimension());
+        ServerLevel level = source.getServer().getLevel(snapshot.dimension());
         if (level == null) {
             source.sendFailure(Component.literal("Could not resolve the runtime dimension for " + runtimeIdText + "."));
             return 0;
         }
         AirshipScheduleExecutionService schedules = AutomatedLogisticsServices.SCHEDULES;
-        schedules.stop(level, transponderId);
+        if (!schedules.killRuntime(level, transponderId, "command_kill")) {
+            source.sendFailure(Component.literal("Could not kill runtime " + runtimeIdText + "."));
+            return 0;
+        }
         source.sendSuccess(() -> Component.literal("Killed runtime " + runtimeIdText + " and released ship physics."), true);
         return 1;
     }
@@ -287,21 +305,18 @@ public final class AutomatedLogisticsCommands {
         }
     }
 
-    private static VehicleRoutePlaybackService.RuntimePlaybackSummary findVisibleRuntimePlayback(
+    private static RuntimeSnapshot findVisibleRuntime(
             CommandSourceStack source,
             UUID transponderId
     ) {
-        return visibleRuntimeSummaries(source).stream()
-                .filter(summary -> summary.transponderId().filter(transponderId::equals).isPresent())
+        return visibleRuntimeSnapshots(source).stream()
+                .filter(snapshot -> snapshot.runtimeId().equals(transponderId))
                 .findFirst()
                 .orElse(null);
     }
 
-    private static List<VehicleRoutePlaybackService.RuntimePlaybackSummary> visibleRuntimeSummaries(CommandSourceStack source) {
-        Optional<UUID> ownerFilter = commandOwnerFilter(source);
-        return AutomatedLogisticsServices.PLAYBACK.runtimePlaybackSummaries(source.getServer()).stream()
-                .filter(summary -> ownerFilter.isEmpty() || summary.ownerId().filter(ownerFilter.get()::equals).isPresent())
-                .toList();
+    private static List<RuntimeSnapshot> visibleRuntimeSnapshots(CommandSourceStack source) {
+        return AutomatedLogisticsServices.SCHEDULES.activeSnapshots(source.getServer(), commandOwnerFilter(source));
     }
 
     private static Optional<UUID> commandOwnerFilter(CommandSourceStack source) {
@@ -311,21 +326,25 @@ public final class AutomatedLogisticsCommands {
         return Optional.ofNullable(source.getEntity()).map(net.minecraft.world.entity.Entity::getUUID);
     }
 
-    private static Component runtimeSummaryLine(VehicleRoutePlaybackService.RuntimePlaybackSummary summary) {
+    private static Component runtimeSummaryLine(RuntimeSnapshot summary) {
         MutableComponent line = Component.literal("- ")
                 .append(Component.literal(summary.shipName()).withStyle(ChatFormatting.AQUA))
                 .append(Component.literal(" | "))
                 .append(Component.literal(summary.routeName()).withStyle(ChatFormatting.WHITE))
                 .append(Component.literal(" | "))
-                .append(Component.literal(summary.state()).withStyle(stateColor(summary.state())))
+                .append(Component.literal(summary.state().name()).withStyle(stateColor(summary.state())))
                 .append(Component.literal(" | "))
                 .append(Component.literal(summary.dimension().location().toString()).withStyle(ChatFormatting.DARK_GRAY))
-                .append(Component.literal(" | "))
-                .append(Component.literal(shortRouteId(summary.routeId())).withStyle(ChatFormatting.GRAY)
+                .append(Component.literal(" | "));
+
+        summary.activeRouteId().ifPresentOrElse(
+                routeId -> line.append(Component.literal(shortRouteId(routeId)).withStyle(ChatFormatting.GRAY)
                         .withStyle(style -> style.withHoverEvent(new HoverEvent(
                                 HoverEvent.Action.SHOW_TEXT,
-                                Component.literal(summary.routeId().value().toString())
-                        ))));
+                                Component.literal(routeId.value().toString())
+                        )))),
+                () -> line.append(Component.literal("no-route").withStyle(ChatFormatting.DARK_GRAY))
+        );
 
         summary.position().ifPresent(position -> line.append(Component.literal(" | "))
                 .append(Component.literal(formatPosition(position)).withStyle(ChatFormatting.GRAY)));
@@ -338,28 +357,28 @@ public final class AutomatedLogisticsCommands {
         if (summary.transponderPos().isPresent()) {
             line.append(actionButton(
                     "[show]",
-                    "/aal runtime show " + summary.transponderId().orElse(summary.routeId().value()),
+                    "/aal runtime show " + summary.runtimeId(),
                     "Highlight this ship transponder for 10 seconds"
             ));
         } else {
             line.append(inactiveAction("[show]", "The linked transponder could not be located."));
         }
         line.append(Component.literal(" "));
-        if (summary.state().startsWith("PENDING_")) {
-            line.append(inactiveAction("[pause]", "Pending restore routes cannot be paused."));
-        } else if (summary.state().equals("PAUSED")) {
+        if (!summary.canPause()) {
+            line.append(inactiveAction("[pause]", "This runtime cannot be paused in its current state."));
+        } else if (summary.state() == RuntimeState.PAUSED_MANUAL || summary.state() == RuntimeState.PAUSED_FAULT) {
             line.append(inactiveAction("[pause]", "This route is already paused."));
         } else {
             line.append(actionButton(
                     "[pause]",
-                    "/aal runtime pause " + summary.transponderId().orElse(summary.routeId().value()),
+                    "/aal runtime pause " + summary.runtimeId(),
                     "Pause this route in a hold state"
             ));
         }
         line.append(Component.literal(" "));
         line.append(actionButton(
                 "[kill]",
-                "/aal runtime kill " + summary.transponderId().orElse(summary.routeId().value()),
+                "/aal runtime kill " + summary.runtimeId(),
                 "Stop this runtime and release ship physics"
         ));
         return line;
@@ -379,16 +398,14 @@ public final class AutomatedLogisticsCommands {
                 .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(hover))));
     }
 
-    private static ChatFormatting stateColor(String state) {
-        if (state.startsWith("PENDING_")) {
-            return ChatFormatting.GOLD;
-        }
+    private static ChatFormatting stateColor(RuntimeState state) {
         return switch (state) {
-            case "ACTIVE" -> ChatFormatting.GREEN;
-            case "WAITING" -> ChatFormatting.AQUA;
-            case "PAUSED" -> ChatFormatting.YELLOW;
-            case "UNLOADED_TRANSIT" -> ChatFormatting.LIGHT_PURPLE;
-            case "COMPLETED" -> ChatFormatting.GRAY;
+            case STARTING, MATERIALIZING, RECOVERING -> ChatFormatting.GOLD;
+            case RUNNING_LOADED -> ChatFormatting.GREEN;
+            case RUNNING_UNLOADED -> ChatFormatting.LIGHT_PURPLE;
+            case WAITING -> ChatFormatting.AQUA;
+            case PAUSED_MANUAL, PAUSED_FAULT -> ChatFormatting.YELLOW;
+            case COMPLETED, KILLED -> ChatFormatting.GRAY;
             default -> ChatFormatting.WHITE;
         };
     }

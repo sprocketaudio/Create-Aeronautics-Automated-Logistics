@@ -9,7 +9,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSch
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleEntry;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteId;
 
-record ActiveAirshipSchedule(
+record ActiveScheduleRuntime(
         UUID transponderId,
         BlockPos transponderPos,
         ResourceKey<Level> dimension,
@@ -21,14 +21,23 @@ record ActiveAirshipSchedule(
         String currentStationName,
         BlockPos currentStationPos,
         int entryIndex,
-        Optional<RouteId> activeRouteId
+        Optional<RouteId> activeRouteId,
+        RuntimeState state
 ) {
     AirshipScheduleEntry currentEntry() {
         return schedule.entries().get(entryIndex);
     }
 
-    ActiveAirshipSchedule withActiveRoute(RouteId routeId) {
-        return new ActiveAirshipSchedule(
+    Optional<AirshipScheduleEntry> currentEntryOptional() {
+        return hasValidEntryIndex() ? Optional.of(schedule.entries().get(entryIndex)) : Optional.empty();
+    }
+
+    boolean hasValidEntryIndex() {
+        return entryIndex >= 0 && entryIndex < schedule.entries().size();
+    }
+
+    ActiveScheduleRuntime withActiveRoute(RouteId routeId) {
+        return new ActiveScheduleRuntime(
                 transponderId,
                 transponderPos,
                 dimension,
@@ -40,11 +49,48 @@ record ActiveAirshipSchedule(
                 currentStationName,
                 currentStationPos,
                 entryIndex,
-                Optional.of(routeId)
+                Optional.of(routeId),
+                state
         );
     }
 
-    ActiveAirshipSchedule advance() {
+    ActiveScheduleRuntime withoutActiveRoute() {
+        return new ActiveScheduleRuntime(
+                transponderId,
+                transponderPos,
+                dimension,
+                schedule,
+                startStationId,
+                startStationName,
+                startStationPos,
+                currentStationId,
+                currentStationName,
+                currentStationPos,
+                entryIndex,
+                Optional.empty(),
+                state
+        );
+    }
+
+    ActiveScheduleRuntime withState(RuntimeState runtimeState) {
+        return new ActiveScheduleRuntime(
+                transponderId,
+                transponderPos,
+                dimension,
+                schedule,
+                startStationId,
+                startStationName,
+                startStationPos,
+                currentStationId,
+                currentStationName,
+                currentStationPos,
+                entryIndex,
+                activeRouteId,
+                runtimeState
+        );
+    }
+
+    ActiveScheduleRuntime advance() {
         AirshipScheduleEntry completed = currentEntry();
         UUID nextStationId = completed.targetStationId().orElse(currentStationId);
         String nextStationName = completed.displayStationName();
@@ -52,7 +98,7 @@ record ActiveAirshipSchedule(
                 .flatMap(net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationRegistry::snapshot)
                 .map(snapshot -> snapshot.stationPos().immutable())
                 .orElse(currentStationPos);
-        return new ActiveAirshipSchedule(
+        return new ActiveScheduleRuntime(
                 transponderId,
                 transponderPos,
                 dimension,
@@ -64,12 +110,13 @@ record ActiveAirshipSchedule(
                 nextStationName,
                 nextStationPos,
                 entryIndex + 1,
-                Optional.empty()
+                Optional.empty(),
+                RuntimeState.STARTING
         );
     }
 
-    ActiveAirshipSchedule restart() {
-        return new ActiveAirshipSchedule(
+    ActiveScheduleRuntime restart() {
+        return new ActiveScheduleRuntime(
                 transponderId,
                 transponderPos,
                 dimension,
@@ -81,12 +128,13 @@ record ActiveAirshipSchedule(
                 startStationName,
                 startStationPos,
                 0,
-                Optional.empty()
+                Optional.empty(),
+                RuntimeState.STARTING
         );
     }
 
-    ActiveAirshipSchedule resetProgress() {
-        return new ActiveAirshipSchedule(
+    ActiveScheduleRuntime resetProgress() {
+        return new ActiveScheduleRuntime(
                 transponderId,
                 transponderPos,
                 dimension,
@@ -98,7 +146,8 @@ record ActiveAirshipSchedule(
                 currentStationName,
                 currentStationPos,
                 0,
-                activeRouteId
+                activeRouteId,
+                state
         );
     }
 
