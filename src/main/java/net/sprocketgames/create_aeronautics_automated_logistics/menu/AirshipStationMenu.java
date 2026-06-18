@@ -59,6 +59,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.service.Playback
 import net.sprocketgames.create_aeronautics_automated_logistics.service.PlaybackOperationResult;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RecordingFailure;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RecordingSession;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.RuntimeProjectionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteOperationResult;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModMenus;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleController;
@@ -2005,7 +2006,10 @@ public class AirshipStationMenu extends AbstractContainerMenu {
                         true,
                         segment.points().stream().map(point -> point.position()).toList(),
                         List.of(Math.max(0, segment.points().size() - 1)),
-                        Optional.empty()
+                        Optional.empty(),
+                        Optional.of(segment.id().value()),
+                        Optional.of(station.stationId()),
+                        Optional.of(segment.transponderId())
                 )
         );
         return true;
@@ -2560,7 +2564,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
     }
 
     private void syncClientState(ServerPlayer player, AirshipStationBlockEntity station) {
-        ClientState state = buildClientState(player, station);
+        ClientState state = RuntimeProjectionService.buildStationClientState(player, station);
         lastSyncedClientStateHash = state.hashCode();
         PacketDistributor.sendToPlayer(player, new SyncStationMenuStatePayload(station.getBlockPos(), state));
     }
@@ -2574,7 +2578,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         if (!(serverPlayer.serverLevel().getBlockEntity(stationPos) instanceof AirshipStationBlockEntity station)) {
             return;
         }
-        ClientState state = buildClientState(serverPlayer, station);
+        ClientState state = RuntimeProjectionService.buildStationClientState(serverPlayer, station);
         int stateHash = state.hashCode();
         if (stateHash == lastSyncedClientStateHash) {
             return;

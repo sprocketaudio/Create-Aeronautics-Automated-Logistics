@@ -54,6 +54,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.service.Recordin
 import java.util.Locale;
 import java.util.ArrayList;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.PlaybackFailure;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.RuntimeProjectionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.TransponderPermissionService;
 
 public class ShipTransponderMenu extends AbstractContainerMenu {
@@ -1001,7 +1002,18 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
 
     private boolean togglePreview(net.minecraft.server.level.ServerPlayer player, ShipTransponderBlockEntity transponder) {
         if (!transponder.hasOwnedStops()) {
-            PacketDistributor.sendToPlayer(player, new SetFlightPathPreviewPayload(false, List.of(), List.of(), Optional.empty()));
+            PacketDistributor.sendToPlayer(
+                    player,
+                    new SetFlightPathPreviewPayload(
+                            false,
+                            List.of(),
+                            List.of(),
+                            Optional.empty(),
+                            Optional.empty(),
+                            Optional.empty(),
+                            Optional.empty()
+                    )
+            );
             return false;
         }
         PreviewPath preview = previewPath(player.serverLevel(), transponder, transponder.ownedSchedule());
@@ -1012,7 +1024,10 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
                         enabled,
                         preview.points(),
                         preview.legEndIndices(),
-                        enabled ? Optional.of(transponder.getBlockPos().immutable()) : Optional.empty()
+                        enabled ? Optional.of(transponder.getBlockPos().immutable()) : Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        enabled ? Optional.of(transponder.transponderId()) : Optional.empty()
                 )
         );
         return enabled;
@@ -1672,7 +1687,11 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         if (!(serverPlayer.serverLevel().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity transponder)) {
             return;
         }
-        StatusSnapshot snapshot = buildStatusSnapshot(serverPlayer);
+        StatusSnapshot snapshot = RuntimeProjectionService.buildTransponderStatusSnapshot(
+                serverPlayer,
+                transponder,
+                initialRecordingMode
+        );
         int snapshotHash = snapshot.hashCode();
         List<net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry> linkedCargoEntries = List.copyOf(transponder.linkedCargo());
         int linkedCargoEntriesHash = linkedCargoEntries.hashCode();

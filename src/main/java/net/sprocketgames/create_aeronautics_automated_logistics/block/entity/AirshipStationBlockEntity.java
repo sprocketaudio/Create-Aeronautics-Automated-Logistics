@@ -57,6 +57,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBloc
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipStationMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RecordingSession;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.RuntimeProjectionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.StationChunkLoadingService;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerRef;
@@ -156,24 +157,14 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     @Nullable
     @Override
     public AbstractContainerMenu createMenu(int containerId, Inventory playerInventory, Player player) {
-        registerStationSnapshot();
-        if (level instanceof ServerLevel serverLevel) {
-            refreshGroundDockLink(serverLevel);
+        if (level instanceof ServerLevel) {
             if (player instanceof ServerPlayer serverPlayer) {
-                AirshipStationMenu menu = new AirshipStationMenu(
+                return RuntimeProjectionService.createStationMenu(
                         containerId,
                         playerInventory,
-                        worldPosition,
-                        selectedTransponderId(),
-                        selectedShipName(),
-                        linkedCargoRevision(),
-                        linkedCargoSummary(),
-                        linkedCargo(),
-                        selectedTransponderId().flatMap(AutomatedLogisticsServices.SCHEDULES::lastCargoFailureContext),
-                        AirshipStationMenu.buildRouteChoiceSummaries(serverPlayer, this)
+                        serverPlayer,
+                        this
                 );
-                menu.setClientState(AirshipStationMenu.buildClientState(serverPlayer, this));
-                return menu;
             }
         }
         return new AirshipStationMenu(

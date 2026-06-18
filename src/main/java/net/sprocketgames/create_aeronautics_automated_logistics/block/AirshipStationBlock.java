@@ -40,6 +40,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBloc
 import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteBlockBreakProtection;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.RuntimeProjectionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.StationChunkLoadingService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
@@ -142,27 +143,8 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
                 station.linkedCargo().size(),
                 station.linkedCargoSummary()
         );
-        serverPlayer.openMenu(station, buffer -> {
-            buffer.writeBlockPos(pos);
-            buffer.writeBoolean(station.selectedTransponderId().isPresent());
-            station.selectedTransponderId().ifPresent(buffer::writeUUID);
-            buffer.writeUtf(station.selectedShipName(), 64);
-            ShipTransponderMenu.writeCargoRevision(buffer, station.linkedCargoRevision());
-            ShipTransponderMenu.writeCargoSummary(buffer, station.linkedCargoSummary());
-            ShipTransponderMenu.writeLinkedCargoEntries(buffer, station.linkedCargo());
-            ShipTransponderMenu.writeCargoFailureContext(
-                    buffer,
-                    station.selectedTransponderId().flatMap(AutomatedLogisticsServices.SCHEDULES::lastCargoFailureContext)
-            );
-            AirshipStationMenu.writeRouteChoiceSummaries(
-                    buffer,
-                    AirshipStationMenu.buildRouteChoiceSummaries(serverPlayer, station)
-            );
-            AirshipStationMenu.writeClientState(
-                    buffer,
-                    AirshipStationMenu.buildClientState(serverPlayer, station)
-            );
-        });
+        serverPlayer.openMenu(station, buffer ->
+                RuntimeProjectionService.writeStationOpenData(buffer, serverPlayer, station));
         return InteractionResult.CONSUME;
     }
 
@@ -225,7 +207,7 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
                 && level.getBlockEntity(pos) instanceof AirshipStationBlockEntity station) {
             if (level.isClientSide) {
                 LogisticsClientOverlays.clearLandingAreaIfMatches(pos);
-                LogisticsClientOverlays.clearFlightPathIfPreviewingStationRoutes(station.stationId());
+                LogisticsClientOverlays.clearFlightPathIfPreviewingStationId(station.stationId());
                 LogisticsClientOverlays.clearDockIfMatches(station.groundDockPos());
                 List<List<BlockPos>> cargoGroups = CargoLinkSupport.expandPreviewPositionGroups(level, pos, 6, station.linkedCargo());
                 if (cargoGroups.isEmpty()) {

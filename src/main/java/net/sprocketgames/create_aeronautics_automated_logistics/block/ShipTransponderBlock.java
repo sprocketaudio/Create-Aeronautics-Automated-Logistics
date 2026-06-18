@@ -45,6 +45,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatu
 import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.RuntimeProjectionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteBlockBreakProtection;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
 import org.jetbrains.annotations.NotNull;
@@ -149,33 +150,14 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
             if (!serverPlayer.isSpectator() && CargoLinkInteractionService.cancelPendingIfSource(serverPlayer, pos)) {
                 return InteractionResult.CONSUME;
             }
-            transponder.refreshRuntimeShip((ServerLevel) level);
-            transponder.refreshShipDockLink((ServerLevel) level);
             RouteStatus projectedRuntimeStatus = AutomatedLogisticsServices.SCHEDULES.projectedRuntimeStatus((ServerLevel) level, transponder);
             boolean projectedScheduleActive = AutomatedLogisticsServices.SCHEDULES.projectedScheduleActive((ServerLevel) level, transponder);
             boolean projectedScheduleHeld = AutomatedLogisticsServices.SCHEDULES.projectedScheduleHeld((ServerLevel) level, transponder);
-            ShipTransponderMenu.InitialRecordingState recordingState =
-                    ShipTransponderMenu.resolveInitialRecordingState(serverPlayer, transponder, false);
-            ShipTransponderMenu statusMenu = new ShipTransponderMenu(
-                    0,
-                    serverPlayer.getInventory(),
-                    pos,
-                    recordingState.recordingMode(),
-                    recordingState.recordingSessionActive(),
-                    recordingState.appendToSchedule(),
-                    transponder.recordingDestinationStationId(),
-                    projectedRuntimeStatus,
-                    transponder.dockOutputActive(),
-                    transponder.hasOwnedStops(),
-                    transponder.ownedSchedule(),
-                    transponder.linkedCargoRevision(),
-                    transponder.linkedCargoSummary(),
-                    transponder.linkedCargo(),
-                    AutomatedLogisticsServices.SCHEDULES.lastCargoFailureContext(transponder.transponderId()),
-                    AutomatedLogisticsServices.SCHEDULES.lastFailure(transponder.transponderId()),
-                    ShipTransponderMenu.StatusSnapshot.idle()
+            ShipTransponderMenu.StatusSnapshot statusSnapshot = RuntimeProjectionService.buildTransponderStatusSnapshot(
+                    serverPlayer,
+                    transponder,
+                    false
             );
-            ShipTransponderMenu.StatusSnapshot statusSnapshot = statusMenu.buildStatusSnapshot(serverPlayer);
             CreateAeronauticsAutomatedLogistics.debugUi(
                     "Transponder openMenu id={} pos={} player={} spectator={} runtimeStatus={} scheduleActive={} scheduleHeld={} dockOutput={} hasOwnedStops={} ownedStopsCount={} linkedCargoCount={} cargoSummary={} snapshotText='{}' snapshotColor={}",
                     transponder.transponderId(),
@@ -193,30 +175,8 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
                     statusSnapshot.text(),
                     Integer.toHexString(statusSnapshot.color())
             );
-            serverPlayer.openMenu(transponder, buffer -> {
-                buffer.writeBlockPos(pos);
-                buffer.writeBoolean(recordingState.recordingMode());
-                buffer.writeBoolean(recordingState.recordingSessionActive());
-                buffer.writeBoolean(recordingState.appendToSchedule());
-                buffer.writeBoolean(transponder.recordingDestinationStationId().isPresent());
-                transponder.recordingDestinationStationId().ifPresent(buffer::writeUUID);
-                buffer.writeEnum(projectedRuntimeStatus);
-                buffer.writeBoolean(transponder.dockOutputActive());
-                buffer.writeBoolean(transponder.hasOwnedStops());
-                buffer.writeNbt(AirshipScheduleNbtSerializer.write(transponder.ownedSchedule()));
-                ShipTransponderMenu.writeCargoRevision(buffer, transponder.linkedCargoRevision());
-                ShipTransponderMenu.writeCargoSummary(buffer, transponder.linkedCargoSummary());
-                ShipTransponderMenu.writeLinkedCargoEntries(buffer, transponder.linkedCargo());
-                ShipTransponderMenu.writeCargoFailureContext(
-                        buffer,
-                        AutomatedLogisticsServices.SCHEDULES.lastCargoFailureContext(transponder.transponderId())
-                );
-                ShipTransponderMenu.writePlaybackFailure(
-                        buffer,
-                        AutomatedLogisticsServices.SCHEDULES.lastFailure(transponder.transponderId())
-                );
-                ShipTransponderMenu.writeStatusSnapshot(buffer, statusSnapshot);
-            });
+            serverPlayer.openMenu(transponder, buffer ->
+                    RuntimeProjectionService.writeTransponderOpenData(buffer, serverPlayer, transponder, false));
         }
         return InteractionResult.CONSUME;
     }
@@ -272,7 +232,7 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
                 && level.getBlockEntity(pos) instanceof ShipTransponderBlockEntity transponder) {
             if (level.isClientSide) {
                 LogisticsClientOverlays.clearFlightPathIfPreviewingTransponder(pos);
-                LogisticsClientOverlays.clearFlightPathIfPreviewingTransponderRoutes(transponder.transponderId());
+                LogisticsClientOverlays.clearFlightPathIfPreviewingTransponderId(transponder.transponderId());
                 LogisticsClientOverlays.clearShipTransponderHighlightIfMatches(pos);
                 LogisticsClientOverlays.clearDockIfMatches(transponder.shipDockPos());
                 List<List<BlockPos>> cargoGroups = CargoLinkSupport.expandPreviewPositionGroups(level, pos, 6, transponder.linkedCargo());

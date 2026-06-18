@@ -57,6 +57,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatu
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoFailureContext;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.RuntimeProjectionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.SableSubLevelVehicleController;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerRef;
 
@@ -145,23 +146,24 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     @Override
     public AbstractContainerMenu createMenu(int containerId, Inventory playerInventory, Player player) {
         if (level instanceof ServerLevel serverLevel) {
-            refreshRuntimeShip(serverLevel);
-            refreshShipDockLink(serverLevel);
-            migrateLegacyInstalledSchedule();
-            RouteStatus projectedRuntimeStatus = AutomatedLogisticsServices.SCHEDULES.projectedRuntimeStatus(serverLevel, this);
-            ShipTransponderMenu.InitialRecordingState recordingState =
-                    player instanceof ServerPlayer serverPlayer
-                            ? ShipTransponderMenu.resolveInitialRecordingState(serverPlayer, this, false)
-                            : new ShipTransponderMenu.InitialRecordingState(false, false, appendToSchedule());
-            ShipTransponderMenu menu = new ShipTransponderMenu(
+            if (player instanceof ServerPlayer serverPlayer) {
+                return RuntimeProjectionService.createTransponderMenu(
+                        containerId,
+                        playerInventory,
+                        serverPlayer,
+                        this,
+                        false
+                );
+            }
+            return new ShipTransponderMenu(
                     containerId,
                     playerInventory,
                     worldPosition,
-                    recordingState.recordingMode(),
-                    recordingState.recordingSessionActive(),
-                    recordingState.appendToSchedule(),
+                    false,
+                    false,
+                    appendToSchedule(),
                     recordingDestinationStationId(),
-                    projectedRuntimeStatus,
+                    AutomatedLogisticsServices.SCHEDULES.projectedRuntimeStatus(serverLevel, this),
                     dockOutputActive(),
                     hasOwnedStops(),
                     ownedSchedule(),
@@ -172,28 +174,6 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                     AutomatedLogisticsServices.SCHEDULES.lastFailure(transponderId()),
                     ShipTransponderMenu.StatusSnapshot.idle()
             );
-            if (player instanceof ServerPlayer serverPlayer) {
-                return new ShipTransponderMenu(
-                        containerId,
-                        playerInventory,
-                        worldPosition,
-                        recordingState.recordingMode(),
-                        recordingState.recordingSessionActive(),
-                        recordingState.appendToSchedule(),
-                        recordingDestinationStationId(),
-                        projectedRuntimeStatus,
-                        dockOutputActive(),
-                        hasOwnedStops(),
-                        ownedSchedule(),
-                        linkedCargoRevision(),
-                        linkedCargoSummary(),
-                        linkedCargo(),
-                        AutomatedLogisticsServices.SCHEDULES.lastCargoFailureContext(transponderId()),
-                        AutomatedLogisticsServices.SCHEDULES.lastFailure(transponderId()),
-                        menu.buildStatusSnapshot(serverPlayer)
-                );
-            }
-            return menu;
         }
         return new ShipTransponderMenu(
                 containerId,

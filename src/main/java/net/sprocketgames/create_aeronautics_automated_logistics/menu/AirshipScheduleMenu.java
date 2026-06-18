@@ -311,7 +311,15 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         ));
         PacketDistributor.sendToPlayer(
                 serverPlayer,
-                new SetFlightPathPreviewPayload(false, List.of(), List.of(), Optional.empty())
+                new SetFlightPathPreviewPayload(
+                        false,
+                        List.of(),
+                        List.of(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty()
+                )
         );
     }
 

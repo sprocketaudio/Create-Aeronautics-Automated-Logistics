@@ -1488,6 +1488,22 @@ Compatibility:
 
 ### Phase 8 - Replace Direct UI Coupling With Projection Snapshots
 
+Status:
+
+- Complete on 2026-06-18.
+- Added `RuntimeProjectionService` so server menu-open and sync paths build
+  `ShipTransponderMenu.StatusSnapshot` and `AirshipStationMenu.ClientState`
+  through one projection boundary.
+- `createMenu`, block open handlers, and transponder reopen now use projection
+  snapshots without refreshing runtime ship discovery, refreshing dock links,
+  migrating schedules, or registering station snapshots during menu open.
+- Preview payloads now carry producer identity (`routeId`, `stationId`,
+  `transponderId`, `transponderPos`) so client preview state clears by explicit
+  producer identity instead of depending on route-cache scans.
+- Existing menu DTOs, colors, text, controls, and payload shapes for station
+  and transponder state were preserved apart from the preview identity
+  extension.
+
 Goal:
 
 - Finish the menu refactor from `MENU_SYSTEM_AUDIT.md` using runtime snapshots.
