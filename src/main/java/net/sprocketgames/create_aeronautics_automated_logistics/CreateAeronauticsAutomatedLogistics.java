@@ -21,10 +21,14 @@ import net.sprocketgames.create_aeronautics_automated_logistics.service.Recordin
 import net.sprocketgames.create_aeronautics_automated_logistics.service.StationChunkLoadingService;
 import org.slf4j.Logger;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 @Mod(CreateAeronauticsAutomatedLogistics.MOD_ID)
 public class CreateAeronauticsAutomatedLogistics {
     public static final String MOD_ID = "create_aeronautics_automated_logistics";
     public static final Logger LOGGER = LogUtils.getLogger();
+    private static final Map<String, Long> THROTTLED_LOG_TIMES = new ConcurrentHashMap<>();
 
     private enum DebugChannel {
         PLAYBACK("playback"),
@@ -68,6 +72,14 @@ public class CreateAeronauticsAutomatedLogistics {
         log(DebugChannel.VEHICLE, true, message, args);
     }
 
+    public static void debugVehicleThrottled(String key, long intervalMs, String message, Object... args) {
+        throttledLog(DebugChannel.VEHICLE, false, key, intervalMs, message, args);
+    }
+
+    public static void debugVehicleWarnThrottled(String key, long intervalMs, String message, Object... args) {
+        throttledLog(DebugChannel.VEHICLE, true, key, intervalMs, message, args);
+    }
+
     public static void debugDocking(String message, Object... args) {
         log(DebugChannel.DOCKING, false, message, args);
     }
@@ -102,6 +114,28 @@ public class CreateAeronauticsAutomatedLogistics {
         } else {
             LOGGER.info("[{}] " + message, prefixedArgs);
         }
+    }
+
+    private static void throttledLog(
+            DebugChannel channel,
+            boolean warn,
+            String key,
+            long intervalMs,
+            String message,
+            Object... args
+    ) {
+        if (!AutomatedLogisticsConfig.debugLogging() || !channelEnabled(channel)) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        Long previous = THROTTLED_LOG_TIMES.putIfAbsent(key, now);
+        if (previous != null) {
+            if (now - previous < intervalMs) {
+                return;
+            }
+            THROTTLED_LOG_TIMES.put(key, now);
+        }
+        log(channel, warn, message, args);
     }
 
     private static boolean channelEnabled(DebugChannel channel) {

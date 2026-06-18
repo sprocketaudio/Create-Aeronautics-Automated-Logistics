@@ -1,7 +1,6 @@
 package net.sprocketgames.create_aeronautics_automated_logistics.service;
 
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
-import dev.ryanhcode.sable.sublevel.storage.HoldingSubLevel;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.storage.holding.GlobalSavedSubLevelPointer;
 import dev.ryanhcode.sable.sublevel.storage.holding.SubLevelHoldingChunk;
@@ -473,14 +472,13 @@ public final class ShipRecoveryService {
             );
         }
         CreateAeronauticsAutomatedLogistics.debugVehicle(
-                "Loading moved stored Sable ship {} sublevel={} pointer={} directly into loaded route context for {}",
+                "Loading moved stored Sable ship {} sublevel={} pointer={} through Sable holding snatch for {}",
                 ship.displayName(),
                 ship.subLevelId(),
                 ship.pointer(),
                 description
         );
-        purgeInMemoryHoldingSubLevel(container.getHoldingChunkMap(), subLevelId, description);
-        container.getHoldingChunkMap().loadHoldingSubLevel(new HoldingSubLevel(data, ship.pointer()));
+        snatchMovedHoldingSubLevel(container, ship, description);
         invalidateStoredShipCache(server);
         if (container.getSubLevel(subLevelId) == null) {
             return RecoveryResult.failure(
@@ -489,6 +487,22 @@ public final class ShipRecoveryService {
             );
         }
         return RecoveryResult.success("Materialized stored ship " + ship.displayName() + " at " + description + ".");
+    }
+
+    private static void snatchMovedHoldingSubLevel(
+            ServerSubLevelContainer container,
+            StoredShipIdentity ship,
+            String description
+    ) {
+        SubLevelHoldingChunkMap holdingChunkMap = container.getHoldingChunkMap();
+        purgeInMemoryHoldingSubLevel(holdingChunkMap, ship.subLevelId(), description);
+        holdingChunkMap.updateChunkStatus(ship.pointer().chunkPos(), false);
+        holdingChunkMap.processChanges();
+        holdingChunkMap.updateChunkStatus(ship.pointer().chunkPos(), true);
+        holdingChunkMap.processChanges();
+        if (container.getSubLevel(ship.subLevelId()) == null) {
+            holdingChunkMap.snatchAndLoad(ship.pointer(), ship.subLevelId());
+        }
     }
 
     private static Optional<String> movedSubLevelLoadBlocker(ServerLevel level, SubLevelData data) {
@@ -876,9 +890,11 @@ public final class ShipRecoveryService {
 
     public static int pruneLoadedDuplicateStoredShips(MinecraftServer server) {
         Objects.requireNonNull(server, "server");
+        Set<UUID> protectedShipIds = protectedRuntimeShipIds(server);
 
         CreateAeronauticsAutomatedLogistics.debugVehicle(
-                "Scanning Sable storage for stored entries that duplicate currently loaded sublevels"
+                "Scanning Sable storage for stored entries that duplicate currently loaded sublevels; protectedRuntimeShips={}",
+                protectedShipIds.size()
         );
         boolean changed = false;
         int removed = 0;
@@ -951,8 +967,30 @@ public final class ShipRecoveryService {
                             if (data == null || !loadedIds.contains(data.uuid())) {
                                 continue;
                             }
+                            GlobalSavedSubLevelPointer globalPointer = new GlobalSavedSubLevelPointer(
+                                    chunkPos,
+                                    pointer.storageIndex(),
+                                    pointer.subLevelIndex()
+                            );
+                            if (protectedShipIds.contains(data.uuid())) {
+                                var loaded = container.getSubLevel(data.uuid());
+                                GlobalSavedSubLevelPointer currentPointer =
+                                        loaded instanceof ServerSubLevel loadedSubLevel && !loadedSubLevel.isRemoved()
+                                                ? loadedSubLevel.getLastSerializationPointer()
+                                                : null;
+                                if (currentPointer == null || currentPointer.equals(globalPointer)) {
+                                    CreateAeronauticsAutomatedLogistics.debugVehicle(
+                                            "Refused loaded-duplicate stored-pointer prune for protected runtime ship {} in chunk {} pointer={} currentPointer={}",
+                                            data.uuid(),
+                                            chunkPos,
+                                            globalPointer,
+                                            currentPointer
+                                    );
+                                    continue;
+                                }
+                            }
                             pointerIterator.remove();
-                            storage.attemptSaveSubLevel(new GlobalSavedSubLevelPointer(chunkPos, pointer.storageIndex(), pointer.subLevelIndex()), null);
+                            storage.attemptSaveSubLevel(globalPointer, null);
                             removedForLevel++;
                             chunkChanged = true;
                             changed = true;
@@ -1067,6 +1105,7 @@ public final class ShipRecoveryService {
 
     public static int pruneDanglingStoredShipEntries(MinecraftServer server) {
         Objects.requireNonNull(server, "server");
+        Set<UUID> protectedShipIds = protectedRuntimeShipIds(server);
 
         int removed = 0;
         boolean changed = false;
@@ -1091,6 +1130,9 @@ public final class ShipRecoveryService {
                         (chunkPos, pointer, data) -> {
                             if (data == null) {
                                 return PointerCleanupDecision.removePointerOnly("missing stored sublevel data");
+                            }
+                            if (protectedShipIds.contains(data.uuid())) {
+                                return PointerCleanupDecision.keep();
                             }
                             Optional<LocalPlotKey> storedPlot = storedLocalPlot(data);
                             if (storedPlot.isEmpty()) {
@@ -1124,6 +1166,17 @@ public final class ShipRecoveryService {
             invalidateStoredShipCache(server);
         }
         return removed;
+    }
+
+    private static Set<UUID> protectedRuntimeShipIds(MinecraftServer server) {
+        Set<UUID> protectedShipIds = new LinkedHashSet<>(AutomatedLogisticsServices.PLAYBACK.routeRuntimeShipIds());
+        if (!protectedShipIds.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugVehicle(
+                    "Protecting {} runtime-referenced stored Sable ship id(s) from prune",
+                    protectedShipIds.size()
+            );
+        }
+        return protectedShipIds;
     }
 
     private static Map<LocalPlotKey, UUID> loadedPlotOccupants(ServerSubLevelContainer container) {

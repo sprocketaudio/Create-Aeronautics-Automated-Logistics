@@ -723,6 +723,10 @@ public class AirshipScheduleExecutionService {
         return activeRuntimes.containsKey(transponderId);
     }
 
+    public boolean hasActiveRuntimes() {
+        return !activeRuntimes.isEmpty();
+    }
+
     public Optional<RuntimeSnapshot> snapshot(MinecraftServer server, UUID transponderId) {
         Objects.requireNonNull(server, "server");
         Objects.requireNonNull(transponderId, "transponderId");
@@ -782,17 +786,6 @@ public class AirshipScheduleExecutionService {
     public boolean projectedScheduleHeld(ServerLevel level, ShipTransponderBlockEntity transponder) {
         Objects.requireNonNull(transponder, "transponder");
         return projectedScheduleHeld(level, transponder.transponderId());
-    }
-
-    public RouteStatus reconcileRuntimeStatus(ServerLevel level, UUID transponderId) {
-        Objects.requireNonNull(level, "level");
-        Objects.requireNonNull(transponderId, "transponderId");
-        return projectedRuntimeStatus(level, transponderId);
-    }
-
-    public RouteStatus reconcileRuntimeStatus(ServerLevel level, ShipTransponderBlockEntity transponder) {
-        Objects.requireNonNull(transponder, "transponder");
-        return reconcileRuntimeStatus(level, transponder.transponderId());
     }
 
     public boolean hasActiveRuntime(ServerLevel level, UUID transponderId) {

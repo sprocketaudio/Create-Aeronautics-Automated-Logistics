@@ -15,17 +15,25 @@ import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderRegistry;
+import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderSnapshot;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.ShowShipTransponderHighlightPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.FailureReason;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteId;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.ShipRecoveryService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AirshipScheduleExecutionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RuntimeSnapshot;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RuntimeState;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteSegmentDirectorySavedData.PendingDeletionRecord;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteSegmentDirectorySavedData.StoredSegmentRecord;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.ShipMaterializationService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.VehicleRoutePlaybackService;
 
 public final class AutomatedLogisticsCommands {
@@ -59,9 +67,11 @@ public final class AutomatedLogisticsCommands {
     public static void onRegisterCommands(RegisterCommandsEvent event) {
         event.getDispatcher().register(Commands.literal("aal")
                 .then(tpTree().requires(source -> source.hasPermission(2)))
+                .then(debugTree().requires(source -> source.hasPermission(2)))
                 .then(runtimeTree()));
         event.getDispatcher().register(Commands.literal("automated_logistics")
                 .then(tpTree().requires(source -> source.hasPermission(2)))
+                .then(debugTree().requires(source -> source.hasPermission(2)))
                 .then(runtimeTree()));
     }
 
@@ -130,6 +140,41 @@ public final class AutomatedLogisticsCommands {
                                         context.getSource(),
                                         StringArgumentType.getString(context, "runtime")
                                 ))));
+    }
+
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> debugTree() {
+        return Commands.literal("debug")
+                .then(Commands.literal("routes")
+                        .then(Commands.literal("transponder")
+                                .then(Commands.argument("transponder", StringArgumentType.word())
+                                        .suggests(SHIP_ID_SUGGESTIONS)
+                                        .executes(context -> debugRoutesForTransponder(
+                                                context,
+                                                StringArgumentType.getString(context, "transponder")
+                                        ))))
+                        .then(Commands.literal("directory")
+                                .executes(AutomatedLogisticsCommands::debugRouteDirectory))
+                        .then(Commands.literal("pending-deletions")
+                                .executes(AutomatedLogisticsCommands::debugPendingRouteDeletions))
+                        .then(Commands.literal("rebuild-index")
+                                .executes(AutomatedLogisticsCommands::debugRebuildRouteIndex)))
+                .then(Commands.literal("runtime")
+                        .then(Commands.literal("dump")
+                                .executes(AutomatedLogisticsCommands::debugRuntimeDump)))
+                .then(Commands.literal("materialization")
+                        .then(Commands.literal("transponder")
+                                .then(Commands.argument("transponder", StringArgumentType.word())
+                                        .suggests(SHIP_ID_SUGGESTIONS)
+                                        .executes(context -> debugMaterializationForTransponder(
+                                                context,
+                                                StringArgumentType.getString(context, "transponder")
+                                        )))))
+                .then(Commands.literal("playback")
+                        .then(Commands.literal("dump")
+                                .executes(AutomatedLogisticsCommands::debugPlaybackDump)))
+                .then(Commands.literal("restore")
+                        .then(Commands.literal("dump")
+                                .executes(AutomatedLogisticsCommands::debugRestoreDump)));
     }
 
     private static int recoverToStation(CommandContext<CommandSourceStack> context, String shipIdentifier, String stationIdentifier) {
@@ -293,6 +338,180 @@ public final class AutomatedLogisticsCommands {
         return 1;
     }
 
+    private static int debugRoutesForTransponder(CommandContext<CommandSourceStack> context, String transponderIdText) {
+        CommandSourceStack source = context.getSource();
+        UUID transponderId = parseUuid(source, transponderIdText, "transponder id");
+        if (transponderId == null) {
+            return 0;
+        }
+
+        MinecraftServer server = source.getServer();
+        List<StoredSegmentRecord> stored = AutomatedLogisticsServices.ROUTES.storedSegmentsForTransponder(server, transponderId);
+        List<RouteSegment> loadedPersistent = AutomatedLogisticsServices.ROUTES.loadedSegmentsForTransponder(server, transponderId);
+        List<RouteSegment> cached = RouteSegmentRegistry.forTransponder(transponderId);
+        source.sendSuccess(() -> Component.literal("Route repository dump for transponder " + transponderId), false);
+        source.sendSuccess(() -> Component.literal("Persistent directory records: " + stored.size()
+                + " | loaded station records: " + loadedPersistent.size()
+                + " | loaded index/cache records: " + cached.size()), false);
+        for (StoredSegmentRecord record : stored) {
+            source.sendSuccess(() -> Component.literal("- stored " + storedSegmentDebug(record)), false);
+        }
+        for (RouteSegment segment : loadedPersistent) {
+            source.sendSuccess(() -> Component.literal("- loaded station segment=" + routeSegmentDebug(segment)), false);
+        }
+        for (RouteSegment segment : cached) {
+            source.sendSuccess(() -> Component.literal("- cache segment=" + routeSegmentDebug(segment)), false);
+        }
+        return Math.max(1, stored.size() + loadedPersistent.size() + cached.size());
+    }
+
+    private static int debugRouteDirectory(CommandContext<CommandSourceStack> context) {
+        CommandSourceStack source = context.getSource();
+        List<StoredSegmentRecord> records = net.sprocketgames.create_aeronautics_automated_logistics.service.RouteSegmentDirectorySavedData
+                .allStoredSegments(source.getServer());
+        List<RouteSegment> loadedPersistent = AutomatedLogisticsServices.ROUTES.loadedSegments(source.getServer());
+        long distinctSegments = records.stream().map(StoredSegmentRecord::segmentId).distinct().count();
+        long distinctTransponders = records.stream().map(StoredSegmentRecord::transponderId).distinct().count();
+        source.sendSuccess(() -> Component.literal("Route segment directory records: " + records.size()
+                + " | distinct segments: " + distinctSegments
+                + " | transponders: " + distinctTransponders
+                + " | loaded station records visible without loading chunks: " + loadedPersistent.size()), false);
+        for (StoredSegmentRecord record : records) {
+            source.sendSuccess(() -> Component.literal("- " + storedSegmentDebug(record)), false);
+        }
+        return Math.max(1, records.size());
+    }
+
+    private static int debugPendingRouteDeletions(CommandContext<CommandSourceStack> context) {
+        CommandSourceStack source = context.getSource();
+        List<PendingDeletionRecord> pending = AutomatedLogisticsServices.ROUTES.allPendingDeletions(source.getServer());
+        source.sendSuccess(() -> Component.literal("Pending deferred route deletions: " + pending.size()), false);
+        for (PendingDeletionRecord record : pending) {
+            source.sendSuccess(() -> Component.literal("- holderStation=" + record.holderStationId()
+                    + " segment=" + record.segmentId().value()), false);
+        }
+        return Math.max(1, pending.size());
+    }
+
+    private static int debugRebuildRouteIndex(CommandContext<CommandSourceStack> context) {
+        CommandSourceStack source = context.getSource();
+        int indexed = AutomatedLogisticsServices.ROUTES.rebuildLoadedRouteIndex(source.getServer());
+        source.sendSuccess(() -> Component.literal("Rebuilt loaded route index/cache from loaded persistent stations. Indexed segments: " + indexed), true);
+        return Math.max(1, indexed);
+    }
+
+    private static int debugRuntimeDump(CommandContext<CommandSourceStack> context) {
+        CommandSourceStack source = context.getSource();
+        List<RuntimeSnapshot> snapshots = AutomatedLogisticsServices.SCHEDULES.activeSnapshots(source.getServer(), Optional.empty());
+        source.sendSuccess(() -> Component.literal("Runtime snapshots: " + snapshots.size()), false);
+        for (RuntimeSnapshot snapshot : snapshots) {
+            source.sendSuccess(() -> Component.literal("- runtime=" + snapshot.runtimeId()
+                    + " transponder=" + snapshot.transponderId()
+                    + " state=" + snapshot.state()
+                    + " route=" + snapshot.activeRouteId().map(id -> id.value().toString()).orElse("none")
+                    + " pendingPlayback=" + snapshot.pendingPlayback()
+                    + " failure=" + snapshot.lastFailure().map(Enum::name).orElse("none")
+                    + " dim=" + snapshot.dimension().location()
+                    + " transponderPos=" + snapshot.transponderPos().map(AutomatedLogisticsCommands::formatBlockPos).orElse("unknown")), false);
+        }
+        return Math.max(1, snapshots.size());
+    }
+
+    private static int debugPlaybackDump(CommandContext<CommandSourceStack> context) {
+        CommandSourceStack source = context.getSource();
+        List<VehicleRoutePlaybackService.RuntimePlaybackSummary> summaries =
+                AutomatedLogisticsServices.PLAYBACK.runtimePlaybackSummaries(source.getServer());
+        source.sendSuccess(() -> Component.literal("Playback/motion/wait summaries: " + summaries.size()
+                + " | active visual ships: " + AutomatedLogisticsServices.PLAYBACK.activeVisualShipIds().size()), false);
+        for (VehicleRoutePlaybackService.RuntimePlaybackSummary summary : summaries) {
+            source.sendSuccess(() -> Component.literal("- route=" + summary.routeId().value()
+                    + " ship=" + summary.shipName()
+                    + " state=" + summary.state()
+                    + " transponder=" + summary.transponderId().map(UUID::toString).orElse("unknown")
+                    + " vehicle=" + summary.vehicleId().map(UUID::toString).orElse("unknown")
+                    + " controllerPos=" + summary.controllerPos().map(AutomatedLogisticsCommands::formatBlockPos).orElse("unknown")
+                    + " cooldown=" + summary.restoreCooldownTicks()
+                    + " dim=" + summary.dimension().location()), false);
+        }
+        return Math.max(1, summaries.size());
+    }
+
+    private static int debugMaterializationForTransponder(CommandContext<CommandSourceStack> context, String transponderIdText) {
+        CommandSourceStack source = context.getSource();
+        UUID transponderId = parseUuid(source, transponderIdText, "transponder id");
+        if (transponderId == null) {
+            return 0;
+        }
+
+        Optional<ShipTransponderSnapshot> snapshot = ShipTransponderRegistry.snapshot(transponderId);
+        if (snapshot.isEmpty()) {
+            source.sendFailure(Component.literal("No loaded transponder identity snapshot for " + transponderId + ". This does not invalidate routes or schedules."));
+            return 0;
+        }
+
+        ShipTransponderSnapshot ship = snapshot.get();
+        ShipMaterializationService materialization = new ShipMaterializationService();
+        source.sendSuccess(() -> Component.literal("Materialization snapshot for transponder " + transponderId
+                + " ship=" + ship.shipName()
+                + " dim=" + ship.dimension().location()
+                + " transponderPos=" + formatBlockPos(ship.transponderPos())
+                + " runtimeShip=" + ship.runtimeShipId().map(UUID::toString).orElse("none")), false);
+
+        if (ship.controllerRef().isPresent()) {
+            ShipMaterializationService.LiveBodyLookupResult result = materialization.resolveLiveBody(
+                    new ShipMaterializationService.LiveBodyLookupRequest(
+                            source.getServer(),
+                            ship.dimension(),
+                            ship.controllerRef().get(),
+                            Optional.of(transponderId),
+                            ship.runtimeShipId().or(ship.controllerRef().get()::vehicleId),
+                            Optional.empty(),
+                            Optional.empty(),
+                            Optional.empty(),
+                            "debug_command",
+                            "manual_materialization_snapshot"
+                    )
+            );
+            source.sendSuccess(() -> Component.literal("Typed live/stored result: " + materializationResultDebug(result.result())
+                    + " | controllerResolved=" + result.controller().isPresent()), false);
+            return 1;
+        }
+
+        if (ship.runtimeShipId().isPresent()) {
+            ShipMaterializationService.MaterializationResult result = materialization.bodyAvailability(
+                    source.getServer(),
+                    ship.dimension(),
+                    Optional.of(transponderId),
+                    ship.runtimeShipId().get(),
+                    Optional.empty(),
+                    Optional.empty()
+            );
+            source.sendSuccess(() -> Component.literal("Typed body availability result: " + materializationResultDebug(result)
+                    + " | controllerRef=missing"), false);
+            return 1;
+        }
+
+        source.sendSuccess(() -> Component.literal("Typed materialization result: CONTROLLER_MISSING reason=no_controller_ref_or_runtime_ship_id"), false);
+        return 1;
+    }
+
+    private static int debugRestoreDump(CommandContext<CommandSourceStack> context) {
+        CommandSourceStack source = context.getSource();
+        List<RuntimeSnapshot> runtimes = AutomatedLogisticsServices.SCHEDULES.activeSnapshots(source.getServer(), Optional.empty());
+        List<VehicleRoutePlaybackService.RuntimePlaybackSummary> playbacks =
+                AutomatedLogisticsServices.PLAYBACK.runtimePlaybackSummaries(source.getServer());
+        long orphanPlaybacks = runtimes.stream().filter(snapshot -> snapshot.state() == RuntimeState.ORPHAN_PLAYBACK).count();
+        long pendingPlaybacks = playbacks.stream().filter(summary -> summary.state().startsWith("PENDING_")).count();
+        source.sendSuccess(() -> Component.literal("Restore coordinator state: stateless staged restore; observable runtime records="
+                + runtimes.size()
+                + " playback records=" + playbacks.size()
+                + " orphanPlaybackSnapshots=" + orphanPlaybacks
+                + " pendingPlaybackRecords=" + pendingPlaybacks
+                + " activeVisualShips=" + AutomatedLogisticsServices.PLAYBACK.activeVisualShipIds().size()), false);
+        source.sendSuccess(() -> Component.literal("Use /aal debug runtime dump and /aal debug playback dump for record-level details."), false);
+        return 1;
+    }
+
     private static int sendResult(CommandSourceStack source, ShipRecoveryService.RecoveryResult result) {
         if (result.success()) {
             source.sendSuccess(() -> Component.literal(result.message()), true);
@@ -431,5 +650,33 @@ public final class AutomatedLogisticsCommands {
 
     private static String formatPosition(net.minecraft.world.phys.Vec3 position) {
         return String.format(java.util.Locale.ROOT, "(%.1f, %.1f, %.1f)", position.x, position.y, position.z);
+    }
+
+    private static String formatBlockPos(net.minecraft.core.BlockPos pos) {
+        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
+    }
+
+    private static String storedSegmentDebug(StoredSegmentRecord record) {
+        return "segment=" + record.segmentId().value()
+                + " holderStation=" + record.holderStationId()
+                + " start=" + record.startStationId()
+                + " end=" + record.endStationId()
+                + " transponder=" + record.transponderId()
+                + " dim=" + record.dimension().location();
+    }
+
+    private static String routeSegmentDebug(RouteSegment segment) {
+        return segment.id().value()
+                + " start=" + segment.startStationId()
+                + " end=" + segment.endStationId()
+                + " transponder=" + segment.transponderId()
+                + " dim=" + segment.dimension().location();
+    }
+
+    private static String materializationResultDebug(ShipMaterializationService.MaterializationResult result) {
+        return result.type()
+                + " success=" + result.success()
+                + " reason=" + result.reasonCode()
+                + " message=\"" + result.message() + "\"";
     }
 }

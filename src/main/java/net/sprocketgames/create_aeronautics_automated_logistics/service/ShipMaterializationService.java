@@ -20,6 +20,8 @@ import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleC
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerResolver;
 
 public final class ShipMaterializationService {
+    private static final long HOT_PATH_LOG_INTERVAL_MS = 5000L;
+
     public enum MaterializationResultType {
         LOADED_BODY_AVAILABLE,
         LIVE_BODY_MISSING,
@@ -532,7 +534,9 @@ public final class ShipMaterializationService {
             MaterializationResultType resultType,
             String reasonCode
     ) {
-        CreateAeronauticsAutomatedLogistics.debugVehicle(
+        logVehicle(
+                false,
+                hotPathRequestKey(event, request.reasonCode(), request.transponderId(), request.sableShipId(), request.routeId(), request.currentLegIndex(), request.stationId()),
                 "{} transponder={} sableShip={} route={} leg={} station={} dimension={} targetPose={} forceAtHold={} resultType={} reason={}",
                 event,
                 format(request.transponderId()),
@@ -553,24 +557,20 @@ public final class ShipMaterializationService {
             MaterializationRequest request,
             MaterializationResult result
     ) {
-        if (result.success()) {
-            CreateAeronauticsAutomatedLogistics.debugVehicle(
-                    "{} transponder={} sableShip={} route={} leg={} station={} dimension={} targetPose={} resultType={} reason={} message={}",
-                    event,
-                    format(request.transponderId()),
-                    format(request.sableShipId()),
-                    request.routeId().map(id -> id.value().toString()).orElse("missing"),
-                    request.currentLegIndex().map(Object::toString).orElse("missing"),
-                    format(request.stationId()),
-                    request.dimension().location(),
-                    request.targetPose(),
-                    result.type(),
-                    result.reasonCode(),
-                    result.message()
-            );
-            return;
-        }
-        CreateAeronauticsAutomatedLogistics.debugVehicleWarn(
+        logVehicle(
+                !result.success(),
+                result.success()
+                        ? null
+                        : hotPathResultKey(
+                                event,
+                                request.reasonCode(),
+                                result.reasonCode(),
+                                request.transponderId(),
+                                request.sableShipId(),
+                                request.routeId(),
+                                request.currentLegIndex(),
+                                request.stationId()
+                        ),
                 "{} transponder={} sableShip={} route={} leg={} station={} dimension={} targetPose={} resultType={} reason={} message={}",
                 event,
                 format(request.transponderId()),
@@ -587,7 +587,11 @@ public final class ShipMaterializationService {
     }
 
     private static void logCleanup(String event, CleanupRequest request, String reasonCode, int removed) {
-        CreateAeronauticsAutomatedLogistics.debugVehicleWarn(
+        logVehicle(
+                true,
+                removed > 0
+                        ? null
+                        : "cleanup|" + event + "|" + request.source() + "|" + reasonCode + "|" + format(request.sableShipId()),
                 "{} source={} transponder={} sableShip={} route={} leg={} station={} dimension={} resultType={} reason={} removed={}",
                 event,
                 request.source(),
@@ -612,7 +616,9 @@ public final class ShipMaterializationService {
             ResourceKey<Level> dimension,
             String reasonCode
     ) {
-        CreateAeronauticsAutomatedLogistics.debugVehicle(
+        logVehicle(
+                false,
+                "bodyLookup|" + event + "|" + reasonCode + "|" + format(transponderId) + "|" + shipId,
                 "{} transponder={} sableShip={} route={} station={} dimension={} targetPose=none resultType={} reason={}",
                 event,
                 format(transponderId),
@@ -634,7 +640,9 @@ public final class ShipMaterializationService {
             ResourceKey<Level> dimension,
             MaterializationResult result
     ) {
-        CreateAeronauticsAutomatedLogistics.debugVehicle(
+        logVehicle(
+                !result.success(),
+                result.success() ? null : "bodyResult|" + event + "|" + result.reasonCode() + "|" + format(transponderId) + "|" + shipId,
                 "{} transponder={} sableShip={} route={} station={} dimension={} targetPose=none resultType={} reason={} message={}",
                 event,
                 format(transponderId),
@@ -654,7 +662,17 @@ public final class ShipMaterializationService {
             MaterializationResultType resultType,
             String reasonCode
     ) {
-        CreateAeronauticsAutomatedLogistics.debugVehicle(
+        logVehicle(
+                false,
+                hotPathRequestKey(
+                        event + "|" + request.source(),
+                        reasonCode,
+                        request.transponderId(),
+                        request.sableShipId(),
+                        request.routeId(),
+                        request.currentLegIndex(),
+                        request.stationId()
+                ),
                 "{} source={} transponder={} sableShip={} route={} leg={} station={} dimension={} targetPose=none resultType={} reason={}",
                 event,
                 request.source(),
@@ -674,24 +692,20 @@ public final class ShipMaterializationService {
             LiveBodyLookupRequest request,
             MaterializationResult result
     ) {
-        if (result.success()) {
-            CreateAeronauticsAutomatedLogistics.debugVehicle(
-                    "{} source={} transponder={} sableShip={} route={} leg={} station={} dimension={} targetPose=none resultType={} reason={} message={}",
-                    event,
-                    request.source(),
-                    format(request.transponderId()),
-                    format(request.sableShipId()),
-                    request.routeId().map(id -> id.value().toString()).orElse("missing"),
-                    request.currentLegIndex().map(Object::toString).orElse("missing"),
-                    format(request.stationId()),
-                    request.dimension().location(),
-                    result.type(),
-                    result.reasonCode(),
-                    result.message()
-            );
-            return;
-        }
-        CreateAeronauticsAutomatedLogistics.debugVehicleWarn(
+        logVehicle(
+                !result.success(),
+                result.success()
+                        ? null
+                        : hotPathResultKey(
+                                event + "|" + request.source(),
+                                request.reasonCode(),
+                                result.reasonCode(),
+                                request.transponderId(),
+                                request.sableShipId(),
+                                request.routeId(),
+                                request.currentLegIndex(),
+                                request.stationId()
+                        ),
                 "{} source={} transponder={} sableShip={} route={} leg={} station={} dimension={} targetPose=none resultType={} reason={} message={}",
                 event,
                 request.source(),
@@ -705,6 +719,75 @@ public final class ShipMaterializationService {
                 result.reasonCode(),
                 result.message()
         );
+    }
+
+    private static void logVehicle(boolean warn, String throttleKey, String message, Object... args) {
+        if (throttleKey == null) {
+            if (warn) {
+                CreateAeronauticsAutomatedLogistics.debugVehicleWarn(message, args);
+            } else {
+                CreateAeronauticsAutomatedLogistics.debugVehicle(message, args);
+            }
+            return;
+        }
+        if (warn) {
+            CreateAeronauticsAutomatedLogistics.debugVehicleWarnThrottled(throttleKey, HOT_PATH_LOG_INTERVAL_MS, message, args);
+        } else {
+            CreateAeronauticsAutomatedLogistics.debugVehicleThrottled(throttleKey, HOT_PATH_LOG_INTERVAL_MS, message, args);
+        }
+    }
+
+    private static String hotPathRequestKey(
+            String event,
+            String reasonCode,
+            Optional<UUID> transponderId,
+            Optional<UUID> sableShipId,
+            Optional<RouteId> routeId,
+            Optional<Integer> currentLegIndex,
+            Optional<UUID> stationId
+    ) {
+        if (!isHotPathReason(reasonCode)) {
+            return null;
+        }
+        return "materializationRequest|"
+                + event + "|"
+                + reasonCode + "|"
+                + format(transponderId) + "|"
+                + format(sableShipId) + "|"
+                + routeId.map(id -> id.value().toString()).orElse("missing") + "|"
+                + currentLegIndex.map(Object::toString).orElse("missing") + "|"
+                + format(stationId);
+    }
+
+    private static String hotPathResultKey(
+            String event,
+            String sourceReasonCode,
+            String resultReasonCode,
+            Optional<UUID> transponderId,
+            Optional<UUID> sableShipId,
+            Optional<RouteId> routeId,
+            Optional<Integer> currentLegIndex,
+            Optional<UUID> stationId
+    ) {
+        if (!isHotPathReason(sourceReasonCode)) {
+            return null;
+        }
+        return "materializationResult|"
+                + event + "|"
+                + sourceReasonCode + "|"
+                + resultReasonCode + "|"
+                + format(transponderId) + "|"
+                + format(sableShipId) + "|"
+                + routeId.map(id -> id.value().toString()).orElse("missing") + "|"
+                + currentLegIndex.map(Object::toString).orElse("missing") + "|"
+                + format(stationId);
+    }
+
+    private static boolean isHotPathReason(String reasonCode) {
+        return reasonCode.equals("hold_refresh")
+                || reasonCode.equals("tick_refresh")
+                || reasonCode.startsWith("startup_sable_storage_grace")
+                || reasonCode.equals("body_availability");
     }
 
     private static String format(Optional<UUID> value) {

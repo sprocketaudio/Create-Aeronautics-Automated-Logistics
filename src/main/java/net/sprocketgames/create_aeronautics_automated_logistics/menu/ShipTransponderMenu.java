@@ -337,6 +337,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         buffer.writeBoolean(snapshot.readyRoute());
         buffer.writeBoolean(snapshot.canPreviewRoute());
         buffer.writeBoolean(snapshot.canControl());
+        buffer.writeBoolean(snapshot.operationalShip());
         writeViewSnapshot(buffer, snapshot.dockView());
         writeViewSnapshot(buffer, snapshot.cargoView());
     }
@@ -359,9 +360,10 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         boolean readyRoute = buffer.readableBytes() > 0 && buffer.readBoolean();
         boolean canPreviewRoute = buffer.readableBytes() > 0 && buffer.readBoolean();
         boolean canControl = buffer.readableBytes() > 0 && buffer.readBoolean();
+        boolean operationalShip = buffer.readableBytes() > 0 && buffer.readBoolean();
         ViewSnapshot dockView = buffer.readableBytes() > 0 ? readViewSnapshot(buffer, ViewSnapshot.dockNone()) : ViewSnapshot.dockNone();
         ViewSnapshot cargoView = buffer.readableBytes() > 0 ? readViewSnapshot(buffer, ViewSnapshot.cargoNone()) : ViewSnapshot.cargoNone();
-        return new StatusSnapshot(shipName, text, color, List.copyOf(tooltip), scheduleActive, scheduleHeld, hasOwnedStops, readyRoute, canPreviewRoute, canControl, dockView, cargoView);
+        return new StatusSnapshot(shipName, text, color, List.copyOf(tooltip), scheduleActive, scheduleHeld, hasOwnedStops, readyRoute, canPreviewRoute, canControl, operationalShip, dockView, cargoView);
     }
 
     public static void writeViewSnapshot(FriendlyByteBuf buffer, ViewSnapshot snapshot) {
@@ -687,6 +689,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
     }
 
     public StatusSnapshot buildStatusSnapshot(Player player) {
+        boolean operationalShip = hasOperationalShip(player);
         List<StatusTooltipLine> tooltip = runtimeStatusTooltip(player).stream()
                 .map(component -> new StatusTooltipLine(component.getString(), componentColor(component, 0xFFFFFF)))
                 .toList();
@@ -701,6 +704,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
                 hasReadyInstalledRoutePlan(player),
                 canPreviewOwnedRoute(player),
                 canControlTransponderLocally(player),
+                operationalShip,
                 buildDockViewSnapshot(player),
                 buildCargoViewSnapshot(player)
         );
@@ -814,27 +818,39 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
 
     public boolean canPreviewOwnedRoute(Player player) {
         if (!isServerView(player)) {
-            return resolvedClientStatusSnapshot().canPreviewRoute();
+            return resolvedClientStatusSnapshot(player).canPreviewRoute();
         }
-        return hasOwnedStops(player) && hasResolvableInstalledRouteChain(player);
+        return hasOperationalShip(player) && hasOwnedStops(player) && hasResolvableInstalledRouteChain(player);
     }
 
     public boolean isScheduleRunning(Player player) {
         if (!isServerView(player)) {
-            return resolvedClientStatusSnapshot().scheduleActive();
+            return resolvedClientStatusSnapshot(player).scheduleActive();
         }
         return fallbackScheduleActive(player);
     }
 
     public boolean isScheduleHeld(Player player) {
         if (!isServerView(player)) {
-            return resolvedClientStatusSnapshot().scheduleHeld();
+            return resolvedClientStatusSnapshot(player).scheduleHeld();
         }
         return fallbackScheduleHeld(player);
     }
 
     public boolean isScheduleSlotLocked(Player player) {
         return isScheduleRunning(player);
+    }
+
+    public boolean hasOperationalShip(Player player) {
+        if (!isServerView(player)) {
+            return resolvedClientStatusSnapshot(player).operationalShip();
+        }
+        if (!(player.level() instanceof ServerLevel level)) {
+            return false;
+        }
+        return liveTransponder(player)
+                .flatMap(transponder -> transponder.controllerRef(level))
+                .isPresent();
     }
 
     @Override
@@ -865,7 +881,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
 
     public boolean canControlTransponderLocally(Player player) {
         if (!isServerView(player)) {
-            return resolvedClientStatusSnapshot().canControl();
+            return resolvedClientStatusSnapshot(player).canControl();
         }
         if (!AutomatedLogisticsConfig.RESTRICT_TRANSPONDER_CONTROL_TO_OWNER.get()) {
             return true;
@@ -922,6 +938,10 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
     }
 
     private boolean startInstalledSchedule(net.minecraft.server.level.ServerPlayer player, ShipTransponderBlockEntity transponder) {
+        if (!hasOperationalShip(player)) {
+            showOperationalShipRequired(player, transponder);
+            return false;
+        }
         if (AutomatedLogisticsServices.SCHEDULES.isHeld(transponder.transponderId())) {
             boolean resumed = AutomatedLogisticsServices.SCHEDULES.resumeHeldPlayback(player.serverLevel(), transponder.transponderId());
             if (resumed) {
@@ -1001,6 +1021,22 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
     }
 
     private boolean togglePreview(net.minecraft.server.level.ServerPlayer player, ShipTransponderBlockEntity transponder) {
+        if (!hasOperationalShip(player)) {
+            PacketDistributor.sendToPlayer(
+                    player,
+                    new SetFlightPathPreviewPayload(
+                            false,
+                            List.of(),
+                            List.of(),
+                            Optional.empty(),
+                            Optional.empty(),
+                            Optional.empty(),
+                            Optional.empty()
+                    )
+            );
+            showOperationalShipRequired(player, transponder);
+            return false;
+        }
         if (!transponder.hasOwnedStops()) {
             PacketDistributor.sendToPlayer(
                     player,
@@ -1095,7 +1131,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
 
     public Component runtimeStateText(Player player) {
         if (!isServerView(player)) {
-            StatusSnapshot snapshot = resolvedClientStatusSnapshot();
+            StatusSnapshot snapshot = resolvedClientStatusSnapshot(player);
             return Component.literal(snapshot.text()).setStyle(Style.EMPTY.withColor(snapshot.color()));
         }
         RouteStatus runtimeStatus = fallbackRuntimeStatus(player);
@@ -1114,6 +1150,9 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
             }
             return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.running");
         }
+        if (!hasOperationalShip(player)) {
+            return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.ship_missing_status");
+        }
         if (!hasOwnedStops(player)) {
             return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.no_route_status");
         }
@@ -1129,7 +1168,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
 
     public int runtimeStateColor(Player player) {
         if (!isServerView(player)) {
-            return resolvedClientStatusSnapshot().color();
+            return resolvedClientStatusSnapshot(player).color();
         }
         RouteStatus runtimeStatus = fallbackRuntimeStatus(player);
         if (fallbackScheduleActive(player)) {
@@ -1140,6 +1179,9 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
                 return 0xFFFFB4B4;
             }
             return 0xFFE7C46E;
+        }
+        if (!hasOperationalShip(player)) {
+            return 0xFFFFB4B4;
         }
         if (!hasOwnedStops(player)) {
             return 0xFFFFD98A;
@@ -1155,7 +1197,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
     }
 
     public Optional<BlockPos> dockPreviewPos(Player player) {
-        if (!canControlTransponderLocally(player)) {
+        if (!canControlTransponderLocally(player) || !hasOperationalShip(player)) {
             return Optional.empty();
         }
         return liveTransponder(player)
@@ -1170,13 +1212,17 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
     }
 
     public List<List<BlockPos>> cargoPreviewPositionGroups(Player player) {
-        if (!canControlTransponderLocally(player)) {
+        boolean canControl = canControlTransponderLocally(player);
+        boolean operationalShip = hasOperationalShip(player);
+        if (!canControl || !operationalShip) {
+            if (!canControl) {
             CreateAeronauticsAutomatedLogistics.debugUi(
-                    "Transponder cargo preview blocked localControl=false player={} spectator={} menuPos={}",
-                    player.getName().getString(),
-                    player.isSpectator(),
-                    transponderPos()
-            );
+                        "Transponder cargo preview blocked localControl=false player={} spectator={} menuPos={}",
+                        player.getName().getString(),
+                        player.isSpectator(),
+                        transponderPos()
+                );
+            }
             return List.of();
         }
         List<net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry> linkedEntries = resolveLinkedCargoEntries(player);
@@ -1228,7 +1274,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
 
     public List<Component> runtimeStatusTooltip(Player player) {
         if (!isServerView(player)) {
-            StatusSnapshot snapshot = resolvedClientStatusSnapshot();
+            StatusSnapshot snapshot = resolvedClientStatusSnapshot(player);
             return snapshot.tooltip().stream()
                     .<Component>map(line -> Component.literal(line.text()).setStyle(Style.EMPTY.withColor(line.color())))
                     .toList();
@@ -1278,6 +1324,13 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
             return List.of(
                     Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.running.1").withStyle(ChatFormatting.YELLOW),
                 Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.running.2").withStyle(ChatFormatting.GRAY)
+            );
+        }
+        if (!hasOperationalShip(player)) {
+            return List.of(
+                    Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.ship_missing_status").withStyle(ChatFormatting.RED),
+                    Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.failure_reason.vehicle_missing").withStyle(ChatFormatting.GRAY),
+                    Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.failure_hint.vehicle_missing").withStyle(ChatFormatting.DARK_GRAY)
             );
         }
         Optional<PlaybackFailure> failure = fallbackFailure(player);
@@ -1485,7 +1538,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
 
     public boolean shouldSuggestRecordingMode(Player player) {
         if (!isServerView(player)) {
-            StatusSnapshot snapshot = resolvedClientStatusSnapshot();
+            StatusSnapshot snapshot = resolvedClientStatusSnapshot(player);
             if (snapshot.scheduleActive() || snapshot.scheduleHeld()) {
                 return false;
             }
@@ -1604,6 +1657,10 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
     }
 
     private boolean beginLinkDock(net.minecraft.server.level.ServerPlayer player, ShipTransponderBlockEntity transponder) {
+        if (!hasOperationalShip(player)) {
+            showOperationalShipRequired(player, transponder);
+            return false;
+        }
         DockLinkInteractionService.beginTransponderLink(player, transponder.getBlockPos());
         return true;
     }
@@ -1640,6 +1697,10 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
     }
 
     private boolean linkCargo(ServerPlayer player, ShipTransponderBlockEntity transponder) {
+        if (!hasOperationalShip(player)) {
+            showOperationalShipRequired(player, transponder);
+            return false;
+        }
         if (AutomatedLogisticsServices.SCHEDULES.isRunning(transponder.transponderId())) {
             actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.cargo_link.locked_while_running"));
             AllSoundEvents.DENY.playOnServer(player.level(), transponder.getBlockPos(), 0.5f, 1.0f);
@@ -1647,6 +1708,11 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         }
         CargoLinkInteractionService.beginTransponderLink(player, transponder.getBlockPos());
         return true;
+    }
+
+    private void showOperationalShipRequired(ServerPlayer player, ShipTransponderBlockEntity transponder) {
+        actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.transponder.requires_valid_ship"));
+        AllSoundEvents.DENY.playOnServer(player.level(), transponder.getBlockPos(), 0.5f, 1.0f);
     }
 
     private boolean clearCargo(ServerPlayer player, ShipTransponderBlockEntity transponder) {
@@ -1716,6 +1782,48 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         return clientStatusSnapshotOverride == null ? initialStatusSnapshot : clientStatusSnapshotOverride;
     }
 
+    private StatusSnapshot resolvedClientStatusSnapshot(Player player) {
+        StatusSnapshot snapshot = resolvedClientStatusSnapshot();
+        if (isServerView(player)
+                || snapshot.scheduleActive()
+                || snapshot.scheduleHeld()
+                || !snapshot.operationalShip()
+                || !snapshot.readyRoute()) {
+            return snapshot;
+        }
+
+        AirshipSchedule clientSchedule = resolveOwnedSchedule(player);
+        if (clientSchedule.entries().isEmpty() || hasResolvableInstalledRouteChain(player)) {
+            return snapshot;
+        }
+
+        List<StatusTooltipLine> tooltip = List.of(
+                new StatusTooltipLine(
+                        Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.partial_route.1").getString(),
+                        0xFFFFD98A
+                ),
+                new StatusTooltipLine(
+                        Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.partial_route.2").getString(),
+                        0xFF9AA6B2
+                )
+        );
+        return new StatusSnapshot(
+                snapshot.shipName(),
+                Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.partial_route_status").getString(),
+                0xFFFFD98A,
+                tooltip,
+                snapshot.scheduleActive(),
+                snapshot.scheduleHeld(),
+                true,
+                false,
+                false,
+                snapshot.canControl(),
+                snapshot.operationalShip(),
+                snapshot.dockView(),
+                snapshot.cargoView()
+        );
+    }
+
     public record StatusSnapshot(
             String shipName,
             String text,
@@ -1727,6 +1835,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
             boolean readyRoute,
             boolean canPreviewRoute,
             boolean canControl,
+            boolean operationalShip,
             ViewSnapshot dockView,
             ViewSnapshot cargoView
     ) {
@@ -1744,6 +1853,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
                     Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.idle").getString(),
                     0xAFC7DE,
                     List.of(),
+                    false,
                     false,
                     false,
                     false,

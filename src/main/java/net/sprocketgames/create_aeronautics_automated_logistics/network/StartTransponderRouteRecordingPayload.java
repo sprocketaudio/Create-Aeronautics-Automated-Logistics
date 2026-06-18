@@ -92,12 +92,11 @@ public record StartTransponderRouteRecordingPayload(BlockPos transponderPos, UUI
             fail(player, Component.translatable("message.create_aeronautics_automated_logistics.recording.busy"));
             return;
         }
+        Optional<VehicleController> controller = transponder.controllerRef(level)
+                .flatMap(controllerRef -> VehicleControllerResolver.resolve(level, controllerRef));
         Optional<ShipTransponderSnapshot> shipSnapshot = ShipTransponderRegistry.snapshot(transponder.transponderId())
                 .filter(ship -> ship.dimension().equals(level.dimension()));
-        Optional<VehicleController> controller = shipSnapshot
-                .flatMap(ShipTransponderSnapshot::controllerRef)
-                .flatMap(controllerRef -> VehicleControllerResolver.resolve(level, controllerRef));
-        if (shipSnapshot.isEmpty() || controller.isEmpty()) {
+        if (controller.isEmpty() || shipSnapshot.isEmpty()) {
             fail(player, Component.translatable("message.create_aeronautics_automated_logistics.recording.selected_ship_unavailable"));
             return;
         }

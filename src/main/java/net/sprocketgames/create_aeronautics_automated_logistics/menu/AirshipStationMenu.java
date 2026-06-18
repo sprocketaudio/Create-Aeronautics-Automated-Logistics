@@ -818,7 +818,8 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         if (transponder.isEmpty() || !canControlSelectedShipLocally(player, transponder.get())) {
             return false;
         }
-        if (transponder.get().scheduleActive() && !transponder.get().scheduleHeld()) {
+        if (projectedScheduleActive(((ServerPlayer) player).serverLevel(), transponder.get())
+                && !projectedScheduleHeld(((ServerPlayer) player).serverLevel(), transponder.get())) {
             return false;
         }
         if (!transponder.get().hasOwnedStops()) {
@@ -840,7 +841,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         Optional<ShipTransponderBlockEntity> transponder = selectedTransponder(player, station);
         return transponder.isPresent()
                 && canControlSelectedShipLocally(player, transponder.get())
-                && transponder.get().scheduleActive();
+                && projectedScheduleActive(((ServerPlayer) player).serverLevel(), transponder.get());
     }
 
     public Component routesFromHereText(Player player) {
@@ -1390,8 +1391,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
                     Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.recording.2").withStyle(ChatFormatting.GRAY)
             );
         }
-        RouteStatus runtimeStatus = transponder.runtimeStatus();
-        runtimeStatus = projectedRuntimeStatus((ServerLevel) player.level(), transponder);
+        RouteStatus runtimeStatus = projectedRuntimeStatus((ServerLevel) player.level(), transponder);
         if (projectedScheduleActive((ServerLevel) player.level(), transponder)) {
             if (runtimeStatus == RouteStatus.HELD) {
                 return List.of(

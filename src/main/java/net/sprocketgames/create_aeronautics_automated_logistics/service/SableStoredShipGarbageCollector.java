@@ -5,6 +5,8 @@ import net.minecraft.server.MinecraftServer;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 
 public final class SableStoredShipGarbageCollector {
+    private static final long HOT_PATH_LOG_INTERVAL_MS = 5000L;
+
     private SableStoredShipGarbageCollector() {
     }
 
@@ -12,6 +14,14 @@ public final class SableStoredShipGarbageCollector {
         Objects.requireNonNull(server, "server");
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(reasonCode, "reasonCode");
+
+        if (shouldDeferStartupPrune(server, source, reasonCode)) {
+            if (!shouldLogDeferredStartupPrune(server, source)) {
+                return 0;
+            }
+            log("cleanup/prune refused", source, reasonCode, "active_runtime_ship_protection", 0);
+            return 0;
+        }
 
         log("cleanup/prune request", source, reasonCode, "dangling_or_colliding_stored_pointer_scan", 0);
         int removed = ShipRecoveryService.pruneDanglingStoredShipEntries(server);
@@ -39,7 +49,24 @@ public final class SableStoredShipGarbageCollector {
     }
 
     private static void log(String event, String source, String reasonCode, String proof, int removed) {
-        CreateAeronauticsAutomatedLogistics.debugVehicleWarn(
+        String throttleKey = removed > 0
+                ? null
+                : "garbageCollector|" + event + "|" + source + "|" + reasonCode + "|" + proof;
+        if (throttleKey == null) {
+            CreateAeronauticsAutomatedLogistics.debugVehicleWarn(
+                    "{} source={} transponder=missing sableShip=missing route=missing station=missing dimension=all resultType={} reason={} proof={} removed={}",
+                    event,
+                    source,
+                    removed > 0 ? "APPLIED" : "REFUSED_OR_NOOP",
+                    reasonCode,
+                    proof,
+                    removed
+            );
+            return;
+        }
+        CreateAeronauticsAutomatedLogistics.debugVehicleWarnThrottled(
+                throttleKey,
+                HOT_PATH_LOG_INTERVAL_MS,
                 "{} source={} transponder=missing sableShip=missing route=missing station=missing dimension=all resultType={} reason={} proof={} removed={}",
                 event,
                 source,
@@ -48,5 +75,23 @@ public final class SableStoredShipGarbageCollector {
                 proof,
                 removed
         );
+    }
+
+    private static boolean shouldDeferStartupPrune(MinecraftServer server, String source, String reasonCode) {
+        if (!reasonCode.startsWith("startup_sable_storage_grace")) {
+            return false;
+        }
+        if (!source.startsWith("server_")) {
+            return false;
+        }
+        if (StationChunkLoadingService.isStartupSableStorageGraceActive()) {
+            return true;
+        }
+        return AutomatedLogisticsServices.SCHEDULES.hasActiveRuntimes()
+                || !AutomatedLogisticsServices.PLAYBACK.routeIdsWithRuntimeRecords().isEmpty();
+    }
+
+    private static boolean shouldLogDeferredStartupPrune(MinecraftServer server, String source) {
+        return !source.equals("server_tick_pre") || server.getTickCount() % 20 == 0;
     }
 }

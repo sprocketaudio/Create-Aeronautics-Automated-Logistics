@@ -119,6 +119,14 @@ public class RouteSegmentDirectorySavedData extends SavedData {
                 .toList();
     }
 
+    public static List<PendingDeletionRecord> allPendingDeletions(MinecraftServer server) {
+        return get(server).pendingDeletionsByHolder.entrySet().stream()
+                .flatMap(entry -> entry.getValue().stream()
+                        .map(segmentId -> new PendingDeletionRecord(entry.getKey(), segmentId)))
+                .sorted(PendingDeletionRecord.sortOrder())
+                .toList();
+    }
+
     public static boolean clearPendingDeletion(MinecraftServer server, UUID holderStationId, RouteSegmentId segmentId) {
         RouteSegmentDirectorySavedData data = get(server);
         Set<RouteSegmentId> pending = data.pendingDeletionsByHolder.get(holderStationId);
@@ -272,6 +280,14 @@ public class RouteSegmentDirectorySavedData extends SavedData {
             return Comparator
                     .comparing((StoredSegmentRecord record) -> record.segmentId().value().toString())
                     .thenComparing(record -> record.holderStationId().toString());
+        }
+    }
+
+    public record PendingDeletionRecord(UUID holderStationId, RouteSegmentId segmentId) {
+        public static Comparator<PendingDeletionRecord> sortOrder() {
+            return Comparator
+                    .comparing((PendingDeletionRecord record) -> record.holderStationId().toString())
+                    .thenComparing(record -> record.segmentId().value().toString());
         }
     }
 }

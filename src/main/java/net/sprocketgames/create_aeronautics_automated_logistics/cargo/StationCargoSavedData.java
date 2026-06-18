@@ -33,11 +33,6 @@ public class StationCargoSavedData extends SavedData {
     public static List<LinkedCargoEntry> entries(MinecraftServer server, UUID stationId, BlockPos anchorPos) {
         StoredCargo storedCargo = get(server).cargoByStation.get(stationId);
         if (storedCargo == null) {
-            CreateAeronauticsAutomatedLogistics.debugCargo(
-                    "StationCargoSavedData entries miss id={} anchor={}",
-                    stationId,
-                    anchorPos
-            );
             return List.of();
         }
         CreateAeronauticsAutomatedLogistics.debugCargo(

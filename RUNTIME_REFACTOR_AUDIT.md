@@ -1633,6 +1633,24 @@ Compatibility:
 
 ### Phase 10 - Tests, Validation Commands, And Dead-Code Removal
 
+Status:
+
+- Complete on 2026-06-18.
+- Added admin/debug commands for persistent route repository dumps, route
+  directory dumps, pending deferred deletion dumps, runtime snapshot dumps,
+  playback/motion/wait dumps, materialization snapshot dumps, restore summary
+  dumps, and loaded route index rebuild checks.
+- Removed obsolete wrapper paths that only mirrored the new projection/runtime
+  APIs, and replaced the remaining obvious server-side menu runtime-status reads
+  with the projection/runtime service path.
+- Retained compatibility fallbacks that still protect client DTO/bootstrap
+  behavior or old-world/runtime restore coverage; Phase 10 removed only code
+  proven redundant after the P2-P9 architecture split.
+- Final gameplay validation covered fresh route/schedule creation, concurrent
+  multi-ship runtime, docking/cargo behavior, reload while running/waiting,
+  unloaded transit, unload-reload rebind, restore fault inspection, and
+  recovery/kill tooling.
+
 Goal:
 
 - Lock behavior and remove old pathways only after validation.
@@ -1651,9 +1669,11 @@ Concrete changes:
   - runtime snapshot dump
   - materialization snapshot dump
   - route index rebuild check
-- Add unit-style tests for pure route/schedule validation if test framework
-  supports it.
+- Add route directory dump, pending deferred deletion dump, playback dump, and
+  restore summary dump.
 - Remove old direct registry cleanup once replaced.
+- Remove obsolete wrapper APIs once the new runtime/projection path is the only
+  authoritative server-side read path.
 
 Behavior unchanged:
 

@@ -14,7 +14,14 @@ The goal is to stop patching individual symptoms and replace the current mixed m
 - explicit about what is saved vs what is only UI/runtime state
 - testable against regressions
 
-This is an audit and refactor map. It does not define the final implementation yet.
+Status note:
+
+- The P8 runtime/UI projection refactor described by this audit has now been
+  implemented on the active `0.5` branch through `RuntimeProjectionService`,
+  targeted menu DTO sync, and producer-identity preview payloads.
+- The findings below remain useful as historical context and regression
+  checklist material, but they no longer describe the current branch as an
+  unstarted refactor target.
 
 ## 1. Current Problem Summary
 

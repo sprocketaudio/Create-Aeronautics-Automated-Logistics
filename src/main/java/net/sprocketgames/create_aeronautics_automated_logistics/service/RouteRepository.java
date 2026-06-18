@@ -18,6 +18,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.identity.Identit
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentId;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteSegmentDirectorySavedData.PendingDeletionRecord;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteSegmentDirectorySavedData.StoredSegmentRecord;
 
 public final class RouteRepository {
@@ -172,6 +173,22 @@ public final class RouteRepository {
         return RouteSegmentDirectorySavedData.forTransponder(server, transponderId);
     }
 
+    public List<RouteSegment> loadedSegmentsForTransponder(MinecraftServer server, UUID transponderId) {
+        Objects.requireNonNull(server, "server");
+        Objects.requireNonNull(transponderId, "transponderId");
+        return allSegments(server, false).stream()
+                .filter(segment -> segment.transponderId().equals(transponderId))
+                .sorted(newestFirst())
+                .toList();
+    }
+
+    public List<RouteSegment> loadedSegments(MinecraftServer server) {
+        Objects.requireNonNull(server, "server");
+        return allSegments(server, false).stream()
+                .sorted(newestFirst())
+                .toList();
+    }
+
     public List<StoredSegmentRecord> storedSegmentsForTransponderForExplicitCleanup(MinecraftServer server, UUID transponderId) {
         Objects.requireNonNull(server, "server");
         Objects.requireNonNull(transponderId, "transponderId");
@@ -207,6 +224,11 @@ public final class RouteRepository {
         Objects.requireNonNull(server, "server");
         Objects.requireNonNull(holderStationId, "holderStationId");
         return RouteSegmentDirectorySavedData.pendingDeletionsForHolder(server, holderStationId);
+    }
+
+    public List<PendingDeletionRecord> allPendingDeletions(MinecraftServer server) {
+        Objects.requireNonNull(server, "server");
+        return RouteSegmentDirectorySavedData.allPendingDeletions(server);
     }
 
     public boolean clearPendingDeletion(MinecraftServer server, UUID holderStationId, RouteSegmentId segmentId) {
