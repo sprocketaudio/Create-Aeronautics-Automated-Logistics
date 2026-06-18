@@ -237,7 +237,7 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
             }
             if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
                 StationChunkLoadingService.untrack(serverLevel.getServer(), station.stationId());
-                ScheduleRouteCleanup.removeRoutesForDeletedStation(serverLevel, station.stationId());
+                ScheduleRouteCleanup.deleteStationRoutes(serverLevel, station.stationId());
                 IdentityDirectorySavedData.removeStation(serverLevel.getServer(), station.stationId());
             }
         }

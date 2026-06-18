@@ -55,7 +55,6 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSch
 import net.sprocketgames.create_aeronautics_automated_logistics.route.CargoWaitTarget;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
-import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoFailureContext;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.SableSubLevelVehicleController;
@@ -603,10 +602,6 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         ownedSchedule = normalized;
         setChanged();
         syncClientState();
-    }
-
-    public int pruneInvalidOwnedSchedule(ServerLevel level) {
-        return ScheduleRouteCleanup.pruneOwnedSchedule(level, this);
     }
 
     public boolean hasOwnedStops() {

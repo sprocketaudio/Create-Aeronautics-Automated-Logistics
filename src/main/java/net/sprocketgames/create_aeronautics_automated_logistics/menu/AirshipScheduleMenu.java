@@ -303,7 +303,7 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         if (segmentsToDelete.isEmpty()) {
             return;
         }
-        ScheduleRouteCleanup.removeRoutesForDeletedStop(level, List.copyOf(segmentsToDelete));
+        ScheduleRouteCleanup.deleteStopAssociatedSegments(level, List.copyOf(segmentsToDelete));
         actionBar(player, Component.translatable(
                 "message.create_aeronautics_automated_logistics.airship_schedule.stop_deleted_with_routes",
                 displayStationName(schedule.entries().get(removedIndex)),

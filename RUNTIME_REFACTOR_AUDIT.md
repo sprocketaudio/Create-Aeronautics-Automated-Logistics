@@ -1137,6 +1137,22 @@ Compatibility:
 
 ### Phase 3 - Separate Explicit Cleanup From Repair
 
+Status:
+
+- Complete on 2026-06-18.
+- Cleanup entry points are now explicit and named:
+  `deleteStationRoutes(...)`, `deleteTransponderRoutes(...)`,
+  and `deleteStopAssociatedSegments(...)`.
+- The vague `pruneInvalid...` cleanup entry points were removed from the active
+  API surface.
+- Explicit delete paths keep their auditable logs for request, refusal,
+  immediate delete, deferred delete, and later deferred application.
+- Explicit delete cleanup no longer calls broad loaded-transponder schedule
+  repair. Station deletion may only remove loaded schedule entries that directly
+  reference the deleted station id or a persistent route-directory segment
+  connected to that station. Transponder and stop deletion do not repair
+  unrelated loaded schedules.
+
 Goal:
 
 - Make cleanup safe, named, and auditable.
@@ -1155,10 +1171,11 @@ Concrete changes:
   - `deleteStationRoutes(stationId)`
   - `deleteTransponderRoutes(transponderId)`
   - `deleteStopAssociatedSegments(transponderId, scheduleBeforeDelete, index)`
-  - `repairScheduleIfRequested(...)`
 - Remove vague `pruneInvalid...` calls from automatic paths.
 - Log every deletion with reason and source event.
 - Add refused-cleanup logs when route data is missing due to index not ready.
+- Remove mutating schedule repair that deleted entries because route resolution
+  or start-station derivation failed under partial repository visibility.
 
 Behavior unchanged:
 

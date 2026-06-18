@@ -313,7 +313,7 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
                 transponder.setRecordingDestinationStationId(java.util.Optional.empty());
                 transponder.setDockOutputActive(false);
                 transponder.setRuntimeStatus(RouteStatus.IDLE);
-                ScheduleRouteCleanup.removeRoutesForDeletedTransponder(serverLevel, transponder.transponderId());
+                ScheduleRouteCleanup.deleteTransponderRoutes(serverLevel, transponder.transponderId());
                 ShipTransponderRegistry.unregister(transponder.transponderId());
                 IdentityDirectorySavedData.removeShip(serverLevel.getServer(), transponder.transponderId());
             }
