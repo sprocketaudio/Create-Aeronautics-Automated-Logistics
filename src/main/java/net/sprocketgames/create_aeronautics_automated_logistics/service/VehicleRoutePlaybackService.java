@@ -61,6 +61,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
     private static final double ENDPOINT_ARRIVAL_DISTANCE = 0.2D;
     private static final double ENDPOINT_SETTLE_DISTANCE = 0.65D;
     private static final double ARRIVAL_ROTATION_TOLERANCE_DEGREES = 4.0D;
+    private static final double MIN_MEANINGFUL_ATTITUDE_PROGRESS_DEGREES = 2.0D;
     private static final double MIN_EFFECTIVE_REPLAY_SPEED = 0.03D;
     private static final double MAX_REPLAY_SPEED = 3.0D;
     private static final double RESTORE_CATCH_SPEED = 0.06D;
@@ -189,6 +190,14 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
 
     @Override
     public PlaybackOperationResult<RouteId> startPlayback(ServerLevel level, BlockPos stationPos, Route route) {
+        return startPlayback(level, stationPos, route, false);
+    }
+
+    public PlaybackOperationResult<RouteId> startPlaybackAtRecordedStart(ServerLevel level, BlockPos stationPos, Route route) {
+        return startPlayback(level, stationPos, route, true);
+    }
+
+    private PlaybackOperationResult<RouteId> startPlayback(ServerLevel level, BlockPos stationPos, Route route, boolean requireRecordedStart) {
         Objects.requireNonNull(level, "level");
         Objects.requireNonNull(stationPos, "stationPos");
         Objects.requireNonNull(route, "route");
@@ -228,7 +237,10 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         if (!controller.isAutomationCapable()) {
             return PlaybackOperationResult.failure(PlaybackFailure.MISSING_CONTROLLER);
         }
-        if (ActivePlayback.nearestEndpointDistance(route, controller) > AutomatedLogisticsConfig.MAX_START_JOIN_DISTANCE.get()) {
+        double startDistance = requireRecordedStart
+                ? controller.position().distanceTo(route.points().getFirst().position())
+                : ActivePlayback.nearestEndpointDistance(route, controller);
+        if (startDistance > AutomatedLogisticsConfig.MAX_START_JOIN_DISTANCE.get()) {
             return PlaybackOperationResult.failure(PlaybackFailure.START_TOO_FAR_FROM_ROUTE);
         }
 
@@ -1513,8 +1525,8 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         activePlayback.resetDockHandshake();
         activePlayback.beginDockReacquireMotion();
         activePlayback.beginRestoreCatch();
+        VehicleController controller = currentController(level, activePlayback, "resume_paused_playback", "resume_refresh");
         if (resumeFromUnloadedHold) {
-            VehicleController controller = currentController(level, activePlayback, "resume_paused_playback", "resume_refresh");
             Vec3 restorePosition = activePlayback.restoreCatchPosition();
             if (controller.isLoaded(level) && level.isLoaded(BlockPos.containing(restorePosition))) {
                 controller.relocate(level, restorePosition, activePlayback.restoreCatchRotation());
@@ -3116,7 +3128,23 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                     && distanceToTarget <= arrivalDistance
                     && !rotationAligned;
             if (aligningAtRecordedStopPose) {
+                Optional<PlaybackFailure> attitudeStalled = activePlayback.checkAttitudeStalled(targetRotation, controller);
+                if (attitudeStalled.isPresent()) {
+                    CreateAeronauticsAutomatedLogistics.LOGGER.warn(
+                            "Playback {} is attitude-stuck at point {}. angularDifference={}, bestAngularDifference={}, attitudeStalledTicks={}, segmentElapsedTicks={}, segmentDurationTicks={}",
+                            activePlayback.route().id().value(),
+                            activePlayback.targetIndex(),
+                            activePlayback.currentAngularDifference(targetRotation, controller).orElse(Double.NaN),
+                            activePlayback.previousAngularDifference(),
+                            activePlayback.attitudeStalledTicks(),
+                            activePlayback.segmentElapsedTicks(),
+                            activePlayback.segmentDurationTicks()
+                    );
+                    return attitudeStalled.get();
+                }
                 activePlayback.resetProgress(distanceToTarget);
+            } else {
+                activePlayback.resetAttitudeProgress();
             }
             if (!aligningAtRecordedStopPose
                     && AutomatedLogisticsConfig.STOP_ON_COLLISION.get()
@@ -3361,7 +3389,9 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         private long segmentDurationTicks;
         private int segmentElapsedTicks;
         private double previousDistance = Double.MAX_VALUE;
+        private double previousAngularDifference = Double.MAX_VALUE;
         private int stalledTicks;
+        private int attitudeStalledTicks;
         private int playbackTicks;
         private int initialJoinSegmentsAdvanced;
         private int endpointSettleTicks;
@@ -4326,9 +4356,55 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             return Optional.empty();
         }
 
+        private Optional<PlaybackFailure> checkAttitudeStalled(
+                Optional<RouteRotation> targetRotation,
+                VehicleController controller
+        ) {
+            Optional<Double> currentDifference = currentAngularDifference(targetRotation, controller);
+            if (currentDifference.isEmpty()) {
+                resetAttitudeProgress();
+                return Optional.empty();
+            }
+            if (currentDifference.get() <= ARRIVAL_ROTATION_TOLERANCE_DEGREES) {
+                resetAttitudeProgress();
+                return Optional.empty();
+            }
+            if (currentDifference.get() < previousAngularDifference - MIN_MEANINGFUL_ATTITUDE_PROGRESS_DEGREES) {
+                resetAttitudeProgress(currentDifference.get());
+                return Optional.empty();
+            }
+
+            attitudeStalledTicks++;
+            if (attitudeStalledTicks >= AutomatedLogisticsConfig.STUCK_TIMEOUT_TICKS.get()) {
+                return Optional.of(PlaybackFailure.STUCK);
+            }
+            return Optional.empty();
+        }
+
         private void resetProgress(double currentDistance) {
             previousDistance = currentDistance;
             stalledTicks = 0;
+        }
+
+        private void resetAttitudeProgress() {
+            previousAngularDifference = Double.MAX_VALUE;
+            attitudeStalledTicks = 0;
+        }
+
+        private void resetAttitudeProgress(double currentDifference) {
+            previousAngularDifference = currentDifference;
+            attitudeStalledTicks = 0;
+        }
+
+        private Optional<Double> currentAngularDifference(
+                Optional<RouteRotation> targetRotation,
+                VehicleController controller
+        ) {
+            if (targetRotation.isEmpty()) {
+                return Optional.empty();
+            }
+            return controller.routeRotation()
+                    .map(currentRotation -> angularDifferenceDegrees(currentRotation, targetRotation.get()));
         }
 
         private double currentDistanceToTarget(Vec3 currentPosition) {
@@ -4338,6 +4414,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         private void resetSegmentTiming() {
             segmentDurationTicks = computeSegmentDurationTicks();
             segmentElapsedTicks = 0;
+            resetAttitudeProgress();
         }
 
         private long overdueSegmentThresholdTicks() {
@@ -4402,6 +4479,14 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
 
         private int stalledTicks() {
             return stalledTicks;
+        }
+
+        private double previousAngularDifference() {
+            return previousAngularDifference;
+        }
+
+        private int attitudeStalledTicks() {
+            return attitudeStalledTicks;
         }
 
         private int endpointSettleTicks() {

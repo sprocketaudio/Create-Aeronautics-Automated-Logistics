@@ -820,7 +820,13 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         if (!isServerView(player)) {
             return resolvedClientStatusSnapshot(player).canPreviewRoute();
         }
-        return hasOperationalShip(player) && hasOwnedStops(player) && hasResolvableInstalledRouteChain(player);
+        if (!(player instanceof ServerPlayer serverPlayer)
+                || !(player.level().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity transponder)) {
+            return false;
+        }
+        return hasOperationalShip(player)
+                && hasOwnedStops(player)
+                && !previewPath(serverPlayer.serverLevel(), transponder, resolveOwnedSchedule(player)).points().isEmpty();
     }
 
     public boolean isScheduleRunning(Player player) {
@@ -1054,6 +1060,9 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         }
         PreviewPath preview = previewPath(player.serverLevel(), transponder, transponder.ownedSchedule());
         boolean enabled = !preview.points().isEmpty();
+        if (!enabled) {
+            showMenuWarning(player, Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.preview_empty"));
+        }
         PacketDistributor.sendToPlayer(
                 player,
                 new SetFlightPathPreviewPayload(
