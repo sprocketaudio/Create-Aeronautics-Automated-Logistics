@@ -874,13 +874,14 @@ public final class ShipRecoveryService {
         holdingChunkMap.processChanges();
     }
 
-    public static void pruneLoadedDuplicateStoredShips(MinecraftServer server) {
+    public static int pruneLoadedDuplicateStoredShips(MinecraftServer server) {
         Objects.requireNonNull(server, "server");
 
         CreateAeronauticsAutomatedLogistics.debugVehicle(
                 "Scanning Sable storage for stored entries that duplicate currently loaded sublevels"
         );
         boolean changed = false;
+        int removed = 0;
         for (ServerLevel level : server.getAllLevels()) {
             ServerSubLevelContainer container = ServerSubLevelContainer.getContainer(level);
             if (container == null) {
@@ -972,6 +973,7 @@ public final class ShipRecoveryService {
             }
 
             if (removedForLevel > 0) {
+                removed += removedForLevel;
                 CreateAeronauticsAutomatedLogistics.debugVehicle(
                         "Pruned {} stale stored holding sublevel entr{} in {} because the live sublevel was already loaded",
                         removedForLevel,
@@ -984,6 +986,7 @@ public final class ShipRecoveryService {
         if (changed) {
             invalidateStoredShipCache(server);
         }
+        return removed;
     }
 
     public static int pruneStoredEntriesForLoadedShip(

@@ -1410,6 +1410,27 @@ Compatibility:
 
 ### Phase 7 - Extract Ship Materialization Layer
 
+Status:
+
+- Complete on 2026-06-18.
+- Added `ShipMaterializationService` as the runtime/playback-facing boundary
+  for live Sable body lookup, stored body lookup, stored-body materialization,
+  materialization diagnostics, and loaded-body stored-entry pruning.
+- Added typed materialization result categories for loaded body, stored body,
+  missing stored body, sublevel load failure, chunk/load readiness, controller
+  reference problems, unsafe relocation/materialization, Sable API
+  unavailability, startup grace, unknown failure, and successful materialize.
+- Added `SableStoredShipGarbageCollector` so startup/stale stored-body cleanup
+  is called through explicit reason-coded cleanup/prune requests.
+- `VehicleRoutePlaybackService` now asks materialization for body availability
+  and materialization results instead of directly calling broad
+  `ShipRecoveryService` restore/prune methods.
+- `VehicleRoutePlaybackService` now routes live controller/body refresh and
+  runtime restore lookup through `ShipMaterializationService` typed live lookup
+  results instead of directly resolving `VehicleControllerResolver` failures.
+- Route persistence, schedule cleanup, UI projection, route validity, and
+  runtime save/load record shape were left unchanged for this phase.
+
 Goal:
 
 - Make Sable body loading/restoring an explicit dependency of runtime, not a

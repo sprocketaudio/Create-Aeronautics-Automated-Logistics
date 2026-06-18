@@ -3,7 +3,6 @@ package net.sprocketgames.create_aeronautics_automated_logistics.service;
 import com.simibubi.create.Create;
 import com.simibubi.create.content.redstone.link.RedstoneLinkNetworkHandler.Frequency;
 import com.simibubi.create.content.trains.schedule.condition.CargoThresholdCondition.Ops;
-import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -54,7 +53,6 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStop;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitCondition;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleController;
-import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerResolver;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleMotionResult;
 
 public class VehicleRoutePlaybackService implements RoutePlaybackService {
@@ -123,6 +121,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
     private final Set<UUID> activeVisualShipIds = new HashSet<>();
     private final WaitRuntime waitRuntime = new WaitRuntime();
     private final RouteMotionRunner motionRunner = new RouteMotionRunner();
+    private final ShipMaterializationService materializationService = new ShipMaterializationService();
     private int visualResyncTicker;
 
     public void resetRuntime() {
@@ -203,20 +202,28 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             return PlaybackOperationResult.failure(PlaybackFailure.STATION_MISSING);
         }
 
-        Optional<VehicleController> controller = VehicleControllerResolver.resolve(level, route.linkedController());
-        if (controller.isEmpty()) {
+        ShipMaterializationService.LiveBodyLookupResult liveLookup = liveControllerLookup(
+                level,
+                route,
+                Optional.empty(),
+                station.map(AirshipStationBlockEntity::stationId),
+                "start_playback",
+                "live_controller_lookup"
+        );
+        if (liveLookup.controller().isEmpty()) {
             return PlaybackOperationResult.failure(PlaybackFailure.VEHICLE_MISSING);
         }
-        if (!controller.get().isAutomationCapable()) {
+        VehicleController controller = liveLookup.controller().get();
+        if (!controller.isAutomationCapable()) {
             return PlaybackOperationResult.failure(PlaybackFailure.MISSING_CONTROLLER);
         }
-        if (ActivePlayback.nearestEndpointDistance(route, controller.get()) > AutomatedLogisticsConfig.MAX_START_JOIN_DISTANCE.get()) {
+        if (ActivePlayback.nearestEndpointDistance(route, controller) > AutomatedLogisticsConfig.MAX_START_JOIN_DISTANCE.get()) {
             return PlaybackOperationResult.failure(PlaybackFailure.START_TOO_FAR_FROM_ROUTE);
         }
 
         clearConflictingControllerPlaybacks(level, route);
 
-        ActivePlayback activePlayback = ActivePlayback.create(route, stationPos, controller.get());
+        ActivePlayback activePlayback = ActivePlayback.create(route, stationPos, controller);
         if (!motionRunner.validateCurrentLegForDeparture(level, activePlayback)) {
             return PlaybackOperationResult.failure(PlaybackFailure.COLLISION_OR_OBSTRUCTION);
         }
@@ -257,7 +264,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         }
 
         setVisualsActive(level, activePlayback, false);
-        activePlayback.controller(level).stop(level);
+        currentController(level, activePlayback, "stop_playback", "stop_refresh").stop(level);
         stationAt(level, activePlayback.stationPos()).ifPresent(station -> {
             clearDockOutputs(level, station, activePlayback);
             if (reason == FailureReason.NONE) {
@@ -334,7 +341,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             if (!activePlayback.route().dimension().equals(level.dimension())) {
                 continue;
             }
-            VehicleController controller = activePlayback.controller(level);
+            VehicleController controller = currentController(level, activePlayback, "hold_paused_vehicles", "hold_refresh");
             if (!controller.isLoaded(level) || !controller.isAssembled()) {
                 continue;
             }
@@ -399,17 +406,25 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         if (!withinActiveVehicleLimit(route.ownerId())) {
             return PlaybackOperationResult.failure(PlaybackFailure.MAX_ACTIVE_VEHICLES_REACHED);
         }
-        Optional<VehicleController> controller = VehicleControllerResolver.resolve(level, route.linkedController());
-        if (controller.isEmpty()) {
+        ShipMaterializationService.LiveBodyLookupResult liveLookup = liveControllerLookup(
+                level,
+                route,
+                Optional.empty(),
+                Optional.empty(),
+                "start_held_fault_playback",
+                "live_controller_lookup"
+        );
+        if (liveLookup.controller().isEmpty()) {
             return PlaybackOperationResult.failure(PlaybackFailure.VEHICLE_MISSING);
         }
-        if (!controller.get().isAutomationCapable()) {
+        VehicleController controller = liveLookup.controller().get();
+        if (!controller.isAutomationCapable()) {
             return PlaybackOperationResult.failure(PlaybackFailure.MISSING_CONTROLLER);
         }
 
         clearConflictingControllerPlaybacks(level, route);
 
-        ActivePlayback activePlayback = ActivePlayback.create(route, stationPos, controller.get());
+        ActivePlayback activePlayback = ActivePlayback.create(route, stationPos, controller);
         activePlaybacks.put(route.id(), activePlayback);
         holdFault(level, activePlayback, failure);
         return PlaybackOperationResult.success(route.id());
@@ -509,7 +524,8 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         }
         setVisualsActive(level, activePlayback, false);
         activePlayback.pauseManual();
-        activePlayback.controller(level).hold(level, activePlayback.holdPosition(), activePlayback.holdRotation());
+        currentController(level, activePlayback, "hold_transient", "hold_refresh")
+                .hold(level, activePlayback.holdPosition(), activePlayback.holdRotation());
         stationAt(level, activePlayback.stationPos()).ifPresent(station -> {
             clearDockOutputs(level, station, activePlayback);
             station.holdPlayback(activePlayback.route(), false, Optional.empty());
@@ -542,7 +558,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         }
         activePlayback.releaseFromHold();
         setVisualsActive(level, activePlayback, false);
-        activePlayback.controller(level).stop(level);
+        currentController(level, activePlayback, "fail_playback", "fail_refresh").stop(level);
         stationAt(level, activePlayback.stationPos()).ifPresent(station ->
                 station.holdPlayback(activePlayback.route(), false, activePlayback.heldFailure().map(PlaybackFailure::failureReason)));
         return true;
@@ -774,7 +790,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
 
     private PlaybackFailure tickOne(ServerLevel level, ActivePlayback activePlayback) {
         Optional<AirshipStationBlockEntity> station = stationAt(level, activePlayback.stationPos());
-        VehicleController controller = activePlayback.controller(level);
+        VehicleController controller = currentController(level, activePlayback, "tick_playback", "tick_refresh");
         if (activePlayback.isPaused()) {
             return tickPaused(level, station, activePlayback, controller);
         }
@@ -998,93 +1014,39 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             ActivePlayback activePlayback,
             boolean forceAtHoldPoint
     ) {
-        Optional<UUID> subLevelId = activePlayback.route().linkedController().vehicleId();
-        Optional<BlockPos> localControllerPos = activePlayback.route().linkedController().controllerPos();
-        if (subLevelId.isEmpty() || localControllerPos.isEmpty()) {
-            if (forceAtHoldPoint || activePlayback.shouldLogProgress()) {
-                CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
-                        "Playback {} cannot materialize unloaded ship at point {} because controller ref is incomplete: vehicleId={} localController={}",
-                        activePlayback.route().id().value(),
-                        activePlayback.targetIndex(),
-                        subLevelId.map(UUID::toString).orElse("missing"),
-                        localControllerPos.map(BlockPos::toShortString).orElse("missing")
-                );
-            }
-            return false;
-        }
-
         Vec3 materializePosition = activePlayback.restoreCatchPosition();
-        BlockPos materializeBlock = BlockPos.containing(materializePosition);
-        if (!level.isLoaded(materializeBlock)) {
-            if (forceAtHoldPoint || activePlayback.shouldLogProgress()) {
-                CreateAeronauticsAutomatedLogistics.debugPlayback(
-                        "Playback {} cannot materialize unloaded ship at point {} yet because simulated route pose chunk is not loaded: position={} chunk={} forceAtHold={} {}",
-                        activePlayback.route().id().value(),
-                        activePlayback.targetIndex(),
-                        materializePosition,
-                        new ChunkPos(materializeBlock),
-                        forceAtHoldPoint,
-                        stationContextDiagnostic(level, activePlayback)
-                );
-            }
-            return false;
-        }
-
-        if (StationChunkLoadingService.isStartupSableStorageGraceActive()) {
-            if (activePlayback.shouldLogProgress()) {
-                CreateAeronauticsAutomatedLogistics.debugPlayback(
-                        "Playback {} is deferring unloaded ship materialization during Sable startup storage grace. point={} position={} chunk={} forceAtHold={}",
-                        activePlayback.route().id().value(),
-                        activePlayback.targetIndex(),
-                        materializePosition,
-                        new ChunkPos(materializeBlock),
-                        forceAtHoldPoint
-                );
-            }
-            return false;
-        }
-
-        if (!activePlayback.canAttemptUnloadedMaterialize(forceAtHoldPoint)) {
-            return false;
-        }
-
         String description = (forceAtHoldPoint ? "route hold point " : "loaded route pose ")
                 + activePlayback.targetIndex()
                 + " for playback "
                 + activePlayback.route().id().value();
-        CreateAeronauticsAutomatedLogistics.debugPlayback(
-                "Playback {} attempting to materialize unloaded ship {} at simulated {} pose position={} localController={} {}",
-                activePlayback.route().id().value(),
-                subLevelId.get(),
-                activePlayback.restoreCatchMode(),
-                materializePosition,
-                localControllerPos.get(),
-                stationContextDiagnostic(level, activePlayback)
-        );
-        ShipRecoveryService.RecoveryResult result = ShipRecoveryService.materializeStoredShipControllerAt(
-                level.getServer(),
-                activePlayback.route().dimension(),
-                subLevelId.get(),
-                localControllerPos.get(),
-                materializePosition,
-                description
+        ShipMaterializationService.MaterializationResult result = materializationService.materializeStoredBodyAt(
+                new ShipMaterializationService.MaterializationRequest(
+                        level.getServer(),
+                        activePlayback.route().dimension(),
+                        transponderIdFor(activePlayback.route()),
+                        activePlayback.route().linkedController().vehicleId(),
+                        Optional.of(activePlayback.route().id()),
+                        Optional.of(activePlayback.targetIndex()),
+                        targetStationId(level, activePlayback),
+                        activePlayback.route().linkedController().controllerPos(),
+                        materializePosition,
+                        description,
+                        forceAtHoldPoint ? "route_hold_point_materialization" : "loaded_route_pose_materialization",
+                        forceAtHoldPoint,
+                        true
+                ),
+                () -> activePlayback.canAttemptUnloadedMaterialize(forceAtHoldPoint)
         );
         if (result.success()) {
             activePlayback.beginRestoreCatch();
             CreateAeronauticsAutomatedLogistics.debugPlayback(
-                    "Playback {} materialized unloaded ship {} at simulated route pose: {}",
+                    "Playback {} materialization result={} at simulated route pose: {}",
                     activePlayback.route().id().value(),
-                    subLevelId.get(),
+                    result.type(),
                     result.message()
             );
             return true;
         }
-        CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
-                "Playback {} failed to materialize unloaded ship {} at simulated route pose: {}",
-                activePlayback.route().id().value(),
-                subLevelId.get(),
-                result.message()
-        );
         return false;
     }
 
@@ -1372,7 +1334,8 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         setVisualsActive(level, activePlayback, false);
         activePlayback.pauseFault(failure);
         clearDeferredDockOutputs(level, activePlayback.route().id());
-        activePlayback.controller(level).hold(level, activePlayback.holdPosition(), activePlayback.holdRotation());
+        currentController(level, activePlayback, "hold_fault", "hold_refresh")
+                .hold(level, activePlayback.holdPosition(), activePlayback.holdRotation());
         stationAt(level, activePlayback.stationPos()).ifPresent(station -> {
             clearDockOutputs(level, station, activePlayback);
             station.holdPlayback(activePlayback.route(), true, Optional.of(failure.failureReason()));
@@ -1406,7 +1369,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         activePlayback.beginDockReacquireMotion();
         activePlayback.beginRestoreCatch();
         if (resumeFromUnloadedHold) {
-            VehicleController controller = activePlayback.controller(level);
+            VehicleController controller = currentController(level, activePlayback, "resume_paused_playback", "resume_refresh");
             Vec3 restorePosition = activePlayback.restoreCatchPosition();
             if (controller.isLoaded(level) && level.isLoaded(BlockPos.containing(restorePosition))) {
                 controller.relocate(level, restorePosition, activePlayback.restoreCatchRotation());
@@ -1434,7 +1397,11 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 activePlayback.targetPosition(),
                 activePlayback.restoreCatchPosition(),
                 stationContextDiagnostic(level, activePlayback),
-                subLevelId.map(shipId -> ShipRecoveryService.describeStoredShip(level.getServer(), activePlayback.route().dimension(), shipId))
+                subLevelId.map(shipId -> materializationService.describeStoredBody(
+                        level.getServer(),
+                        activePlayback.route().dimension(),
+                        shipId
+                ))
                         .orElse("missing Sable identity")
         );
     }
@@ -1449,7 +1416,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         );
         setVisualsActive(level, activePlayback, false);
         clearDeferredDockOutputs(level, activePlayback.route().id());
-        activePlayback.controller(level).stop(level);
+        currentController(level, activePlayback, "kill_playback", "stop_refresh").stop(level);
         stationAt(level, activePlayback.stationPos()).ifPresent(station -> {
             clearDockOutputs(level, station, activePlayback);
             station.failPlayback(failure.failureReason());
@@ -1463,7 +1430,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
 
     private void finishCompletedPlayback(ServerLevel level, ActivePlayback activePlayback, boolean stopStationPlayback) {
         clearDeferredDockOutputs(level, activePlayback.route().id());
-        activePlayback.controller(level).stop(level);
+        currentController(level, activePlayback, "pause_playback", "stop_refresh").stop(level);
         stationAt(level, activePlayback.stationPos()).ifPresent(station -> {
             clearDockOutputs(level, station, activePlayback);
             if (stopStationPlayback) {
@@ -1567,6 +1534,52 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 .filter(snapshot -> snapshot.controllerRef().filter(route.linkedController()::matches).isPresent())
                 .map(ShipTransponderSnapshot::transponderId)
                 .findFirst();
+    }
+
+    private ShipMaterializationService.LiveBodyLookupResult liveControllerLookup(
+            ServerLevel level,
+            Route route,
+            Optional<Integer> currentLegIndex,
+            Optional<UUID> stationId,
+            String source,
+            String reasonCode
+    ) {
+        return materializationService.resolveLiveBody(
+                new ShipMaterializationService.LiveBodyLookupRequest(
+                        level.getServer(),
+                        route.dimension(),
+                        route.linkedController(),
+                        transponderIdFor(route),
+                        route.linkedController().vehicleId(),
+                        Optional.of(route.id()),
+                        currentLegIndex,
+                        stationId,
+                        source,
+                        reasonCode
+                )
+        );
+    }
+
+    private VehicleController currentController(
+            ServerLevel level,
+            ActivePlayback activePlayback,
+            String source,
+            String reasonCode
+    ) {
+        VehicleController controller = activePlayback.controller();
+        if (controller.isLoaded(level) && controller.isAssembled()) {
+            return controller;
+        }
+        ShipMaterializationService.LiveBodyLookupResult liveLookup = liveControllerLookup(
+                level,
+                activePlayback.route(),
+                Optional.of(activePlayback.targetIndex()),
+                targetStationId(level, activePlayback),
+                source,
+                reasonCode
+        );
+        liveLookup.controller().ifPresent(activePlayback::rebindController);
+        return activePlayback.controller();
     }
 
     private boolean cargoStorageMissing(
@@ -1765,10 +1778,18 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 continue;
             }
             restored.route().linkedController().vehicleId().ifPresent(shipId -> {
-                int pruned = ShipRecoveryService.pruneStoredEntriesForLoadedShip(
-                        server,
-                        restored.route().dimension(),
-                        shipId
+                int pruned = materializationService.pruneStoredEntriesForLoadedBody(
+                        new ShipMaterializationService.CleanupRequest(
+                                server,
+                                restored.route().dimension(),
+                                transponderIdFor(restored.route()),
+                                Optional.of(shipId),
+                                Optional.of(restored.route().id()),
+                                Optional.of(restored.targetIndex()),
+                                targetStationId(level, restored),
+                                "runtime_restore",
+                                "restored_live_ship_before_playback_resume"
+                        )
                 );
                 if (pruned > 0) {
                     CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
@@ -1805,7 +1826,8 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 restored.beginRestoreCatch();
             }
             if (restored.isHoldLocked()) {
-                restored.controller(level).hold(level, restored.holdPosition(), restored.holdRotation());
+                currentController(level, restored, "runtime_restore", "restore_hold_refresh")
+                        .hold(level, restored.holdPosition(), restored.holdRotation());
             }
             stationAt(level, restored.stationPos()).ifPresent(station -> {
                 if (restored.isPaused()) {
@@ -1863,6 +1885,12 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 + ", stationPresent=" + stationPresent;
     }
 
+    private Optional<UUID> targetStationId(ServerLevel level, ActivePlayback activePlayback) {
+        return activePlayback.targetStationPos()
+                .flatMap(pos -> stationAt(level, pos))
+                .map(AirshipStationBlockEntity::stationId);
+    }
+
     private static String formatVec3Offset(Vec3 actual, Vec3 intended) {
         Vec3 offset = intended.subtract(actual);
         return offset + " |dist=" + actual.distanceTo(intended);
@@ -1880,7 +1908,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         if (shipId.isEmpty()) {
             return "Pending route has no linked Sable vehicle id.";
         }
-        return ShipRecoveryService.describeStoredShip(server, route.get().dimension(), shipId.get());
+        return materializationService.describeStoredBody(server, route.get().dimension(), shipId.get());
     }
 
     private String pendingRouteDiagnostic(CompoundTag playbackTag) {
@@ -1910,17 +1938,18 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         if (shipId.isEmpty()) {
             return Optional.of(PlaybackFailure.MISSING_CONTROLLER);
         }
-        ServerLevel level = server.getLevel(route.get().dimension());
-        if (level == null) {
-            return Optional.empty();
+        ShipMaterializationService.MaterializationResult availability = materializationService.bodyAvailability(
+                server,
+                route.get().dimension(),
+                transponderIdFor(route.get()),
+                shipId.get(),
+                Optional.of(route.get().id()),
+                Optional.empty()
+        );
+        if (availability.type() == ShipMaterializationService.MaterializationResultType.STORED_BODY_MISSING) {
+            return Optional.of(PlaybackFailure.VEHICLE_MISSING);
         }
-        ServerSubLevelContainer container = ServerSubLevelContainer.getContainer(level);
-        if (container != null && container.getSubLevel(shipId.get()) != null) {
-            return Optional.empty();
-        }
-        return ShipRecoveryService.hasStoredShip(server, route.get().dimension(), shipId.get())
-                ? Optional.empty()
-                : Optional.of(PlaybackFailure.VEHICLE_MISSING);
+        return Optional.empty();
     }
 
     private CompoundTag writeActivePlayback(ActivePlayback activePlayback) {
@@ -1975,23 +2004,31 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         if (level == null) {
             return Optional.empty();
         }
-        Optional<VehicleController> controller = VehicleControllerResolver.resolve(level, route.get().linkedController());
-        if (controller.isEmpty()) {
-            return Optional.empty();
-        }
         Optional<BlockPos> stationPos = NbtUtils.readBlockPos(tag, STATION_POS);
         if (stationPos.isEmpty()) {
             return Optional.empty();
         }
+        int targetIndex = tag.getInt(TARGET_INDEX);
+        if (targetIndex < 0 || targetIndex >= route.get().points().size()) {
+            return Optional.empty();
+        }
+        ShipMaterializationService.LiveBodyLookupResult liveLookup = liveControllerLookup(
+                level,
+                route.get(),
+                Optional.of(targetIndex),
+                stationAt(level, stationPos.get()).map(AirshipStationBlockEntity::stationId),
+                "runtime_restore",
+                "restore_live_controller_lookup"
+        );
+        if (liveLookup.controller().isEmpty()) {
+            return Optional.empty();
+        }
+        VehicleController controller = liveLookup.controller().get();
 
         Vec3 joinOffset = readVec3(tag.getCompound(JOIN_OFFSET));
         Optional<RouteRotation> joinStartRotation = tag.contains(JOIN_START_ROTATION, Tag.TAG_COMPOUND)
                 ? readRotation(tag.getCompound(JOIN_START_ROTATION))
                 : Optional.empty();
-        int targetIndex = tag.getInt(TARGET_INDEX);
-        if (targetIndex < 0 || targetIndex >= route.get().points().size()) {
-            return Optional.empty();
-        }
         int direction = tag.getInt(DIRECTION);
         if (direction != -1 && direction != 1) {
             return Optional.empty();
@@ -2013,15 +2050,15 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         OptionalInt validatedLegTargetIndex = readLegIndex(tag, VALIDATED_LEG_TARGET_INDEX, route.get());
         Vec3 holdPosition = tag.contains(HOLD_POSITION, Tag.TAG_COMPOUND)
                 ? readVec3(tag.getCompound(HOLD_POSITION))
-                : controller.get().position();
+                : controller.position();
         Optional<RouteRotation> holdRotation = tag.contains(HOLD_ROTATION, Tag.TAG_COMPOUND)
                 ? readRotation(tag.getCompound(HOLD_ROTATION))
-                : controller.get().routeRotation();
+                : controller.routeRotation();
 
         return Optional.of(ActivePlayback.restore(
                 route.get(),
                 stationPos.get().immutable(),
-                controller.get(),
+                controller,
                 joinOffset,
                 joinStartRotation,
                 targetIndex,
@@ -3083,7 +3120,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         }
 
         private PlaybackFailure primePlaybackMotion(ServerLevel level, ActivePlayback activePlayback) {
-            VehicleController controller = activePlayback.controller(level);
+            VehicleController controller = currentController(level, activePlayback, "prime_playback_motion", "prime_motion_refresh");
             activePlayback.ensurePrimedSegmentProgress();
             Vec3 guidancePosition = activePlayback.guidancePosition();
             double targetSpeed = activePlayback.targetSpeedBlocksPerTick();
@@ -3352,11 +3389,8 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             return controller;
         }
 
-        private VehicleController controller(ServerLevel level) {
-            if (!controller.isLoaded(level) || !controller.isAssembled()) {
-                VehicleControllerResolver.resolve(level, route.linkedController()).ifPresent(resolved -> controller = resolved);
-            }
-            return controller;
+        private void rebindController(VehicleController controller) {
+            this.controller = Objects.requireNonNull(controller, "controller");
         }
 
         private Vec3 joinOffset() {
