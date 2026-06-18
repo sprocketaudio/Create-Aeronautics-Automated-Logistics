@@ -26,7 +26,7 @@ public final class ScheduleRouteCleanup {
     }
 
     public static void deleteStationRoutes(ServerLevel level, UUID stationId) {
-        List<StoredSegmentRecord> affected = AutomatedLogisticsServices.ROUTES.storedSegmentsConnectedToStation(level.getServer(), stationId);
+        List<StoredSegmentRecord> affected = AutomatedLogisticsServices.ROUTES.storedSegmentsConnectedToStationForExplicitCleanup(level.getServer(), stationId);
         logExplicitCleanupRequest("station_delete", "stationId=" + stationId, affected);
         if (affected.isEmpty()) {
             CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
@@ -45,7 +45,7 @@ public final class ScheduleRouteCleanup {
     }
 
     public static void deleteTransponderRoutes(ServerLevel level, UUID transponderId) {
-        List<StoredSegmentRecord> affected = AutomatedLogisticsServices.ROUTES.storedSegmentsForTransponder(level.getServer(), transponderId);
+        List<StoredSegmentRecord> affected = AutomatedLogisticsServices.ROUTES.storedSegmentsForTransponderForExplicitCleanup(level.getServer(), transponderId);
         logExplicitCleanupRequest("transponder_delete", "transponderId=" + transponderId, affected);
         for (var snapshot : AirshipStationRegistry.knownStations(level.dimension())) {
             if (!(level.getBlockEntity(snapshot.stationPos()) instanceof AirshipStationBlockEntity station)) {
@@ -80,7 +80,7 @@ public final class ScheduleRouteCleanup {
         }
         List<StoredSegmentRecord> affected = new ArrayList<>();
         for (RouteSegment segment : segments) {
-            affected.addAll(AutomatedLogisticsServices.ROUTES.storedCopiesForSegment(level.getServer(), segment.id()));
+            affected.addAll(AutomatedLogisticsServices.ROUTES.storedCopiesForSegmentForExplicitCleanup(level.getServer(), segment.id()));
         }
         logExplicitCleanupRequest(
                 "stop_delete",
@@ -108,6 +108,7 @@ public final class ScheduleRouteCleanup {
             UUID deletedStationId,
             List<StoredSegmentRecord> affected
     ) {
+        var server = level.getServer();
         Map<UUID, Set<RouteSegmentId>> affectedSegmentsByTransponder = new HashMap<>();
         Set<UUID> affectedTransponders = new HashSet<>();
         for (StoredSegmentRecord record : affected) {
@@ -117,18 +118,34 @@ public final class ScheduleRouteCleanup {
                     .add(record.segmentId());
         }
 
-        for (var snapshot : ShipTransponderRegistry.allShips()) {
-            if (!snapshot.dimension().equals(level.dimension())) {
+        for (IdentityDirectorySavedData.PersistedShipIdentity shipIdentity : IdentityDirectorySavedData.get(server).allShips()) {
+            ServerLevel shipLevel = server.getLevel(shipIdentity.dimension());
+            if (shipLevel == null) {
+                if (affectedTransponders.contains(shipIdentity.transponderId())) {
+                    CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                            "Schedule cleanup refused source=station_delete transponder={} station={} reason=transponder_level_unavailable applied=false",
+                            shipIdentity.transponderId(),
+                            deletedStationId
+                    );
+                }
                 continue;
             }
-            if (!(level.getBlockEntity(snapshot.transponderPos()) instanceof ShipTransponderBlockEntity transponder)) {
+            shipLevel.getChunkAt(shipIdentity.transponderPos());
+            if (!(shipLevel.getBlockEntity(shipIdentity.transponderPos()) instanceof ShipTransponderBlockEntity transponder)) {
+                if (affectedTransponders.contains(shipIdentity.transponderId())) {
+                    CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                            "Schedule cleanup refused source=station_delete transponder={} station={} reason=transponder_block_entity_unavailable applied=false",
+                            shipIdentity.transponderId(),
+                            deletedStationId
+                    );
+                }
                 continue;
             }
             AirshipSchedule schedule = transponder.ownedSchedule();
             if (schedule.entries().isEmpty()) {
                 continue;
             }
-            UUID transponderId = transponder.transponderId();
+            UUID transponderId = shipIdentity.transponderId();
             Set<RouteSegmentId> affectedSegments = affectedSegmentsByTransponder.getOrDefault(transponderId, Set.of());
             List<AirshipScheduleEntry> kept = new ArrayList<>();
             boolean changed = false;

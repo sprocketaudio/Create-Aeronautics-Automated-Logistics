@@ -146,16 +146,43 @@ public final class RouteRepository {
         return RouteSegmentDirectorySavedData.connectedToStation(server, stationId);
     }
 
+    public List<StoredSegmentRecord> storedSegmentsConnectedToStationForExplicitCleanup(MinecraftServer server, UUID stationId) {
+        Objects.requireNonNull(server, "server");
+        Objects.requireNonNull(stationId, "stationId");
+        return explicitCleanupStoredRecords(server).stream()
+                .filter(record -> record.startStationId().equals(stationId) || record.endStationId().equals(stationId))
+                .sorted(StoredSegmentRecord.sortOrder())
+                .toList();
+    }
+
     public List<StoredSegmentRecord> storedSegmentsForTransponder(MinecraftServer server, UUID transponderId) {
         Objects.requireNonNull(server, "server");
         Objects.requireNonNull(transponderId, "transponderId");
         return RouteSegmentDirectorySavedData.forTransponder(server, transponderId);
     }
 
+    public List<StoredSegmentRecord> storedSegmentsForTransponderForExplicitCleanup(MinecraftServer server, UUID transponderId) {
+        Objects.requireNonNull(server, "server");
+        Objects.requireNonNull(transponderId, "transponderId");
+        return explicitCleanupStoredRecords(server).stream()
+                .filter(record -> record.transponderId().equals(transponderId))
+                .sorted(StoredSegmentRecord.sortOrder())
+                .toList();
+    }
+
     public List<StoredSegmentRecord> storedCopiesForSegment(MinecraftServer server, RouteSegmentId segmentId) {
         Objects.requireNonNull(server, "server");
         Objects.requireNonNull(segmentId, "segmentId");
         return RouteSegmentDirectorySavedData.storedCopiesForSegment(server, segmentId);
+    }
+
+    public List<StoredSegmentRecord> storedCopiesForSegmentForExplicitCleanup(MinecraftServer server, RouteSegmentId segmentId) {
+        Objects.requireNonNull(server, "server");
+        Objects.requireNonNull(segmentId, "segmentId");
+        return explicitCleanupStoredRecords(server).stream()
+                .filter(record -> record.segmentId().equals(segmentId))
+                .sorted(StoredSegmentRecord.sortOrder())
+                .toList();
     }
 
     public boolean queuePendingDeletion(MinecraftServer server, UUID holderStationId, RouteSegmentId segmentId) {
@@ -227,6 +254,13 @@ public final class RouteRepository {
         return applied;
     }
 
+    private List<StoredSegmentRecord> explicitCleanupStoredRecords(MinecraftServer server) {
+        Map<String, StoredSegmentRecord> merged = new LinkedHashMap<>();
+        mergeStoredRecords(merged, RouteSegmentDirectorySavedData.allStoredSegments(server));
+        mergeStoredRecords(merged, scanAndBackfillStoredSegments(server));
+        return new ArrayList<>(merged.values());
+    }
+
     private List<RouteSegment> allSegments(MinecraftServer server, boolean loadStations) {
         IdentityDirectorySavedData identities = IdentityDirectorySavedData.get(server);
         Map<RouteSegmentId, RouteSegment> segments = new LinkedHashMap<>();
@@ -253,6 +287,62 @@ public final class RouteRepository {
             }
         }
         return new ArrayList<>(segments.values());
+    }
+
+    private List<StoredSegmentRecord> scanAndBackfillStoredSegments(MinecraftServer server) {
+        List<StoredSegmentRecord> scanned = new ArrayList<>();
+        for (IdentityDirectorySavedData.PersistedStationIdentity stationIdentity : IdentityDirectorySavedData.get(server).allStations()) {
+            ServerLevel level = server.getLevel(stationIdentity.dimension());
+            if (level == null) {
+                CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                        "Explicit cleanup directory backfill skipped station={} pos={} dimension={} reason=level_unavailable",
+                        stationIdentity.stationId(),
+                        stationIdentity.stationPos(),
+                        stationIdentity.dimension().location()
+                );
+                continue;
+            }
+            level.getChunkAt(stationIdentity.stationPos());
+            if (!(level.getBlockEntity(stationIdentity.stationPos()) instanceof AirshipStationBlockEntity station)) {
+                CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                        "Explicit cleanup directory backfill skipped station={} pos={} dimension={} reason=holder_station_unavailable",
+                        stationIdentity.stationId(),
+                        stationIdentity.stationPos(),
+                        stationIdentity.dimension().location()
+                );
+                continue;
+            }
+            List<RouteSegment> stationSegments = station.routeSegments();
+            syncStoredSegments(server, station.stationId(), stationSegments);
+            CreateAeronauticsAutomatedLogistics.debugPlayback(
+                    "Explicit cleanup directory backfill station={} pos={} dimension={} storedSegments={}",
+                    station.stationId(),
+                    station.getBlockPos().toShortString(),
+                    level.dimension().location(),
+                    stationSegments.size()
+            );
+            for (RouteSegment segment : stationSegments) {
+                scanned.add(new StoredSegmentRecord(
+                        station.stationId(),
+                        segment.id(),
+                        segment.startStationId(),
+                        segment.endStationId(),
+                        segment.transponderId(),
+                        segment.dimension()
+                ));
+            }
+        }
+        return scanned;
+    }
+
+    private void mergeStoredRecords(Map<String, StoredSegmentRecord> records, List<StoredSegmentRecord> additions) {
+        for (StoredSegmentRecord record : additions) {
+            records.put(storedRecordKey(record), record);
+        }
+    }
+
+    private String storedRecordKey(StoredSegmentRecord record) {
+        return record.holderStationId() + "|" + record.segmentId().value();
     }
 
     private static Comparator<RouteSegment> newestFirst() {

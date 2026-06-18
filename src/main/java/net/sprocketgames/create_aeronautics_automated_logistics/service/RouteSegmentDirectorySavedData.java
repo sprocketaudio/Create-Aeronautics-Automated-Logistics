@@ -96,6 +96,12 @@ public class RouteSegmentDirectorySavedData extends SavedData {
                 .toList();
     }
 
+    public static List<StoredSegmentRecord> allStoredSegments(MinecraftServer server) {
+        return get(server).storedSegments.values().stream()
+                .sorted(StoredSegmentRecord.sortOrder())
+                .toList();
+    }
+
     public static boolean queuePendingDeletion(MinecraftServer server, UUID holderStationId, RouteSegmentId segmentId) {
         RouteSegmentDirectorySavedData data = get(server);
         boolean added = data.pendingDeletionsByHolder
@@ -262,7 +268,7 @@ public class RouteSegmentDirectorySavedData extends SavedData {
             );
         }
 
-        private static Comparator<StoredSegmentRecord> sortOrder() {
+        public static Comparator<StoredSegmentRecord> sortOrder() {
             return Comparator
                     .comparing((StoredSegmentRecord record) -> record.segmentId().value().toString())
                     .thenComparing(record -> record.holderStationId().toString());

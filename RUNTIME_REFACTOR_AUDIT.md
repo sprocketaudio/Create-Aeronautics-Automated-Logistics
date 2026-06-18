@@ -1078,6 +1078,10 @@ Status:
 - Added a persistent route segment directory plus pending-deletion queue so
   explicit station/transponder/stop delete cleanup can discover affected route
   segment identities even when holder station block entities are unloaded.
+- Explicit delete cleanup now backfills missing or incomplete route-directory
+  records from persisted station identities before refusing cleanup, so older
+  worlds do not depend on prior station registration just to prove route
+  ownership during station/transponder/stop deletion.
 - Deferred route deletions are applied on later station load/register, then the
   stored route list and cache/index are updated.
 - `RouteSegmentRegistry` is explicitly documented and used as an index/cache,
