@@ -16,15 +16,15 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSch
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.TransponderPermissionService;
 
-public record OpenInstalledScheduleEditorPayload(BlockPos transponderPos, boolean returnToRecordingMode) implements CustomPacketPayload {
-    public static final Type<OpenInstalledScheduleEditorPayload> TYPE = new Type<>(
-            ResourceLocation.fromNamespaceAndPath(CreateAeronauticsAutomatedLogistics.MOD_ID, "open_installed_schedule_editor")
+public record OpenScheduleEditorPayload(BlockPos transponderPos, boolean returnToRecordingMode) implements CustomPacketPayload {
+    public static final Type<OpenScheduleEditorPayload> TYPE = new Type<>(
+            ResourceLocation.fromNamespaceAndPath(CreateAeronauticsAutomatedLogistics.MOD_ID, "open_schedule_editor")
     );
-    public static final StreamCodec<RegistryFriendlyByteBuf, OpenInstalledScheduleEditorPayload> STREAM_CODEC =
-            StreamCodec.ofMember(OpenInstalledScheduleEditorPayload::write, OpenInstalledScheduleEditorPayload::read);
+    public static final StreamCodec<RegistryFriendlyByteBuf, OpenScheduleEditorPayload> STREAM_CODEC =
+            StreamCodec.ofMember(OpenScheduleEditorPayload::write, OpenScheduleEditorPayload::read);
 
-    private static OpenInstalledScheduleEditorPayload read(RegistryFriendlyByteBuf buffer) {
-        return new OpenInstalledScheduleEditorPayload(buffer.readBlockPos(), buffer.readBoolean());
+    private static OpenScheduleEditorPayload read(RegistryFriendlyByteBuf buffer) {
+        return new OpenScheduleEditorPayload(buffer.readBlockPos(), buffer.readBoolean());
     }
 
     private void write(RegistryFriendlyByteBuf buffer) {
@@ -37,13 +37,13 @@ public record OpenInstalledScheduleEditorPayload(BlockPos transponderPos, boolea
         return TYPE;
     }
 
-    public static void handle(OpenInstalledScheduleEditorPayload payload, IPayloadContext context) {
+    public static void handle(OpenScheduleEditorPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player)) {
             return;
         }
         if (!(player.level().getBlockEntity(payload.transponderPos()) instanceof ShipTransponderBlockEntity transponder)) {
             CreateAeronauticsAutomatedLogistics.debugUi(
-                    "OpenInstalledScheduleEditor rejected missing transponder pos={} player={} spectator={}",
+                    "OpenScheduleEditor rejected missing transponder pos={} player={} spectator={}",
                     payload.transponderPos(),
                     player.getName().getString(),
                     player.isSpectator()
@@ -52,7 +52,7 @@ public record OpenInstalledScheduleEditorPayload(BlockPos transponderPos, boolea
         }
         if (!TransponderPermissionService.ensureCanControl(player, transponder)) {
             CreateAeronauticsAutomatedLogistics.debugUi(
-                    "OpenInstalledScheduleEditor rejected permission pos={} id={} player={} spectator={} owner={}",
+                    "OpenScheduleEditor rejected permission pos={} id={} player={} spectator={} owner={}",
                     payload.transponderPos(),
                     transponder.transponderId(),
                     player.getName().getString(),
@@ -63,7 +63,7 @@ public record OpenInstalledScheduleEditorPayload(BlockPos transponderPos, boolea
         }
         AirshipSchedule schedule = transponder.ownedSchedule();
         CreateAeronauticsAutomatedLogistics.debugUi(
-                "OpenInstalledScheduleEditor opening pos={} id={} player={} spectator={} entries={} title='{}'",
+                "OpenScheduleEditor opening pos={} id={} player={} spectator={} entries={} title='{}'",
                 payload.transponderPos(),
                 transponder.transponderId(),
                 player.getName().getString(),
@@ -71,6 +71,7 @@ public record OpenInstalledScheduleEditorPayload(BlockPos transponderPos, boolea
                 schedule.entries().size(),
                 schedule.title()
         );
+        SyncIdentityDirectoryPayload.sendTo(player);
         player.openMenu(
                 new SimpleMenuProvider(
                         (containerId, inventory, ignoredPlayer) -> new AirshipScheduleMenu(

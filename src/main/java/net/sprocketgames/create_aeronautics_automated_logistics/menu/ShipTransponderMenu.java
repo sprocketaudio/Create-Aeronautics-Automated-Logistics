@@ -41,7 +41,6 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSch
 import net.sprocketgames.create_aeronautics_automated_logistics.route.CargoWaitTarget;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
-import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentResolver;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitCondition;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
@@ -653,14 +652,6 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         return initialLinkedCargoEntries;
     }
 
-    public Component installedScheduleText(Player player) {
-        return Component.literal(resolveOwnedSchedule(player).title());
-    }
-
-    public boolean hasInstalledSchedule(Player player) {
-        return player.level().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity;
-    }
-
     public boolean hasOwnedStops(Player player) {
         if (!isServerView(player)) {
             return resolvedClientStatusSnapshot().hasOwnedStops() || !resolveOwnedSchedule(player).entries().isEmpty();
@@ -755,6 +746,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         }
         return initialRuntimeStatus == RouteStatus.RUNNING
                 || initialRuntimeStatus == RouteStatus.WAITING
+                || initialRuntimeStatus == RouteStatus.DOCK_QUEUED
                 || initialRuntimeStatus == RouteStatus.HELD
                 || initialRuntimeStatus == RouteStatus.HELD_FAULTED;
     }
@@ -931,7 +923,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
             showMenuWarning(player, Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.transponder_no_stops"));
             return false;
         }
-        if (!hasReadyInstalledRoutePlan(player)) {
+        if (!hasResolvableInstalledRouteChain(player)) {
             showMenuWarning(player, Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.transponder_partial_route"));
             return false;
         }
@@ -992,7 +984,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
 
     private boolean togglePreview(net.minecraft.server.level.ServerPlayer player, ShipTransponderBlockEntity transponder) {
         if (!transponder.hasOwnedStops()) {
-            PacketDistributor.sendToPlayer(player, new SetFlightPathPreviewPayload(false, List.of(), List.of(), Optional.empty()));
+            PacketDistributor.sendToPlayer(player, new SetFlightPathPreviewPayload(false, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), Optional.empty(), Optional.empty(), Optional.empty()));
             return false;
         }
         PreviewPath preview = previewPath(player.serverLevel(), transponder, transponder.ownedSchedule());
@@ -1003,7 +995,15 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
                         enabled,
                         preview.points(),
                         preview.legEndIndices(),
-                        enabled ? Optional.of(transponder.getBlockPos().immutable()) : Optional.empty()
+                        enabled
+                                ? java.util.Collections.nCopies(preview.legEndIndices().size(), transponder.transponderId())
+                                : List.of(),
+                        enabled ? preview.legColorSlots() : List.of(),
+                        List.of(),
+                        List.of(),
+                        enabled ? Optional.of(transponder.getBlockPos().immutable()) : Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty()
                 )
         );
         return enabled;
@@ -1015,40 +1015,77 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         }
         Optional<AirshipScheduleExecutionService.ResolvedStartContext> startContext =
                 AutomatedLogisticsServices.SCHEDULES.resolveStartContext(level, transponder, schedule);
-        if (startContext.isEmpty()) {
-            return PreviewPath.empty();
-        }
         List<Vec3> points = new ArrayList<>();
         List<Integer> legEndIndices = new ArrayList<>();
-        UUID stationId = startContext.get().stationId();
-        AirshipSchedule runtimeSchedule = startContext.get().runtimeSchedule();
-        for (AirshipScheduleEntry entry : runtimeSchedule.entries()) {
+        List<Integer> legColorSlots = new ArrayList<>();
+        UUID stationId;
+        AirshipSchedule runtimeSchedule;
+        int entryStartIndex = 0;
+        int legOrdinal = 0;
+        if (startContext.isPresent()) {
+            stationId = startContext.get().stationId();
+            runtimeSchedule = startContext.get().runtimeSchedule();
+        } else {
+            Optional<RouteSegment> firstSegment = firstKnownScheduleSegment(level, schedule, transponder.transponderId());
+            if (firstSegment.isEmpty()) {
+                return PreviewPath.empty();
+            }
+            appendPreviewSegment(firstSegment.get(), points, legEndIndices, legColorSlots, legOrdinal++);
+            stationId = firstSegment.get().endStationId();
+            runtimeSchedule = schedule;
+            entryStartIndex = 1;
+        }
+        for (int i = entryStartIndex; i < runtimeSchedule.entries().size(); i++) {
+            AirshipScheduleEntry entry = runtimeSchedule.entries().get(i);
             if (entry.targetStationId().isEmpty()) {
                 break;
             }
             UUID fromStationId = stationId;
-            Optional<RouteSegment> segment = entry.pinnedSegmentId()
-                    .flatMap(net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry::byId)
-                    .filter(candidate -> candidate.startStationId().equals(fromStationId))
-                    .filter(candidate -> candidate.endStationId().equals(entry.targetStationId().get()))
-                    .filter(candidate -> candidate.dimension().equals(level.dimension()))
-                    .filter(candidate -> candidate.transponderId().equals(transponder.transponderId()))
-                    .or(() -> RouteSegmentResolver.newestFor(
-                            fromStationId,
-                            entry.targetStationId().get(),
-                            level.dimension(),
-                            Optional.of(transponder.transponderId())
-                    ));
+            Optional<RouteSegment> segment = RouteSegmentResolver.scheduledSegment(
+                    level,
+                    fromStationId,
+                    entry.targetStationId().get(),
+                    entry.pinnedSegmentId(),
+                    transponder.transponderId()
+            );
             if (segment.isEmpty()) {
                 break;
             }
-            segment.get().points().forEach(routePoint -> points.add(routePoint.position()));
-            if (points.size() >= 2) {
-                legEndIndices.add(points.size() - 1);
-            }
+            appendPreviewSegment(segment.get(), points, legEndIndices, legColorSlots, legOrdinal++);
             stationId = entry.targetStationId().get();
         }
-        return new PreviewPath(points, legEndIndices);
+        return new PreviewPath(points, legEndIndices, legColorSlots);
+    }
+
+    private Optional<RouteSegment> firstKnownScheduleSegment(
+            ServerLevel level,
+            AirshipSchedule schedule,
+            UUID transponderId
+    ) {
+        if (schedule.entries().isEmpty() || schedule.entries().getFirst().targetStationId().isEmpty()) {
+            return Optional.empty();
+        }
+        AirshipScheduleEntry firstEntry = schedule.entries().getFirst();
+        return firstEntry.pinnedSegmentId()
+                .flatMap(segmentId -> RouteSegmentResolver.byId(level, segmentId))
+                .filter(segment -> segment.endStationId().equals(firstEntry.targetStationId().get()))
+                .filter(segment -> segment.dimension().equals(level.dimension()))
+                .filter(segment -> segment.transponderId().equals(transponderId))
+                .or(() -> RouteSegmentResolver.endingAt(level, firstEntry.targetStationId().get(), Optional.of(transponderId)));
+    }
+
+    private void appendPreviewSegment(
+            RouteSegment segment,
+            List<Vec3> points,
+            List<Integer> legEndIndices,
+            List<Integer> legColorSlots,
+            int legOrdinal
+    ) {
+        segment.points().forEach(routePoint -> points.add(routePoint.position()));
+        if (points.size() >= 2) {
+            legEndIndices.add(points.size() - 1);
+            legColorSlots.add(Math.floorMod(legOrdinal, 3));
+        }
     }
 
     private Optional<UUID> resolveStartStationId(ServerLevel level, ShipTransponderBlockEntity transponder, AirshipSchedule schedule) {
@@ -1062,9 +1099,9 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
                 .map(AirshipScheduleExecutionService.ResolvedStartContext::stationId);
     }
 
-    private record PreviewPath(List<Vec3> points, List<Integer> legEndIndices) {
+    private record PreviewPath(List<Vec3> points, List<Integer> legEndIndices, List<Integer> legColorSlots) {
         private static PreviewPath empty() {
-            return new PreviewPath(List.of(), List.of());
+            return new PreviewPath(List.of(), List.of(), List.of());
         }
     }
 
@@ -1084,6 +1121,9 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
             if (fallbackDockOutputActive(player)) {
                 return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.docked");
             }
+            if (runtimeStatus == RouteStatus.DOCK_QUEUED) {
+                return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.dock_queue");
+            }
             if (runtimeStatus == RouteStatus.WAITING) {
                 return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.waiting");
             }
@@ -1092,7 +1132,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         if (!hasOwnedStops(player)) {
             return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.no_route_status");
         }
-        if (!hasReadyInstalledRoutePlan(player)) {
+        if (!hasResolvableInstalledRouteChain(player)) {
             return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.partial_route_status");
         }
         Optional<PlaybackFailure> failure = fallbackFailure(player);
@@ -1119,7 +1159,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         if (!hasOwnedStops(player)) {
             return 0xFFFFD98A;
         }
-        if (!hasReadyInstalledRoutePlan(player)) {
+        if (!hasResolvableInstalledRouteChain(player)) {
             return 0xFFFFD98A;
         }
         Optional<PlaybackFailure> failure = fallbackFailure(player);
@@ -1244,6 +1284,12 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
                         Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.docked.2").withStyle(ChatFormatting.GRAY)
                 );
             }
+            if (runtimeStatus == RouteStatus.DOCK_QUEUED) {
+                return List.of(
+                        Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.dock_queue.1").withStyle(ChatFormatting.YELLOW),
+                        Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.dock_queue.2").withStyle(ChatFormatting.GRAY)
+                );
+            }
             if (runtimeStatus == RouteStatus.WAITING) {
                 return List.of(
                         Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.waiting.1").withStyle(ChatFormatting.YELLOW),
@@ -1262,7 +1308,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
                     Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.no_route.2").withStyle(ChatFormatting.GRAY)
             );
         }
-        if (!hasReadyInstalledRoutePlan(player)) {
+        if (!hasResolvableInstalledRouteChain(player)) {
             return List.of(
                     Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.partial_route.1").withStyle(ChatFormatting.YELLOW),
                     Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.partial_route.2").withStyle(ChatFormatting.GRAY)
@@ -1464,9 +1510,9 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
             if (snapshot.scheduleActive() || snapshot.scheduleHeld()) {
                 return false;
             }
-            return !snapshot.readyRoute();
+            return !snapshot.canPreviewRoute();
         }
-        return !hasReadyInstalledRoutePlan(player);
+        return !hasResolvableInstalledRouteChain(player);
     }
 
     private boolean hasReadyInstalledRoutePlan(Player player) {
@@ -1511,11 +1557,10 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         if (firstEntry.targetStationId().isEmpty()) {
             return false;
         }
-        Optional<RouteSegment> firstSegment = firstEntry.pinnedSegmentId()
-                .flatMap(RouteSegmentRegistry::byId)
-                .filter(candidate -> candidate.endStationId().equals(firstEntry.targetStationId().get()))
-                .filter(candidate -> candidate.dimension().equals(player.level().dimension()))
-                .filter(candidate -> candidate.transponderId().equals(transponderId));
+        if (!(player instanceof ServerPlayer serverPlayer)) {
+            return false;
+        }
+        Optional<RouteSegment> firstSegment = firstKnownScheduleSegment(serverPlayer.serverLevel(), schedule, transponderId);
         if (firstSegment.isEmpty()) {
             return false;
         }
@@ -1528,18 +1573,13 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
             }
             UUID fromStationId = currentStationId;
             UUID nextStationId = entry.targetStationId().get();
-            Optional<RouteSegment> segment = entry.pinnedSegmentId()
-                    .flatMap(RouteSegmentRegistry::byId)
-                    .filter(candidate -> candidate.startStationId().equals(fromStationId))
-                    .filter(candidate -> candidate.endStationId().equals(nextStationId))
-                    .filter(candidate -> candidate.dimension().equals(player.level().dimension()))
-                    .filter(candidate -> candidate.transponderId().equals(transponderId))
-                    .or(() -> RouteSegmentResolver.newestFor(
-                            fromStationId,
-                            nextStationId,
-                            player.level().dimension(),
-                            Optional.of(transponderId)
-                    ));
+            Optional<RouteSegment> segment = RouteSegmentResolver.scheduledSegment(
+                    serverPlayer.serverLevel(),
+                    fromStationId,
+                    nextStationId,
+                    entry.pinnedSegmentId(),
+                    transponderId
+            );
             if (segment.isEmpty()) {
                 return false;
             }
@@ -1579,6 +1619,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
 
     private boolean editInstalledSchedule(ServerPlayer player, ShipTransponderBlockEntity transponder) {
         AirshipSchedule schedule = transponder.ownedSchedule();
+        net.sprocketgames.create_aeronautics_automated_logistics.network.SyncIdentityDirectoryPayload.sendTo(player);
         player.openMenu(
                 new net.minecraft.world.SimpleMenuProvider(
                         (containerId, inventory, ignoredPlayer) -> new AirshipScheduleMenu(containerId, inventory, transponder.getBlockPos(), false),

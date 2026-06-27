@@ -21,7 +21,6 @@ public final class ModCreativeTabs {
                     .displayItems((parameters, output) -> {
                         output.accept(ModItems.AIRSHIP_STATION.get());
                         output.accept(ModItems.SHIP_TRANSPONDER.get());
-                        output.accept(ModItems.AIRSHIP_SCHEDULE.get());
                     })
                     .build());
 

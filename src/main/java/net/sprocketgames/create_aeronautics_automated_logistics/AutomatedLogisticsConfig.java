@@ -22,7 +22,9 @@ public class AutomatedLogisticsConfig {
     public static final ModConfigSpec.IntValue STATION_DOCK_SEARCH_RADIUS;
     public static final ModConfigSpec.IntValue DOCK_LOCK_TIMEOUT_TICKS;
     public static final ModConfigSpec.IntValue DOCK_IDLE_TIMEOUT_TICKS;
+    public static final ModConfigSpec.DoubleValue DOCK_RESERVATION_CLEARANCE_DISTANCE;
     public static final ModConfigSpec.BooleanValue FORCE_LOAD_STATION_CHUNKS;
+    public static final ModConfigSpec.IntValue STATION_INTERACTION_CHUNK_RADIUS;
 
     public static final ModConfigSpec.IntValue MAX_ACTIVE_VEHICLES_PER_PLAYER;
     public static final ModConfigSpec.BooleanValue RESTRICT_TRANSPONDER_CONTROL_TO_OWNER;
@@ -86,10 +88,18 @@ public class AutomatedLogisticsConfig {
         DOCK_IDLE_TIMEOUT_TICKS = BUILDER
                 .comment("Maximum ticks to wait for dock transfer activity to become idle before continuing.")
                 .defineInRange("dockIdleTimeoutTicks", 20 * 120, 20, 20 * 60 * 30);
+        DOCK_RESERVATION_CLEARANCE_DISTANCE = BUILDER
+                .comment("Recorded route distance in blocks kept clear around a reserved dock.")
+                .comment("Incoming ships queue before this much inbound path remains to the docking stop; the holder releases after clearing this much outbound path after the stop.")
+                .defineInRange("dockReservationClearanceDistance", 80.0D, 1.0D, 512.0D);
         FORCE_LOAD_STATION_CHUNKS = BUILDER
                 .comment("Keep Airship Station chunks force-loaded so route starts, docking, and stop context remain available even when players move away.")
                 .comment("Disable this if you prefer to manage loading with another chunk-loader mod.")
                 .define("forceLoadStationChunks", true);
+        STATION_INTERACTION_CHUNK_RADIUS = BUILDER
+                .comment("Extra station-centered chunk radius to temporarily force-load while a ship is docking.")
+                .comment("0 loads only the station chunk, 1 loads a 3x3 chunk square, and 2 loads a 5x5 chunk square.")
+                .defineInRange("stationInteractionChunkRadius", 0, 0, 2);
         BUILDER.pop();
 
         BUILDER.push("limits");
@@ -106,22 +116,28 @@ public class AutomatedLogisticsConfig {
 
         BUILDER.push("debug");
         DEBUG_LOGGING = BUILDER
-                .comment("Enable automated logistics debug logging.")
+                .comment("Master switch for automated logistics debug logging.")
+                .comment("When false, all category debug logs below are disabled.")
                 .define("debugLogging", false);
         DEBUG_PLAYBACK = BUILDER
                 .comment("Enable playback/runtime debug logs, including unloaded-transit progress and restore.")
+                .comment("Only used when debugLogging is true.")
                 .define("playback", true);
         DEBUG_VEHICLE = BUILDER
                 .comment("Enable low-level vehicle/Sable controller debug logs.")
+                .comment("Only used when debugLogging is true.")
                 .define("vehicle", true);
         DEBUG_DOCKING = BUILDER
                 .comment("Enable docking connector discovery and docking-runtime debug logs.")
+                .comment("Only used when debugLogging is true.")
                 .define("docking", true);
         DEBUG_CARGO = BUILDER
                 .comment("Enable cargo endpoint, cargo wait, and cargo saved-data debug logs.")
+                .comment("Only used when debugLogging is true.")
                 .define("cargo", true);
         DEBUG_UI_SYNC = BUILDER
                 .comment("Enable station/transponder menu, sync, and state-refresh debug logs.")
+                .comment("Only used when debugLogging is true.")
                 .define("uiSync", true);
         BUILDER.pop();
 
@@ -133,23 +149,23 @@ public class AutomatedLogisticsConfig {
     }
 
     public static boolean debugPlayback() {
-        return DEBUG_PLAYBACK.get();
+        return debugLogging() && DEBUG_PLAYBACK.get();
     }
 
     public static boolean debugVehicle() {
-        return DEBUG_VEHICLE.get();
+        return debugLogging() && DEBUG_VEHICLE.get();
     }
 
     public static boolean debugDocking() {
-        return DEBUG_DOCKING.get();
+        return debugLogging() && DEBUG_DOCKING.get();
     }
 
     public static boolean debugCargo() {
-        return DEBUG_CARGO.get();
+        return debugLogging() && DEBUG_CARGO.get();
     }
 
     public static boolean debugUiSync() {
-        return DEBUG_UI_SYNC.get();
+        return debugLogging() && DEBUG_UI_SYNC.get();
     }
 
     public static boolean requireCrouchToBreakRouteBlocks() {
@@ -162,6 +178,10 @@ public class AutomatedLogisticsConfig {
 
     public static boolean forceLoadStationChunks() {
         return FORCE_LOAD_STATION_CHUNKS.get();
+    }
+
+    public static int stationInteractionChunkRadius() {
+        return STATION_INTERACTION_CHUNK_RADIUS.get();
     }
 
 }

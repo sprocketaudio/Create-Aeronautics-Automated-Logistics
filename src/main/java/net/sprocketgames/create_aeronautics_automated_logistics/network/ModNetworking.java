@@ -30,9 +30,9 @@ public final class ModNetworking {
                 SelectAirshipScheduleStationPayload::handle
         );
         registrar.playToServer(
-                OpenInstalledScheduleEditorPayload.TYPE,
-                OpenInstalledScheduleEditorPayload.STREAM_CODEC,
-                OpenInstalledScheduleEditorPayload::handle
+                OpenScheduleEditorPayload.TYPE,
+                OpenScheduleEditorPayload.STREAM_CODEC,
+                OpenScheduleEditorPayload::handle
         );
         registrar.playToServer(
                 ShipTransponderMenuActionPayload.TYPE,
@@ -43,6 +43,11 @@ public final class ModNetworking {
                 AirshipStationMenuActionPayload.TYPE,
                 AirshipStationMenuActionPayload.STREAM_CODEC,
                 AirshipStationMenuActionPayload::handle
+        );
+        registrar.playToServer(
+                PreviewStationRoutesPayload.TYPE,
+                PreviewStationRoutesPayload.STREAM_CODEC,
+                PreviewStationRoutesPayload::handle
         );
         registrar.playToServer(
                 ReopenShipTransponderPayload.TYPE,
@@ -75,6 +80,11 @@ public final class ModNetworking {
                 SetFlightPathPreviewPayload::handle
         );
         registrar.playToClient(
+                SyncIdentityDirectoryPayload.TYPE,
+                SyncIdentityDirectoryPayload.STREAM_CODEC,
+                SyncIdentityDirectoryPayload::handle
+        );
+        registrar.playToClient(
                 SetAutomatedShipVisualStatePayload.TYPE,
                 SetAutomatedShipVisualStatePayload.STREAM_CODEC,
                 SetAutomatedShipVisualStatePayload::handle
@@ -103,6 +113,11 @@ public final class ModNetworking {
                 ShowShipTransponderHighlightPayload.TYPE,
                 ShowShipTransponderHighlightPayload.STREAM_CODEC,
                 ShowShipTransponderHighlightPayload::handle
+        );
+        registrar.playToClient(
+                ShowDockingIssueToastPayload.TYPE,
+                ShowDockingIssueToastPayload.STREAM_CODEC,
+                ShowDockingIssueToastPayload::handle
         );
         registrar.playToClient(
                 SetTransponderRecordingStatePayload.TYPE,

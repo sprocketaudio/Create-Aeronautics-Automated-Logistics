@@ -40,10 +40,9 @@ public record ReopenShipTransponderPayload(BlockPos transponderPos, boolean reco
         if (!(player.level().getBlockEntity(payload.transponderPos()) instanceof ShipTransponderBlockEntity transponder)) {
             return;
         }
-        transponder.refreshRuntimeShip(player.serverLevel());
-        transponder.refreshShipDockLink(player.serverLevel());
-        net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES
-                .reconcileRuntimeStatus(player.serverLevel(), transponder);
+        net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus projectedRuntimeStatus =
+                net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES
+                        .projectRuntimeStatus(player.serverLevel(), transponder);
         ShipTransponderMenu.InitialRecordingState recordingState =
                 ShipTransponderMenu.resolveInitialRecordingState(player, transponder, payload.recordingMode());
         ShipTransponderMenu statusMenu = new ShipTransponderMenu(
@@ -54,7 +53,7 @@ public record ReopenShipTransponderPayload(BlockPos transponderPos, boolean reco
                 recordingState.recordingSessionActive(),
                 recordingState.appendToSchedule(),
                 transponder.recordingDestinationStationId(),
-                transponder.runtimeStatus(),
+                projectedRuntimeStatus,
                 transponder.dockOutputActive(),
                 transponder.hasOwnedStops(),
                 transponder.ownedSchedule(),
@@ -75,7 +74,7 @@ public record ReopenShipTransponderPayload(BlockPos transponderPos, boolean reco
                 player.getName().getString(),
                 player.isSpectator(),
                 recordingState.recordingMode(),
-                transponder.runtimeStatus(),
+                projectedRuntimeStatus,
                 transponder.scheduleActive(),
                 transponder.scheduleHeld(),
                 transponder.dockOutputActive(),
@@ -84,6 +83,7 @@ public record ReopenShipTransponderPayload(BlockPos transponderPos, boolean reco
                 statusSnapshot.text(),
                 Integer.toHexString(statusSnapshot.color())
         );
+        SyncIdentityDirectoryPayload.sendTo(player);
         player.openMenu(transponder, buffer -> {
             buffer.writeBlockPos(payload.transponderPos());
             buffer.writeBoolean(recordingState.recordingMode());
@@ -91,7 +91,7 @@ public record ReopenShipTransponderPayload(BlockPos transponderPos, boolean reco
             buffer.writeBoolean(recordingState.appendToSchedule());
             buffer.writeBoolean(transponder.recordingDestinationStationId().isPresent());
             transponder.recordingDestinationStationId().ifPresent(buffer::writeUUID);
-            buffer.writeEnum(transponder.runtimeStatus());
+            buffer.writeEnum(projectedRuntimeStatus);
             buffer.writeBoolean(transponder.dockOutputActive());
             buffer.writeBoolean(transponder.hasOwnedStops());
             buffer.writeNbt(AirshipScheduleNbtSerializer.write(transponder.ownedSchedule()));

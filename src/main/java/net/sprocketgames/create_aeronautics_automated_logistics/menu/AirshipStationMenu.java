@@ -4,6 +4,7 @@ import com.simibubi.create.AllSoundEvents;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -60,9 +61,9 @@ import net.sprocketgames.create_aeronautics_automated_logistics.service.Playback
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RecordingFailure;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RecordingSession;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteOperationResult;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.ShipMaterializationService;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModMenus;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleController;
-import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerResolver;
 import net.sprocketgames.create_aeronautics_automated_logistics.AutomatedLogisticsConfig;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.StationPermissionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.TransponderPermissionService;
@@ -88,6 +89,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
     public static final int ACTION_SHOW_CARGO = 16;
     public static final int ACTION_SELECT_SHIP_BASE = 1000;
     public static final int ACTION_PREVIEW_ROUTE_BASE = 2000;
+    public static final int ACTION_PREVIEW_ROUTE_FILTER_BASE = 3000;
     private static final int WAIT_ADJUST_TICKS = 20 * 5;
 
     private final BlockPos stationPos;
@@ -410,6 +412,10 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         return Component.literal(IdentityNames.shortId(station.stationId()));
     }
 
+    public Optional<UUID> stationId() {
+        return clientState.stationId();
+    }
+
     @Override
     public boolean clickMenuButton(Player player, int id) {
         if (!(player instanceof ServerPlayer serverPlayer)) {
@@ -420,6 +426,12 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         }
 
         if (id >= ACTION_SELECT_SHIP_BASE) {
+            if (id >= ACTION_PREVIEW_ROUTE_FILTER_BASE) {
+                if (!StationPermissionService.ensureCanControl(serverPlayer, station)) {
+                    return false;
+                }
+                return previewRoutesByFilterIndex(serverPlayer, station, id - ACTION_PREVIEW_ROUTE_FILTER_BASE);
+            }
             if (id >= ACTION_PREVIEW_ROUTE_BASE) {
                 if (!StationPermissionService.ensureCanControl(serverPlayer, station)) {
                     return false;
@@ -690,6 +702,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         if (!(player.level().getBlockEntity(stationPos) instanceof AirshipStationBlockEntity station)) {
             return Component.empty();
         }
+        List<RouteSegment> stationRoutes = stationRoutes(station, player.level().dimension());
         int outgoing = RouteSegmentResolver.validOutgoingSegments(
                 station,
                 player.level().dimension(),
@@ -698,7 +711,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         return Component.translatable(
                 "gui.create_aeronautics_automated_logistics.airship_station.segments",
                 outgoing,
-                station.routeSegments().size()
+                stationRoutes.size()
         );
     }
 
@@ -1254,7 +1267,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         if (!(player.level().getBlockEntity(stationPos) instanceof AirshipStationBlockEntity station)) {
             return clientRouteChoices;
         }
-        return summarizeRoutes(localRoutes(station, player));
+        return summarizeRoutes(stationDisplayRoutes((ServerPlayer) player, station));
     }
 
     private Optional<UUID> selectedTransponderId(AirshipStationBlockEntity station) {
@@ -1310,6 +1323,9 @@ public class AirshipStationMenu extends AbstractContainerMenu {
             if (transponder.dockOutputActive()) {
                 return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.docked");
             }
+            if (runtimeStatus == RouteStatus.DOCK_QUEUED) {
+                return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.dock_queue");
+            }
             if (runtimeStatus == RouteStatus.WAITING) {
                 return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.waiting");
             }
@@ -1344,6 +1360,9 @@ public class AirshipStationMenu extends AbstractContainerMenu {
             }
             if (state.dockOutputActive()) {
                 return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.docked");
+            }
+            if (state.runtimeStatus() == RouteStatus.DOCK_QUEUED) {
+                return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.dock_queue");
             }
             if (state.runtimeStatus() == RouteStatus.WAITING) {
                 return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.waiting");
@@ -1416,6 +1435,12 @@ public class AirshipStationMenu extends AbstractContainerMenu {
                 return List.of(
                         Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.docked.1").withStyle(ChatFormatting.YELLOW),
                         Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.docked.2").withStyle(ChatFormatting.GRAY)
+                );
+            }
+            if (runtimeStatus == RouteStatus.DOCK_QUEUED) {
+                return List.of(
+                        Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.dock_queue.1").withStyle(ChatFormatting.YELLOW),
+                        Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.dock_queue.2").withStyle(ChatFormatting.GRAY)
                 );
             }
             if (runtimeStatus == RouteStatus.WAITING) {
@@ -1579,10 +1604,13 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         if (firstEntry.targetStationId().isEmpty()) {
             return false;
         }
+        if (!(player instanceof ServerPlayer serverPlayer)) {
+            return false;
+        }
         Optional<RouteSegment> firstSegment = firstEntry.pinnedSegmentId()
-                .flatMap(RouteSegmentRegistry::byId)
+                .flatMap(segmentId -> RouteSegmentResolver.byId(serverPlayer.serverLevel(), segmentId))
                 .filter(candidate -> candidate.endStationId().equals(firstEntry.targetStationId().get()))
-                .filter(candidate -> candidate.dimension().equals(player.level().dimension()))
+                .filter(candidate -> candidate.dimension().equals(serverPlayer.serverLevel().dimension()))
                 .filter(candidate -> candidate.transponderId().equals(transponder.transponderId()));
         if (firstSegment.isEmpty()) {
             return false;
@@ -1595,18 +1623,13 @@ public class AirshipStationMenu extends AbstractContainerMenu {
             }
             UUID fromStationId = currentStationId;
             UUID nextStationId = entry.targetStationId().get();
-            Optional<RouteSegment> segment = entry.pinnedSegmentId()
-                    .flatMap(RouteSegmentRegistry::byId)
-                    .filter(candidate -> candidate.startStationId().equals(fromStationId))
-                    .filter(candidate -> candidate.endStationId().equals(nextStationId))
-                    .filter(candidate -> candidate.dimension().equals(player.level().dimension()))
-                    .filter(candidate -> candidate.transponderId().equals(transponder.transponderId()))
-                    .or(() -> RouteSegmentResolver.newestFor(
-                            fromStationId,
-                            nextStationId,
-                            player.level().dimension(),
-                            Optional.of(transponder.transponderId())
-                    ));
+            Optional<RouteSegment> segment = RouteSegmentResolver.scheduledSegment(
+                    serverPlayer.serverLevel(),
+                    fromStationId,
+                    nextStationId,
+                    entry.pinnedSegmentId(),
+                    transponder.transponderId()
+            );
             if (segment.isEmpty()) {
                 return false;
             }
@@ -1748,7 +1771,20 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         }
 
         Optional<VehicleController> controller = selectedShip.get().controllerRef()
-                .flatMap(controllerRef -> VehicleControllerResolver.resolve(player.serverLevel(), controllerRef));
+                .flatMap(controllerRef -> AutomatedLogisticsServices.MATERIALIZATION.resolveLiveBody(
+                        new ShipMaterializationService.LiveBodyLookupRequest(
+                                player.serverLevel().getServer(),
+                                player.serverLevel().dimension(),
+                                controllerRef,
+                                selectedTransponderId,
+                                controllerRef.vehicleId(),
+                                Optional.empty(),
+                                Optional.empty(),
+                                Optional.of(station.stationId()),
+                                "station_start_segment_recording",
+                                "recording_live_lookup"
+                        )
+                ).controller());
         if (controller.isEmpty()) {
             station.setFailure(FailureReason.VEHICLE_DESTROYED_OR_MISSING);
             actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.recording.selected_ship_unavailable"));
@@ -1928,21 +1964,11 @@ public class AirshipStationMenu extends AbstractContainerMenu {
     }
 
     private boolean linkCargo(ServerPlayer player, AirshipStationBlockEntity station) {
-        if (station.isRecording() || selectedShipAutomationRunning(player.serverLevel(), station)) {
-            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.cargo_link.locked_while_running"));
-            AllSoundEvents.DENY.playOnServer(player.level(), station.getBlockPos(), 0.5f, 1.0f);
-            return false;
-        }
         CargoLinkInteractionService.beginStationLink(player, station.getBlockPos());
         return true;
     }
 
     private boolean clearCargo(ServerPlayer player, AirshipStationBlockEntity station) {
-        if (station.isRecording() || selectedShipAutomationRunning(player.serverLevel(), station)) {
-            actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.cargo_link.locked_while_running"));
-            AllSoundEvents.DENY.playOnServer(player.level(), station.getBlockPos(), 0.5f, 1.0f);
-            return false;
-        }
         if (CargoLinkInteractionService.hasPendingStationLink(player, station.getBlockPos())) {
             return CargoLinkInteractionService.cancelPending(player);
         }
@@ -1955,7 +1981,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
     }
 
     private boolean previewRouteByIndex(ServerPlayer player, AirshipStationBlockEntity station, int routeIndex) {
-        List<RouteSegment> routes = localRoutes(station, player);
+        List<RouteSegment> routes = stationDisplayRoutes(player, station);
         if (routeIndex < 0 || routeIndex >= routes.size()) {
             CreateAeronauticsAutomatedLogistics.debugUi(
                     "Station preview route rejected player={} spectator={} stationPos={} routeIndex={} availableRoutes={}",
@@ -1983,14 +2009,194 @@ public class AirshipStationMenu extends AbstractContainerMenu {
                         true,
                         segment.points().stream().map(point -> point.position()).toList(),
                         List.of(Math.max(0, segment.points().size() - 1)),
+                        List.of(segment.transponderId()),
+                        List.of(0),
+                        List.of(),
+                        List.of(segment.id().value()),
+                        Optional.empty(),
+                        Optional.of(station.stationId()),
                         Optional.empty()
                 )
         );
         return true;
     }
 
+    public void previewSelectedRoutes(ServerPlayer player, List<UUID> selectedRouteIds) {
+        if (!(player.containerMenu instanceof AirshipStationMenu menu) || menu != this) {
+            return;
+        }
+        if (!(player.serverLevel().getBlockEntity(stationPos) instanceof AirshipStationBlockEntity station)) {
+            return;
+        }
+        previewRoutesByIds(player, station, selectedRouteIds);
+    }
+
+    private boolean previewRoutesByIds(ServerPlayer player, AirshipStationBlockEntity station, List<UUID> selectedRouteIds) {
+        java.util.LinkedHashSet<UUID> selected = new java.util.LinkedHashSet<>(selectedRouteIds);
+        if (selected.isEmpty()) {
+            PacketDistributor.sendToPlayer(
+                    player,
+                    new SetFlightPathPreviewPayload(
+                            false,
+                            List.of(),
+                            List.of(),
+                            List.of(),
+                            List.of(),
+                            List.of(),
+                            List.of(),
+                            Optional.empty(),
+                            Optional.empty(),
+                            Optional.empty()
+                    )
+            );
+            return true;
+        }
+
+        List<RouteSegment> selectedRoutes = stationDisplayRoutes(player, station).stream()
+                .filter(route -> selected.contains(route.id().value()))
+                .toList();
+        if (selectedRoutes.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugUi(
+                    "Station preview selected routes rejected player={} spectator={} stationPos={} requestedRoutes={} matchedRoutes=0",
+                    player.getName().getString(),
+                    player.isSpectator(),
+                    station.getBlockPos(),
+                    selected.size()
+            );
+            PacketDistributor.sendToPlayer(
+                    player,
+                    new SetFlightPathPreviewPayload(
+                            false,
+                            List.of(),
+                            List.of(),
+                            List.of(),
+                            List.of(),
+                            List.of(),
+                            List.of(),
+                            Optional.empty(),
+                            Optional.empty(),
+                            Optional.empty()
+                    )
+            );
+            return false;
+        }
+
+        List<Vec3> points = new ArrayList<>();
+        List<Integer> legEndIndices = new ArrayList<>();
+        List<UUID> legPaletteKeys = new ArrayList<>();
+        List<Integer> legColorSlots = new ArrayList<>();
+        List<Integer> breakStartIndices = new ArrayList<>();
+        java.util.HashMap<UUID, Integer> legOrdinalByShip = new java.util.HashMap<>();
+        for (RouteSegment route : selectedRoutes) {
+            if (!points.isEmpty() && !route.points().isEmpty()) {
+                breakStartIndices.add(points.size());
+            }
+            int startIndex = points.size();
+            route.points().forEach(point -> points.add(point.position()));
+            if (!route.points().isEmpty()) {
+                legEndIndices.add(startIndex + route.points().size() - 1);
+                legPaletteKeys.add(route.transponderId());
+                int legOrdinal = legOrdinalByShip.getOrDefault(route.transponderId(), 0);
+                legColorSlots.add(Math.floorMod(legOrdinal, 3));
+                legOrdinalByShip.put(route.transponderId(), legOrdinal + 1);
+            }
+        }
+
+        CreateAeronauticsAutomatedLogistics.debugUi(
+                "Station preview selected routes sending player={} spectator={} stationPos={} routeCount={} pointCount={} routeIds={}",
+                player.getName().getString(),
+                player.isSpectator(),
+                station.getBlockPos(),
+                selectedRoutes.size(),
+                points.size(),
+                selectedRoutes.stream().map(route -> route.id().value()).toList()
+        );
+        PacketDistributor.sendToPlayer(
+                player,
+                new SetFlightPathPreviewPayload(
+                        true,
+                        List.copyOf(points),
+                        List.copyOf(legEndIndices),
+                        List.copyOf(legPaletteKeys),
+                        List.copyOf(legColorSlots),
+                        List.copyOf(breakStartIndices),
+                        selectedRoutes.stream().map(route -> route.id().value()).toList(),
+                        Optional.empty(),
+                        Optional.of(station.stationId()),
+                        Optional.empty()
+                )
+        );
+        return true;
+    }
+
+    private boolean previewRoutesByFilterIndex(ServerPlayer player, AirshipStationBlockEntity station, int filterIndex) {
+        List<RouteSegment> routes = stationDisplayRoutes(player, station);
+        Optional<UUID> filterTransponderId = previewFilterTransponderId(player, station, filterIndex);
+        List<RouteSegment> filteredRoutes = filterTransponderId.isPresent()
+                ? routes.stream().filter(route -> route.transponderId().equals(filterTransponderId.get())).toList()
+                : routes;
+        if (filteredRoutes.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugUi(
+                    "Station preview filtered routes rejected player={} spectator={} stationPos={} filterIndex={} transponderId={} availableRoutes={}",
+                    player.getName().getString(),
+                    player.isSpectator(),
+                    station.getBlockPos(),
+                    filterIndex,
+                    filterTransponderId.map(UUID::toString).orElse("all"),
+                    routes.size()
+            );
+            return false;
+        }
+        List<Vec3> points = new ArrayList<>();
+        List<Integer> legEndIndices = new ArrayList<>();
+        List<UUID> legPaletteKeys = new ArrayList<>();
+        List<Integer> legColorSlots = new ArrayList<>();
+        List<Integer> breakStartIndices = new ArrayList<>();
+        java.util.HashMap<UUID, Integer> legOrdinalByShip = new java.util.HashMap<>();
+        for (RouteSegment route : filteredRoutes) {
+            if (!points.isEmpty() && !route.points().isEmpty()) {
+                breakStartIndices.add(points.size());
+            }
+            int startIndex = points.size();
+            route.points().forEach(point -> points.add(point.position()));
+            if (!route.points().isEmpty()) {
+                legEndIndices.add(startIndex + route.points().size() - 1);
+                legPaletteKeys.add(route.transponderId());
+                int legOrdinal = legOrdinalByShip.getOrDefault(route.transponderId(), 0);
+                legColorSlots.add(Math.floorMod(legOrdinal, 3));
+                legOrdinalByShip.put(route.transponderId(), legOrdinal + 1);
+            }
+        }
+        CreateAeronauticsAutomatedLogistics.debugUi(
+                "Station preview filtered routes sending player={} spectator={} stationPos={} filterIndex={} transponderId={} routeCount={} pointCount={}",
+                player.getName().getString(),
+                player.isSpectator(),
+                station.getBlockPos(),
+                filterIndex,
+                filterTransponderId.map(UUID::toString).orElse("all"),
+                filteredRoutes.size(),
+                points.size()
+        );
+        PacketDistributor.sendToPlayer(
+                player,
+                new SetFlightPathPreviewPayload(
+                        true,
+                        List.copyOf(points),
+                        List.copyOf(legEndIndices),
+                        List.copyOf(legPaletteKeys),
+                        List.copyOf(legColorSlots),
+                        List.copyOf(breakStartIndices),
+                        filteredRoutes.stream().map(route -> route.id().value()).toList(),
+                        Optional.empty(),
+                        Optional.of(station.stationId()),
+                        filterTransponderId
+                )
+        );
+        return true;
+    }
+
     public static List<RouteChoiceSummary> buildRouteChoiceSummaries(ServerPlayer player, AirshipStationBlockEntity station) {
-        return summarizeRoutes(localRoutesForSummary(station, player));
+        return summarizeRoutes(stationDisplayRoutes(player, station));
     }
 
     private static List<RouteChoiceSummary> summarizeRoutes(List<RouteSegment> routes) {
@@ -2015,7 +2221,32 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         if (selectedTransponder.isPresent()) {
             return scheduledLocalRoutes(station, player, selectedTransponder.get());
         }
-        return RouteSegmentResolver.validLocalSegments(station, player.level().dimension(), Optional.empty()).stream()
+        return stationRoutes(station, player.level().dimension());
+    }
+
+    private static List<RouteSegment> stationRoutes(AirshipStationBlockEntity station, ResourceKey<net.minecraft.world.level.Level> dimension) {
+        return collapseSupersededRouteHistory(RouteSegmentResolver.validLocalSegments(station, dimension, Optional.empty()).stream()
+                .sorted(Comparator
+                        .comparingLong(RouteSegment::createdEpochMillis)
+                        .reversed()
+                        .thenComparing(segment -> segment.id().value().toString()))
+                .toList());
+    }
+
+    private static List<RouteSegment> collapseSupersededRouteHistory(List<RouteSegment> routes) {
+        java.util.LinkedHashMap<RouteHistoryKey, RouteSegment> newestByKey = new java.util.LinkedHashMap<>();
+        for (RouteSegment route : routes) {
+            newestByKey.putIfAbsent(
+                    new RouteHistoryKey(
+                            route.startStationId(),
+                            route.endStationId(),
+                            route.transponderId(),
+                            route.dimension()
+                    ),
+                    route
+            );
+        }
+        return newestByKey.values().stream()
                 .sorted(Comparator
                         .comparingLong(RouteSegment::createdEpochMillis)
                         .reversed()
@@ -2023,18 +2254,44 @@ public class AirshipStationMenu extends AbstractContainerMenu {
                 .toList();
     }
 
-    private static List<RouteSegment> localRoutesForSummary(AirshipStationBlockEntity station, ServerPlayer player) {
-        Optional<ShipTransponderBlockEntity> selectedTransponder = station.selectedTransponderId()
-                .flatMap(transponderId -> selectedTransponderForSummary(player.serverLevel(), transponderId));
-        if (selectedTransponder.isPresent()) {
-            return scheduledLocalRoutesForSummary(station, player, selectedTransponder.get());
+    private static Optional<UUID> previewFilterTransponderId(ServerPlayer player, AirshipStationBlockEntity station, int filterIndex) {
+        List<RouteFilterChoice> choices = buildRouteFilterChoices(player, station);
+        if (filterIndex < 0 || filterIndex >= choices.size()) {
+            return Optional.empty();
         }
-        return RouteSegmentResolver.validLocalSegments(station, player.level().dimension(), Optional.empty()).stream()
-                .sorted(Comparator
-                        .comparingLong(RouteSegment::createdEpochMillis)
-                        .reversed()
-                        .thenComparing(segment -> segment.id().value().toString()))
-                .toList();
+        return Optional.ofNullable(choices.get(filterIndex).transponderId());
+    }
+
+    private static List<RouteFilterChoice> buildRouteFilterChoices(ServerPlayer player, AirshipStationBlockEntity station) {
+        List<RouteFilterChoice> choices = new ArrayList<>();
+        choices.add(new RouteFilterChoice(null, "All Ships"));
+        LinkedHashMap<UUID, String> labels = new LinkedHashMap<>();
+        for (ShipChoiceSnapshot choice : buildShipChoiceSnapshots(player, station, Optional.empty())) {
+            labels.put(choice.transponderId(), choice.shipName());
+        }
+        for (RouteSegment route : stationDisplayRoutes(player, station)) {
+            labels.putIfAbsent(route.transponderId(), shipNameForSummary(route.transponderId(), route.shipName()));
+        }
+        labels.forEach((transponderId, label) -> choices.add(new RouteFilterChoice(transponderId, label)));
+        return List.copyOf(choices);
+    }
+
+    private static List<RouteSegment> stationDisplayRoutes(ServerPlayer player, AirshipStationBlockEntity station) {
+        List<RouteSegment> routes = new ArrayList<>();
+        for (ShipTransponderSnapshot snapshot : sortedShipsForSummary(player, station)) {
+            if (!(player.serverLevel().getBlockEntity(snapshot.transponderPos()) instanceof ShipTransponderBlockEntity transponder)
+                    || !transponder.transponderId().equals(snapshot.transponderId())) {
+                continue;
+            }
+            for (RouteSegment route : scheduledLocalRoutesForSummary(station, player, transponder)) {
+                addUniqueRouteForSummary(routes, route);
+            }
+        }
+        routes.sort(Comparator
+                .comparingLong(RouteSegment::createdEpochMillis)
+                .reversed()
+                .thenComparing(segment -> segment.id().value().toString()));
+        return List.copyOf(routes);
     }
 
     private static List<RouteSegment> scheduledLocalRoutesForSummary(
@@ -2081,15 +2338,11 @@ public class AirshipStationMenu extends AbstractContainerMenu {
             ServerPlayer player
     ) {
         return entry.pinnedSegmentId()
-                .flatMap(RouteSegmentRegistry::byId)
+                .flatMap(segmentId -> RouteSegmentResolver.byId(player.serverLevel(), segmentId))
                 .filter(segment -> segment.endStationId().equals(targetStationId))
-                .filter(segment -> segment.dimension().equals(player.level().dimension()))
+                .filter(segment -> segment.dimension().equals(player.serverLevel().dimension()))
                 .filter(segment -> segment.transponderId().equals(transponderId))
-                .or(() -> RouteSegmentRegistry.endingAt(
-                        targetStationId,
-                        player.level().dimension(),
-                        Optional.of(transponderId)
-                ).stream().findFirst());
+                .or(() -> RouteSegmentResolver.endingAt(player.serverLevel(), targetStationId, Optional.of(transponderId)));
     }
 
     private static Optional<RouteSegment> resolveScheduledSegmentForSummary(
@@ -2099,18 +2352,13 @@ public class AirshipStationMenu extends AbstractContainerMenu {
             UUID transponderId,
             ServerPlayer player
     ) {
-        return entry.pinnedSegmentId()
-                .flatMap(RouteSegmentRegistry::byId)
-                .filter(segment -> segment.startStationId().equals(startStationId))
-                .filter(segment -> segment.endStationId().equals(targetStationId))
-                .filter(segment -> segment.dimension().equals(player.level().dimension()))
-                .filter(segment -> segment.transponderId().equals(transponderId))
-                .or(() -> RouteSegmentResolver.newestFor(
-                        startStationId,
-                        targetStationId,
-                        player.level().dimension(),
-                        Optional.of(transponderId)
-                ));
+        return RouteSegmentResolver.scheduledSegment(
+                player.serverLevel(),
+                startStationId,
+                targetStationId,
+                entry.pinnedSegmentId(),
+                transponderId
+        );
     }
 
     private static void addUniqueRouteForSummary(List<RouteSegment> routes, RouteSegment route) {
@@ -2165,6 +2413,14 @@ public class AirshipStationMenu extends AbstractContainerMenu {
             UUID transponderId,
             Player player
     ) {
+        if (player instanceof ServerPlayer serverPlayer) {
+            return entry.pinnedSegmentId()
+                    .flatMap(segmentId -> RouteSegmentResolver.byId(serverPlayer.serverLevel(), segmentId))
+                    .filter(segment -> segment.endStationId().equals(targetStationId))
+                    .filter(segment -> segment.dimension().equals(serverPlayer.serverLevel().dimension()))
+                    .filter(segment -> segment.transponderId().equals(transponderId))
+                    .or(() -> RouteSegmentResolver.endingAt(serverPlayer.serverLevel(), targetStationId, Optional.of(transponderId)));
+        }
         return entry.pinnedSegmentId()
                 .flatMap(RouteSegmentRegistry::byId)
                 .filter(segment -> segment.endStationId().equals(targetStationId))
@@ -2184,6 +2440,15 @@ public class AirshipStationMenu extends AbstractContainerMenu {
             UUID transponderId,
             Player player
     ) {
+        if (player instanceof ServerPlayer serverPlayer) {
+            return RouteSegmentResolver.scheduledSegment(
+                    serverPlayer.serverLevel(),
+                    startStationId,
+                    targetStationId,
+                    entry.pinnedSegmentId(),
+                    transponderId
+            );
+        }
         return entry.pinnedSegmentId()
                 .flatMap(RouteSegmentRegistry::byId)
                 .filter(segment -> segment.startStationId().equals(startStationId))
@@ -2468,6 +2733,12 @@ public class AirshipStationMenu extends AbstractContainerMenu {
                 return List.of(
                         Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.docked.1").withStyle(ChatFormatting.YELLOW),
                         Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.docked.2").withStyle(ChatFormatting.GRAY)
+                );
+            }
+            if (state.runtimeStatus() == RouteStatus.DOCK_QUEUED) {
+                return List.of(
+                        Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.dock_queue.1").withStyle(ChatFormatting.YELLOW),
+                        Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.dock_queue.2").withStyle(ChatFormatting.GRAY)
                 );
             }
             if (state.runtimeStatus() == RouteStatus.WAITING) {
@@ -2839,6 +3110,17 @@ public class AirshipStationMenu extends AbstractContainerMenu {
             ResourceKey<net.minecraft.world.level.Level> dimension,
             int pointCount,
             long createdEpochMillis
+    ) {
+    }
+
+    private record RouteFilterChoice(UUID transponderId, String label) {
+    }
+
+    private record RouteHistoryKey(
+            UUID startStationId,
+            UUID endStationId,
+            UUID transponderId,
+            ResourceKey<net.minecraft.world.level.Level> dimension
     ) {
     }
 

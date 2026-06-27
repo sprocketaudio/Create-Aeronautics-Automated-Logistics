@@ -30,9 +30,12 @@ It is built mainly for Create Aeronautics airships. Other Sable-based vehicles m
 The current release includes:
 
 - Route automation: transponder-owned route recording, stop planning, and route playback
+- Runtime authority: unloaded ship travel with restore/reload continuity for normal recorded routes
+- Station loading: stations keep their own chunk loaded and can temporarily expand a configurable square chunk area for station-side docking, cargo transfer, and queueing coverage, with owner warnings when dock/cargo interaction blocks are outside that loaded area
 - Stop logic: grouped wait conditions, cargo-aware waits, redstone waits, and time-of-day waits
 - Linking systems: dock linking plus item and fluid cargo linking on both ships and stations
-- Feedback and control: in-world previews, Create-style UI feedback, and basic ownership / permission support for multiplayer
+- Shared-station safety: single-dock reservation queueing so ships hold clear of an occupied dock instead of converging on the same face
+- Feedback and control: in-world previews, Create-style UI feedback, runtime/admin diagnostics, and basic ownership / permission support for multiplayer
 
 ## Supported Cargo Link Targets
 

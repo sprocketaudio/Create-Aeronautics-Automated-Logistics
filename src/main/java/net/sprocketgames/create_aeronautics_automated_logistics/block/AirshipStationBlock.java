@@ -142,6 +142,7 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
                 station.linkedCargo().size(),
                 station.linkedCargoSummary()
         );
+        net.sprocketgames.create_aeronautics_automated_logistics.network.SyncIdentityDirectoryPayload.sendTo(serverPlayer);
         serverPlayer.openMenu(station, buffer -> {
             buffer.writeBlockPos(pos);
             buffer.writeBoolean(station.selectedTransponderId().isPresent());
@@ -236,9 +237,22 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
                 LogisticsClientOverlays.clearCargoIfMatches(cargoGroups);
             }
             if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
-                StationChunkLoadingService.untrack(serverLevel.getServer(), station.stationId());
-                ScheduleRouteCleanup.removeRoutesForDeletedStation(serverLevel, station.stationId());
-                IdentityDirectorySavedData.removeStation(serverLevel.getServer(), station.stationId());
+                boolean deletionAccepted = ScheduleRouteCleanup.removeRoutesForDeletedStation(
+                        serverLevel,
+                        station.stationId(),
+                        pos
+                );
+                if (deletionAccepted) {
+                    StationChunkLoadingService.untrack(serverLevel.getServer(), station.stationId());
+                    IdentityDirectorySavedData.removeStationIfOwned(
+                            serverLevel.getServer(),
+                            station.stationId(),
+                            serverLevel.dimension(),
+                            pos
+                    );
+                    net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationRegistry
+                            .unregister(station.stationId());
+                }
             }
         }
         super.onRemove(state, level, pos, newState, isMoving);

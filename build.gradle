@@ -213,6 +213,11 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 runs {
     // applies to all the run configs below
     configureEach {
+        // Java 21 needs this open for the NeoForge dev launcher stack used by BootstrapLauncher/UnionFileSystem.
+        jvmArguments.addAll(
+                '--add-opens=java.base/java.lang.invoke=ALL-UNNAMED'
+        )
+
         // Recommended logging data for a userdev environment
         // The markers can be added/remove as needed separated by commas.
         // "SCAN": For mods scan.

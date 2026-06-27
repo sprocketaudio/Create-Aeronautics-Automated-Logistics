@@ -2,6 +2,7 @@ package net.sprocketgames.create_aeronautics_automated_logistics.block.entity;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
@@ -52,6 +53,8 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.RoutePoint
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentNbtSerializer;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentDirectorySavedData;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentId;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStop;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
@@ -109,6 +112,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     private Optional<BlockPos> groundDockPos = Optional.empty();
     private DockLinkStatus groundDockStatus = DockLinkStatus.UNKNOWN;
     private boolean dockOutputActive;
+    private Optional<RouteId> dockOutputOwner = Optional.empty();
     private final List<RouteSegment> routeSegments = new ArrayList<>();
     private final List<VehicleControllerRef> linkedControllers = new ArrayList<>();
     private final List<RoutePoint> recordingPoints = new ArrayList<>();
@@ -128,7 +132,6 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         }
         if (level.getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
             station.refreshGroundDockLink(serverLevel);
-            ScheduleRouteCleanup.pruneInvalidRouteSegments(serverLevel, station);
         }
     }
 
@@ -142,10 +145,6 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
                 linkedCargo.size(),
                 level != null && level.isClientSide
         );
-        if (level != null && !level.isClientSide && dockOutputActive) {
-            dockOutputActive = false;
-            setChanged();
-        }
         syncPoweredBlockState();
         registerLoadedSnapshot();
     }
@@ -160,10 +159,6 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     public AbstractContainerMenu createMenu(int containerId, Inventory playerInventory, Player player) {
         registerStationSnapshot();
         if (level instanceof ServerLevel serverLevel) {
-            ScheduleRouteCleanup.pruneInvalidRouteSegments(serverLevel, this);
-            refreshGroundDockLink(serverLevel);
-            selectedTransponderId.ifPresent(transponderId ->
-                    AutomatedLogisticsServices.SCHEDULES.reconcileRuntimeStatus(serverLevel, transponderId));
             if (player instanceof ServerPlayer serverPlayer) {
                 AirshipStationMenu menu = new AirshipStationMenu(
                         containerId,
@@ -297,6 +292,10 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         return dockOutputActive;
     }
 
+    public Optional<RouteId> dockOutputOwner() {
+        return dockOutputOwner;
+    }
+
     public List<LinkedCargoEntry> linkedCargo() {
         return List.copyOf(resolvedLinkedCargo());
     }
@@ -384,26 +383,103 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         return true;
     }
 
+    public void claimDockOutput(RouteId routeId) {
+        Objects.requireNonNull(routeId, "routeId");
+        updateDockOutputState(true, Optional.of(routeId), "claim");
+    }
+
+    public boolean releaseDockOutput(RouteId routeId) {
+        Objects.requireNonNull(routeId, "routeId");
+        if (dockOutputOwner.filter(routeId::equals).isEmpty()) {
+            if (dockOutputOwner.isEmpty() && !dockOutputActive) {
+                return true;
+            }
+            CreateAeronauticsAutomatedLogistics.debugDocking(
+                    "Station dock output clear refused: stationId={} pos={} requestedRoute={} active={} owner={} status={} reason=owner_mismatch",
+                    stationId,
+                    worldPosition,
+                    routeId.value(),
+                    dockOutputActive,
+                    dockOutputOwner.map(RouteId::value).map(Object::toString).orElse("none"),
+                    status
+            );
+            return false;
+        }
+        updateDockOutputState(false, Optional.empty(), "release");
+        return true;
+    }
+
+    public void forceClearDockOutput(String reason) {
+        updateDockOutputState(false, Optional.empty(), "force_clear:" + reason);
+    }
+
     public void setDockOutputActive(boolean active) {
-        if (dockOutputActive == active) {
+        updateDockOutputState(active, active ? dockOutputOwner : Optional.empty(), "legacy_set");
+    }
+
+    private void updateDockOutputState(boolean active, Optional<RouteId> owner, String action) {
+        Optional<RouteId> previousOwner = dockOutputOwner;
+        boolean previousActive = dockOutputActive;
+        if (previousActive == active && previousOwner.equals(owner)) {
             return;
         }
         dockOutputActive = active;
-        setChanged();
-        syncPoweredBlockState();
-        notifyRedstoneNeighbors();
-        syncClientState();
+        dockOutputOwner = active ? owner : Optional.empty();
+        CreateAeronauticsAutomatedLogistics.debugDocking(
+                "Station dock output changed: stationId={} pos={} {}->{} owner={} prevOwner={} status={} groundDock={} action={} caller={}",
+                stationId,
+                worldPosition,
+                previousActive,
+                dockOutputActive,
+                dockOutputOwner.map(RouteId::value).map(Object::toString).orElse("none"),
+                previousOwner.map(RouteId::value).map(Object::toString).orElse("none"),
+                status,
+                groundDockPos.map(BlockPos::toShortString).orElse("-"),
+                action,
+                dockOutputMutationSource()
+        );
+        if (previousActive != dockOutputActive) {
+            setChanged();
+            syncPoweredBlockState();
+            notifyRedstoneNeighbors();
+            syncClientState();
+        }
+    }
+
+    private static String dockOutputMutationSource() {
+        StackTraceElement[] trace = Thread.currentThread().getStackTrace();
+        for (StackTraceElement element : trace) {
+            String className = element.getClassName();
+            String methodName = element.getMethodName();
+            if (className.equals(Thread.class.getName())
+                    || className.equals(AirshipStationBlockEntity.class.getName()) && methodName.equals("dockOutputMutationSource")
+                    || className.equals(AirshipStationBlockEntity.class.getName()) && methodName.equals("setDockOutputActive")) {
+                continue;
+            }
+            return className + "#" + methodName + ":" + element.getLineNumber();
+        }
+        return "unknown";
     }
 
     public DockDiscoveryResult refreshGroundDockLink(ServerLevel level) {
         DockDiscoveryResult result = validateGroundDockLink(level);
+        DockLinkStatus previousStatus = groundDockStatus;
+        Optional<BlockPos> previousDockPos = groundDockPos;
         groundDockStatus = result.status() == DockLinkStatus.LINKED && result.dockPos().isEmpty()
                 ? DockLinkStatus.UNKNOWN
                 : result.status();
         if (result.status() == DockLinkStatus.LINKED) {
             groundDockPos = result.dockPos();
-        } else {
-            groundDockPos = Optional.empty();
+        } else if (groundDockPos.isPresent() && level.getGameTime() % 100 == 0) {
+            CreateAeronauticsAutomatedLogistics.debugDocking(
+                    "Preserving station dock link after passive refresh miss: station={} dock={} status={} reason=not_explicit_clear",
+                    stationId,
+                    groundDockPos.get().toShortString(),
+                    result.status()
+            );
+        }
+        if (previousStatus.equals(groundDockStatus) && previousDockPos.equals(groundDockPos)) {
+            return result;
         }
         setChanged();
         syncClientState();
@@ -464,7 +540,9 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     public void addRouteSegment(RouteSegment segment) {
         routeSegments.add(segment);
         pruneSegmentHistory(segment, 5);
-        RouteSegmentRegistry.replaceForStartStation(stationId, routeSegmentsOwnedByThisStation());
+        if (level instanceof ServerLevel serverLevel) {
+            syncRouteSegmentIndexes(serverLevel);
+        }
         setChanged();
         syncClientState();
     }
@@ -472,7 +550,9 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     public boolean removeRouteSegment(UUID segmentId) {
         boolean removed = routeSegments.removeIf(segment -> segment.id().value().equals(segmentId));
         if (removed) {
-            RouteSegmentRegistry.replaceForStartStation(stationId, routeSegmentsOwnedByThisStation());
+            if (level instanceof ServerLevel serverLevel) {
+                syncRouteSegmentIndexes(serverLevel);
+            }
             setChanged();
             syncClientState();
         }
@@ -506,6 +586,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     public boolean isPlaybackRunning() {
         return status == RouteStatus.RUNNING
                 || status == RouteStatus.WAITING
+                || status == RouteStatus.DOCK_QUEUED
                 || status == RouteStatus.HELD
                 || status == RouteStatus.HELD_FAULTED;
     }
@@ -600,6 +681,14 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         syncClientState();
     }
 
+    public void dockQueuePlayback(Route route) {
+        recordedRoute = Optional.of(route.withStatus(RouteStatus.DOCK_QUEUED));
+        status = RouteStatus.DOCK_QUEUED;
+        failureReason = Optional.empty();
+        setChanged();
+        syncClientState();
+    }
+
     public void holdPlayback(Route route, boolean faulted, Optional<FailureReason> reason) {
         recordedRoute = Optional.of(route.withStatus(faulted ? RouteStatus.HELD_FAULTED : RouteStatus.HELD));
         status = faulted ? RouteStatus.HELD_FAULTED : RouteStatus.HELD;
@@ -655,7 +744,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         super.setChanged();
         if (level != null && !level.isClientSide) {
             registerStationSnapshot();
-            RouteSegmentRegistry.replaceForStartStation(stationId, routeSegmentsOwnedByThisStation());
+            syncRouteSegmentIndexes((ServerLevel) level);
         }
     }
 
@@ -666,20 +755,10 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     }
 
     private void registerStationSnapshot() {
-        if (level == null || level.isClientSide) {
+        if (level == null) {
             return;
         }
-        AirshipStationSnapshot snapshot = new AirshipStationSnapshot(
-                stationId,
-                stationName(),
-                level.dimension(),
-                worldPosition,
-                ownerId,
-                ownerName
-        );
-        AirshipStationRegistry.register(snapshot);
-        IdentityDirectorySavedData.upsertStation(((ServerLevel) level).getServer(), snapshot);
-        StationChunkLoadingService.track((ServerLevel) level, stationId, worldPosition);
+        registerLoadedSnapshot();
     }
 
     private RouteStatus statusForFailure(FailureReason reason) {
@@ -867,7 +946,57 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         if (level == null) {
             return;
         }
-        AirshipStationSnapshot snapshot = new AirshipStationSnapshot(
+        if (level instanceof ServerLevel serverLevel) {
+            boolean identityRegenerated = false;
+            AirshipStationSnapshot snapshot = stationSnapshot();
+            IdentityDirectorySavedData.StationIdentityClaim claim =
+                    IdentityDirectorySavedData.claimStation(serverLevel.getServer(), snapshot);
+            if (!claim.accepted()) {
+                UUID copiedStationId = stationId;
+                IdentityDirectorySavedData.PersistedStationIdentity canonical =
+                        claim.conflictingIdentity().orElseThrow();
+                resetCopiedStationIdentity();
+                snapshot = stationSnapshot();
+                IdentityDirectorySavedData.StationIdentityClaim replacementClaim =
+                        IdentityDirectorySavedData.claimStation(serverLevel.getServer(), snapshot);
+                if (!replacementClaim.accepted()) {
+                    CreateAeronauticsAutomatedLogistics.LOGGER.error(
+                            "Copied station identity regeneration failed: copiedId={} generatedId={} copiedPos={} canonicalPos={} canonicalDimension={} action=station_not_registered",
+                            copiedStationId,
+                            stationId,
+                            worldPosition,
+                            canonical.stationPos(),
+                            canonical.dimension().location()
+                    );
+                    return;
+                }
+                identityRegenerated = true;
+                CreateAeronauticsAutomatedLogistics.LOGGER.info(
+                        "Copied station identity regenerated: copiedId={} newId={} copiedPos={} canonicalPos={} canonicalDimension={} action=fresh_station_identity",
+                        copiedStationId,
+                        stationId,
+                        worldPosition,
+                        canonical.stationPos(),
+                        canonical.dimension().location()
+                );
+            }
+            AirshipStationRegistry.register(snapshot);
+            if (applyPendingRouteSegmentDeletes(serverLevel)) {
+                super.setChanged();
+                syncClientState();
+            }
+            StationChunkLoadingService.track(serverLevel, stationId, worldPosition);
+            syncRouteSegmentIndexes(serverLevel);
+            if (identityRegenerated) {
+                syncClientState();
+            }
+            return;
+        }
+        AirshipStationRegistry.register(stationSnapshot());
+    }
+
+    private AirshipStationSnapshot stationSnapshot() {
+        return new AirshipStationSnapshot(
                 stationId,
                 stationName(),
                 level.dimension(),
@@ -875,12 +1004,58 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
                 ownerId,
                 ownerName
         );
-        AirshipStationRegistry.register(snapshot);
-        if (level instanceof ServerLevel serverLevel) {
-            IdentityDirectorySavedData.upsertStation(serverLevel.getServer(), snapshot);
-            StationChunkLoadingService.track(serverLevel, stationId, worldPosition);
-            RouteSegmentRegistry.replaceForStartStation(stationId, routeSegmentsOwnedByThisStation());
+    }
+
+    private void resetCopiedStationIdentity() {
+        stationId = UUID.randomUUID();
+        stationName = "";
+        selectedTransponderId = Optional.empty();
+        selectedShipName = "";
+        failureReason = Optional.empty();
+        activeRecording = Optional.empty();
+        recordedRoute = Optional.empty();
+        status = RouteStatus.IDLE;
+        routeSegments.clear();
+        linkedControllers.clear();
+        recordingPoints.clear();
+        recordingStops.clear();
+        groundDockPos = Optional.empty();
+        groundDockStatus = DockLinkStatus.UNKNOWN;
+        dockOutputActive = false;
+        dockOutputOwner = Optional.empty();
+        linkedCargo.clear();
+        syncedLinkedCargoSummary = null;
+        linkedCargoRevision++;
+        linkedCargoRestoreMissLogged = false;
+        super.setChanged();
+    }
+
+    private boolean applyPendingRouteSegmentDeletes(ServerLevel serverLevel) {
+        java.util.Set<RouteSegmentId> pendingDeletes = RouteSegmentDirectorySavedData.consumePendingDeletes(
+                serverLevel.getServer(),
+                stationId
+        );
+        if (pendingDeletes.isEmpty()) {
+            return false;
         }
+        List<UUID> deletedIds = pendingDeletes.stream()
+                .map(RouteSegmentId::value)
+                .toList();
+        boolean removed = routeSegments.removeIf(segment -> pendingDeletes.contains(segment.id()));
+        CreateAeronauticsAutomatedLogistics.debugPlayback(
+                "Applied pending route segment deletes for station {} at {} ids={} removed={}",
+                stationId,
+                worldPosition,
+                deletedIds,
+                removed
+        );
+        return removed;
+    }
+
+    private void syncRouteSegmentIndexes(ServerLevel serverLevel) {
+        List<RouteSegment> ownedSegments = routeSegmentsOwnedByThisStation();
+        RouteSegmentRegistry.replaceForStartStation(stationId, ownedSegments);
+        ownedSegments.forEach(segment -> RouteSegmentDirectorySavedData.upsert(serverLevel.getServer(), segment));
     }
 
     private List<RouteSegment> routeSegmentsOwnedByThisStation() {
@@ -1093,10 +1268,11 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
             failureReason = Optional.of(FailureReason.INVALID_ROUTE_DATA);
             return RouteStatus.INVALID_ROUTE;
         }
-        if ((loadedStatus == RouteStatus.RUNNING || loadedStatus == RouteStatus.WAITING) && tag.getBoolean(LIVE_SYNC)) {
+        if ((loadedStatus == RouteStatus.RUNNING || loadedStatus == RouteStatus.WAITING || loadedStatus == RouteStatus.DOCK_QUEUED)
+                && tag.getBoolean(LIVE_SYNC)) {
             return loadedStatus;
         }
-        if (loadedStatus == RouteStatus.RUNNING || loadedStatus == RouteStatus.WAITING) {
+        if (loadedStatus == RouteStatus.RUNNING || loadedStatus == RouteStatus.WAITING || loadedStatus == RouteStatus.DOCK_QUEUED) {
             return loadedRoute.isPresent() ? RouteStatus.RECORDED : RouteStatus.IDLE;
         }
         if (loadedRoute.isEmpty() && loadedStatus == RouteStatus.RECORDED) {

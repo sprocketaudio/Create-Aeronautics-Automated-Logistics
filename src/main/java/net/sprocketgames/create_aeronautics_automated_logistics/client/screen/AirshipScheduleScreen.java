@@ -3192,20 +3192,14 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         if (this.minecraft == null || this.minecraft.level == null) {
             return List.of();
         }
-        return AirshipStationRegistry.knownStations(this.minecraft.level.dimension()).stream()
-                .filter(station -> this.minecraft.level.getBlockEntity(station.stationPos()) instanceof AirshipStationBlockEntity blockEntity
-                        && blockEntity.stationId().equals(station.stationId()))
-                .toList();
+        return AirshipStationRegistry.knownStations(this.minecraft.level.dimension());
     }
 
     private List<ShipTransponderSnapshot> availableShips() {
         if (this.minecraft == null || this.minecraft.level == null) {
             return List.of();
         }
-        return ShipTransponderRegistry.knownShips(this.minecraft.level.dimension()).stream()
-                .filter(ship -> this.minecraft.level.getBlockEntity(ship.transponderPos()) instanceof ShipTransponderBlockEntity blockEntity
-                        && blockEntity.transponderId().equals(ship.transponderId()))
-                .toList();
+        return ShipTransponderRegistry.knownShips(this.minecraft.level.dimension());
     }
 
     private double distanceToPlayer(ShipTransponderSnapshot ship) {

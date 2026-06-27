@@ -1,6 +1,7 @@
 package net.sprocketgames.create_aeronautics_automated_logistics.block.entity;
 
 import java.util.Optional;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.ArrayList;
 import java.util.List;
@@ -16,15 +17,10 @@ import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.Clearable;
-import net.minecraft.world.Container;
-import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.core.NonNullList;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -45,23 +41,22 @@ import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.Lo
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityDirectorySavedData;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderSnapshot;
-import net.sprocketgames.create_aeronautics_automated_logistics.item.AirshipScheduleItem;
+import net.sprocketgames.create_aeronautics_automated_logistics.materialization.ShipBodyDirectorySavedData;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.ShipTransponderMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlocks;
-import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModItems;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.CargoWaitTarget;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteId;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
-import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoFailureContext;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.SableSubLevelVehicleController;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerRef;
 
-public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvider, Container, Clearable {
+public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvider {
     private static final String DATA_VERSION = "dataVersion";
     private static final String TRANSPONDER_ID = "transponderId";
     private static final String SHIP_NAME = "shipName";
@@ -80,6 +75,11 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     private static final String RECORDING_DESTINATION_STATION_ID = "recordingDestinationStationId";
     private static final String RUNTIME_STATUS = "runtimeStatus";
     private static final String SCHEDULE_SLOT = "scheduleSlot";
+    private static final String LEGACY_ITEM_ID = CreateAeronauticsAutomatedLogistics.MOD_ID + ":airship_schedule";
+    private static final String LEGACY_COMPONENTS = "components";
+    private static final String LEGACY_CUSTOM_DATA_COMPONENT = "minecraft:custom_data";
+    private static final String LEGACY_ITEM_TAG = "tag";
+    private static final String LEGACY_SCHEDULE_TAG = "airshipSchedule";
     private static final String LINKED_CARGO = "linkedCargo";
     private static final String LINKED_CARGO_X = "x";
     private static final String LINKED_CARGO_Y = "y";
@@ -96,7 +96,6 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     private static final String CARGO_FAILURE_WAIT_TYPE = "cargoFailureWaitType";
     private static final int CURRENT_DATA_VERSION = 1;
     private static final int REFRESH_INTERVAL_TICKS = 40;
-    public static final int INTERNAL_SCHEDULE_SLOT = 0;
 
     private UUID transponderId = UUID.randomUUID();
     private String shipName = "";
@@ -107,17 +106,18 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     private Optional<BlockPos> shipDockPos = Optional.empty();
     private DockLinkStatus shipDockStatus = DockLinkStatus.UNKNOWN;
     private boolean dockOutputActive;
+    private Optional<RouteId> dockOutputOwner = Optional.empty();
     private boolean appendToSchedule;
     private AirshipSchedule ownedSchedule = AirshipSchedule.empty();
     private Optional<UUID> recordingDestinationStationId = Optional.empty();
     private RouteStatus runtimeStatus = RouteStatus.IDLE;
     private long lastSeenGameTime = -1L;
-    private final NonNullList<ItemStack> items = NonNullList.withSize(1, ItemStack.EMPTY);
     private final List<LinkedCargoEntry> linkedCargo = new ArrayList<>();
     private @Nullable LinkedCargoSummary syncedLinkedCargoSummary;
     private int linkedCargoRevision;
     private Optional<CargoFailureContext> syncedCargoFailureContext = Optional.empty();
     private boolean linkedCargoRestoreMissLogged;
+    private boolean legacyScheduleSlotNeedsRewrite;
 
     public ShipTransponderBlockEntity(BlockPos pos, BlockState blockState) {
         super(ModBlockEntities.SHIP_TRANSPONDER.get(), pos, blockState);
@@ -146,10 +146,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     @Override
     public AbstractContainerMenu createMenu(int containerId, Inventory playerInventory, Player player) {
         if (level instanceof ServerLevel serverLevel) {
-            refreshRuntimeShip(serverLevel);
-            refreshShipDockLink(serverLevel);
-            migrateLegacyInstalledSchedule();
-            AutomatedLogisticsServices.SCHEDULES.reconcileRuntimeStatus(serverLevel, this);
+            RouteStatus projectedRuntimeStatus = AutomatedLogisticsServices.SCHEDULES.projectRuntimeStatus(serverLevel, this);
             ShipTransponderMenu.InitialRecordingState recordingState =
                     player instanceof ServerPlayer serverPlayer
                             ? ShipTransponderMenu.resolveInitialRecordingState(serverPlayer, this, false)
@@ -162,7 +159,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                     recordingState.recordingSessionActive(),
                     recordingState.appendToSchedule(),
                     recordingDestinationStationId(),
-                    runtimeStatus(),
+                    projectedRuntimeStatus,
                     dockOutputActive(),
                     hasOwnedStops(),
                     ownedSchedule(),
@@ -182,7 +179,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                         recordingState.recordingSessionActive(),
                         recordingState.appendToSchedule(),
                         recordingDestinationStationId(),
-                        runtimeStatus(),
+                        projectedRuntimeStatus,
                         dockOutputActive(),
                         hasOwnedStops(),
                         ownedSchedule(),
@@ -274,6 +271,10 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         return dockOutputActive;
     }
 
+    public Optional<RouteId> dockOutputOwner() {
+        return dockOutputOwner;
+    }
+
     public boolean appendToSchedule() {
         return appendToSchedule;
     }
@@ -289,6 +290,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     public boolean scheduleActive() {
         return runtimeStatus == RouteStatus.RUNNING
                 || runtimeStatus == RouteStatus.WAITING
+                || runtimeStatus == RouteStatus.DOCK_QUEUED
                 || runtimeStatus == RouteStatus.HELD
                 || runtimeStatus == RouteStatus.HELD_FAULTED;
     }
@@ -387,15 +389,82 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         return true;
     }
 
+    public void claimDockOutput(RouteId routeId) {
+        Objects.requireNonNull(routeId, "routeId");
+        updateDockOutputState(true, Optional.of(routeId), "claim");
+    }
+
+    public boolean releaseDockOutput(RouteId routeId) {
+        Objects.requireNonNull(routeId, "routeId");
+        if (dockOutputOwner.filter(routeId::equals).isEmpty()) {
+            if (dockOutputOwner.isEmpty() && !dockOutputActive) {
+                return true;
+            }
+            CreateAeronauticsAutomatedLogistics.debugDocking(
+                    "Transponder dock output clear refused: transponderId={} pos={} requestedRoute={} active={} owner={} runtimeStatus={} reason=owner_mismatch",
+                    transponderId,
+                    worldPosition,
+                    routeId.value(),
+                    dockOutputActive,
+                    dockOutputOwner.map(RouteId::value).map(Object::toString).orElse("none"),
+                    runtimeStatus
+            );
+            return false;
+        }
+        updateDockOutputState(false, Optional.empty(), "release");
+        return true;
+    }
+
+    public void forceClearDockOutput(String reason) {
+        updateDockOutputState(false, Optional.empty(), "force_clear:" + reason);
+    }
+
     public void setDockOutputActive(boolean active) {
-        if (dockOutputActive == active) {
+        updateDockOutputState(active, active ? dockOutputOwner : Optional.empty(), "legacy_set");
+    }
+
+    private void updateDockOutputState(boolean active, Optional<RouteId> owner, String action) {
+        Optional<RouteId> previousOwner = dockOutputOwner;
+        boolean previousActive = dockOutputActive;
+        if (previousActive == active && previousOwner.equals(owner)) {
             return;
         }
         dockOutputActive = active;
-        setChanged();
-        syncPoweredBlockState();
-        notifyRedstoneNeighbors();
-        syncClientState();
+        dockOutputOwner = active ? owner : Optional.empty();
+        CreateAeronauticsAutomatedLogistics.debugDocking(
+                "Transponder dock output changed: transponderId={} pos={} {}->{} owner={} prevOwner={} runtimeStatus={} shipDock={} action={} caller={}",
+                transponderId,
+                worldPosition,
+                previousActive,
+                dockOutputActive,
+                dockOutputOwner.map(RouteId::value).map(Object::toString).orElse("none"),
+                previousOwner.map(RouteId::value).map(Object::toString).orElse("none"),
+                runtimeStatus,
+                shipDockPos.map(BlockPos::toShortString).orElse("-"),
+                action,
+                dockOutputMutationSource()
+        );
+        if (previousActive != dockOutputActive) {
+            setChanged();
+            syncPoweredBlockState();
+            notifyRedstoneNeighbors();
+            syncClientState();
+        }
+    }
+
+    private static String dockOutputMutationSource() {
+        StackTraceElement[] trace = Thread.currentThread().getStackTrace();
+        for (StackTraceElement element : trace) {
+            String className = element.getClassName();
+            String methodName = element.getMethodName();
+            if (className.equals(Thread.class.getName())
+                    || className.equals(ShipTransponderBlockEntity.class.getName()) && methodName.equals("dockOutputMutationSource")
+                    || className.equals(ShipTransponderBlockEntity.class.getName()) && methodName.equals("setDockOutputActive")) {
+                continue;
+            }
+            return className + "#" + methodName + ":" + element.getLineNumber();
+        }
+        return "unknown";
     }
 
     public void setAppendToSchedule(boolean appendToSchedule) {
@@ -459,11 +528,34 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         long previousSeen = lastSeenGameTime;
 
         if (controller.isPresent()) {
-            runtimeShipId = controller.get().ref().vehicleId();
-            lastKnownPosition = Optional.of(controller.get().position());
+            SableSubLevelVehicleController liveController = controller.get();
+            runtimeShipId = liveController.ref().vehicleId().or(() -> runtimeShipId);
+            lastKnownPosition = Optional.of(liveController.position());
             lastSeenGameTime = level.getGameTime();
-        } else {
-            runtimeShipId = Optional.empty();
+            liveController.ref().vehicleId().ifPresent(shipId -> {
+                Optional<UUID> existingTrackingPointId = ShipBodyDirectorySavedData.get(level.getServer())
+                        .byTransponder(transponderId)
+                        .filter(identity -> identity.sableShipId().equals(shipId))
+                        .flatMap(ShipBodyDirectorySavedData.BodyIdentity::trackingPointId);
+                UUID trackingPointId = liveController.ensureMaterializationTrackingPoint(existingTrackingPointId);
+                ShipBodyDirectorySavedData.observeLiveBody(
+                        level.getServer(),
+                        transponderId,
+                        shipId,
+                        level.dimension(),
+                        liveController.ref().controllerPos().orElse(worldPosition),
+                        Optional.of(trackingPointId),
+                        liveController.lastSerializationPointer(),
+                        level.getGameTime()
+                );
+            });
+        } else if (runtimeShipId.isPresent() && level.getGameTime() % 100 == 0) {
+            CreateAeronauticsAutomatedLogistics.debugVehicle(
+                    "Preserving transponder runtime ship identity after live lookup miss: transponder={} ship={} pos={} reason=controller_not_visible",
+                    transponderId,
+                    runtimeShipId.get(),
+                    worldPosition.toShortString()
+            );
         }
 
         if (!previousId.equals(runtimeShipId)
@@ -479,13 +571,23 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     public DockDiscoveryResult refreshShipDockLink(ServerLevel level) {
         refreshRuntimeShip(level);
         DockDiscoveryResult result = validateShipDockLink(level);
+        DockLinkStatus previousStatus = shipDockStatus;
+        Optional<BlockPos> previousDockPos = shipDockPos;
         shipDockStatus = result.status() == DockLinkStatus.LINKED && result.dockPos().isEmpty()
                 ? DockLinkStatus.UNKNOWN
                 : result.status();
         if (result.status() == DockLinkStatus.LINKED) {
             shipDockPos = result.dockPos();
-        } else {
-            shipDockPos = Optional.empty();
+        } else if (shipDockPos.isPresent() && level.getGameTime() % 100 == 0) {
+            CreateAeronauticsAutomatedLogistics.debugDocking(
+                    "Preserving transponder dock link after passive refresh miss: transponder={} dock={} status={} reason=not_explicit_clear",
+                    transponderId,
+                    shipDockPos.get().toShortString(),
+                    result.status()
+            );
+        }
+        if (previousStatus.equals(shipDockStatus) && previousDockPos.equals(shipDockPos)) {
+            return result;
         }
         setChanged();
         syncClientState();
@@ -575,22 +677,6 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         );
     }
 
-    public ItemStack installedScheduleStack() {
-        return getItem(INTERNAL_SCHEDULE_SLOT);
-    }
-
-    public boolean hasInstalledSchedule() {
-        return true;
-    }
-
-    public AirshipSchedule installedSchedule() {
-        return ownedSchedule();
-    }
-
-    public Component installedScheduleTitle() {
-        return Component.literal(ownedSchedule().title());
-    }
-
     public AirshipSchedule ownedSchedule() {
         return bindScheduleToThisTransponder(ownedSchedule);
     }
@@ -605,10 +691,6 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         syncClientState();
     }
 
-    public int pruneInvalidOwnedSchedule(ServerLevel level) {
-        return ScheduleRouteCleanup.pruneOwnedSchedule(level, this);
-    }
-
     public boolean hasOwnedStops() {
         return !ownedSchedule().entries().isEmpty();
     }
@@ -618,31 +700,88 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         return source.withAssignedShip(Optional.of(transponderId), shipName());
     }
 
-    private void migrateLegacyInstalledSchedule() {
-        ItemStack stack = installedScheduleStack();
-        if (stack.isEmpty() || !stack.is(ModItems.AIRSHIP_SCHEDULE.get())) {
+    private void migrateLegacyScheduleSlot(CompoundTag rootTag) {
+        if (!rootTag.contains(SCHEDULE_SLOT, Tag.TAG_COMPOUND)) {
+            return;
+        }
+        legacyScheduleSlotNeedsRewrite = true;
+        CompoundTag slotTag = rootTag.getCompound(SCHEDULE_SLOT);
+        Optional<AirshipSchedule> legacySchedule = readLegacyScheduleSlot(slotTag);
+        if (legacySchedule.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Legacy schedule slot migration ignored: transponderId={} pos={} reason=no_schedule_payload itemId={}",
+                    transponderId,
+                    worldPosition,
+                    legacySlotItemId(slotTag)
+            );
             return;
         }
         if (ownedSchedule.entries().isEmpty()) {
-            ownedSchedule = bindScheduleToThisTransponder(AirshipScheduleItem.readSchedule(stack));
+            ownedSchedule = bindScheduleToThisTransponder(legacySchedule.get());
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Legacy schedule slot migration applied: transponderId={} pos={} legacyEntries={} title='{}'",
+                    transponderId,
+                    worldPosition,
+                    ownedSchedule.entries().size(),
+                    ownedSchedule.title()
+            );
+            return;
         }
-        if (AirshipScheduleItem.isLegacyUnboundSchedule(stack)) {
-            AirshipScheduleItem.bindScheduleToTransponder(stack, transponderId, shipName());
-        }
-        setChanged();
+        CreateAeronauticsAutomatedLogistics.debugLog(
+                "Legacy schedule slot migration skipped: transponderId={} pos={} reason=owned_schedule_already_present existingEntries={} legacyEntries={}",
+                transponderId,
+                worldPosition,
+                ownedSchedule.entries().size(),
+                legacySchedule.get().entries().size()
+        );
     }
 
-    public boolean canInstallSchedule(ItemStack stack) {
-        if (stack.isEmpty() || !stack.is(ModItems.AIRSHIP_SCHEDULE.get())) {
-            return false;
+    private Optional<AirshipSchedule> readLegacyScheduleSlot(CompoundTag slotTag) {
+        Optional<CompoundTag> scheduleTag = readLegacyScheduleTag(slotTag);
+        if (scheduleTag.isEmpty()) {
+            return Optional.empty();
         }
-        Optional<UUID> assignedTransponder = AirshipScheduleItem.readSchedule(stack).assignedTransponderId();
-        if (assignedTransponder.isPresent()) {
-            return assignedTransponder
-                .map(transponderId::equals)
-                .orElse(false);
+        try {
+            return Optional.of(AirshipScheduleNbtSerializer.read(scheduleTag.get()));
+        } catch (RuntimeException exception) {
+            CreateAeronauticsAutomatedLogistics.debugLog(
+                    "Legacy schedule slot migration failed: transponderId={} pos={} reason=deserialize_error itemId={} error={}",
+                    transponderId,
+                    worldPosition,
+                    legacySlotItemId(slotTag),
+                    exception.toString()
+            );
+            return Optional.empty();
         }
-        return true;
+    }
+
+    private Optional<CompoundTag> readLegacyScheduleTag(CompoundTag slotTag) {
+        if (slotTag.contains(LEGACY_COMPONENTS, Tag.TAG_COMPOUND)) {
+            CompoundTag components = slotTag.getCompound(LEGACY_COMPONENTS);
+            if (components.contains(LEGACY_CUSTOM_DATA_COMPONENT, Tag.TAG_COMPOUND)) {
+                CompoundTag customData = components.getCompound(LEGACY_CUSTOM_DATA_COMPONENT);
+                if (customData.contains(LEGACY_SCHEDULE_TAG, Tag.TAG_COMPOUND)) {
+                    return Optional.of(customData.getCompound(LEGACY_SCHEDULE_TAG));
+                }
+            }
+        }
+        if (slotTag.contains(LEGACY_ITEM_TAG, Tag.TAG_COMPOUND)) {
+            CompoundTag legacyItemTag = slotTag.getCompound(LEGACY_ITEM_TAG);
+            if (legacyItemTag.contains(LEGACY_SCHEDULE_TAG, Tag.TAG_COMPOUND)) {
+                return Optional.of(legacyItemTag.getCompound(LEGACY_SCHEDULE_TAG));
+            }
+        }
+        if (slotTag.contains(LEGACY_SCHEDULE_TAG, Tag.TAG_COMPOUND)) {
+            return Optional.of(slotTag.getCompound(LEGACY_SCHEDULE_TAG));
+        }
+        return Optional.empty();
+    }
+
+    private String legacySlotItemId(CompoundTag slotTag) {
+        if (slotTag.contains("id", Tag.TAG_STRING)) {
+            return slotTag.getString("id");
+        }
+        return LEGACY_ITEM_ID;
     }
 
     @Override
@@ -659,12 +798,11 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     @Override
     protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.saveAdditional(tag, registries);
-        writeData(tag, registries, false, true, true);
+        writeData(tag, false, true, true);
     }
 
     private void writeData(
             CompoundTag tag,
-            HolderLookup.Provider registries,
             boolean liveCargoSummary,
             boolean includeOwnedSchedule,
             boolean includeLinkedCargoEntries
@@ -687,9 +825,6 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         }
         recordingDestinationStationId.ifPresent(id -> tag.putUUID(RECORDING_DESTINATION_STATION_ID, id));
         tag.putString(RUNTIME_STATUS, runtimeStatus.name());
-        if (hasInstalledSchedule()) {
-            tag.put(SCHEDULE_SLOT, installedScheduleStack().saveOptional(registries));
-        }
         if (includeLinkedCargoEntries && !linkedCargo.isEmpty()) {
             ListTag linkedCargoTag = new ListTag();
             for (LinkedCargoEntry entry : linkedCargo) {
@@ -756,9 +891,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                 ? Optional.of(tag.getUUID(RECORDING_DESTINATION_STATION_ID))
                 : Optional.empty();
         runtimeStatus = readRuntimeStatus(tag);
-        setItem(INTERNAL_SCHEDULE_SLOT, tag.contains(SCHEDULE_SLOT, Tag.TAG_COMPOUND)
-                ? ItemStack.parseOptional(registries, tag.getCompound(SCHEDULE_SLOT))
-                : ItemStack.EMPTY);
+        migrateLegacyScheduleSlot(tag);
         linkedCargo.clear();
         if (tag.contains(LINKED_CARGO, Tag.TAG_LIST)) {
             ListTag linkedCargoTag = tag.getList(LINKED_CARGO, Tag.TAG_COMPOUND);
@@ -769,7 +902,6 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         syncedLinkedCargoSummary = readLinkedCargoSummary(tag);
         linkedCargoRevision = tag.getInt(LINKED_CARGO_REVISION);
         syncedCargoFailureContext = readCargoFailureContext(tag);
-        migrateLegacyInstalledSchedule();
         lastKnownPosition = tag.contains(LAST_X, Tag.TAG_ANY_NUMERIC)
                 && tag.contains(LAST_Y, Tag.TAG_ANY_NUMERIC)
                 && tag.contains(LAST_Z, Tag.TAG_ANY_NUMERIC)
@@ -788,11 +920,11 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                 linkedCargo.size(),
                 level != null && level.isClientSide
         );
-        if (level != null && !level.isClientSide && dockOutputActive) {
-            dockOutputActive = false;
-            setChanged();
-        }
         if (level instanceof ServerLevel serverLevel) {
+            if (legacyScheduleSlotNeedsRewrite) {
+                legacyScheduleSlotNeedsRewrite = false;
+                setChanged();
+            }
             restoreOrPersistLinkedCargo(serverLevel);
             ShipTransponderSnapshot snapshot = snapshot(serverLevel);
             ShipTransponderRegistry.register(snapshot);
@@ -817,7 +949,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         CompoundTag tag = new CompoundTag();
         // Normal block-entity sync should stay lightweight. Menus already send
         // full owned-schedule and linked-cargo snapshots explicitly on open/reopen.
-        writeData(tag, registries, true, false, false);
+        writeData(tag, true, false, false);
         return tag;
     }
 
@@ -1046,58 +1178,6 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                 .orElse(worldPosition);
     }
 
-    @Override
-    public int getContainerSize() {
-        return 1;
-    }
-
-    @Override
-    public boolean isEmpty() {
-        return installedScheduleStack().isEmpty();
-    }
-
-    @Override
-    public ItemStack getItem(int slot) {
-        return slot == INTERNAL_SCHEDULE_SLOT ? items.get(INTERNAL_SCHEDULE_SLOT) : ItemStack.EMPTY;
-    }
-
-    @Override
-    public ItemStack removeItem(int slot, int amount) {
-        if (slot != INTERNAL_SCHEDULE_SLOT) {
-            return ItemStack.EMPTY;
-        }
-        ItemStack removed = ContainerHelper.removeItem(items, slot, amount);
-        if (!removed.isEmpty()) {
-            setChanged();
-        }
-        return removed;
-    }
-
-    @Override
-    public ItemStack removeItemNoUpdate(int slot) {
-        if (slot != INTERNAL_SCHEDULE_SLOT) {
-            return ItemStack.EMPTY;
-        }
-        return ContainerHelper.takeItem(items, slot);
-    }
-
-    @Override
-    public void setItem(int slot, ItemStack stack) {
-        if (slot != INTERNAL_SCHEDULE_SLOT) {
-            return;
-        }
-        if (!stack.isEmpty() && !stack.is(ModItems.AIRSHIP_SCHEDULE.get())) {
-            return;
-        }
-        ItemStack stored = stack.copyWithCount(Math.min(stack.getCount(), getMaxStackSize()));
-        if (!stored.isEmpty() && AirshipScheduleItem.readSchedule(stored).assignedTransponderId().isEmpty()) {
-            AirshipScheduleItem.bindScheduleToTransponder(stored, transponderId, shipName());
-        }
-        items.set(slot, stored);
-        setChanged();
-    }
-
-    @Override
     public boolean stillValid(Player player) {
         if (level == null || level.getBlockEntity(worldPosition) != this) {
             return false;
@@ -1107,21 +1187,5 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                 worldPosition.getY() + 0.5D,
                 worldPosition.getZ() + 0.5D
         ) <= 64.0D;
-    }
-
-    @Override
-    public boolean canPlaceItem(int slot, ItemStack stack) {
-        return slot == INTERNAL_SCHEDULE_SLOT && canInstallSchedule(stack);
-    }
-
-    @Override
-    public int getMaxStackSize() {
-        return 1;
-    }
-
-    @Override
-    public void clearContent() {
-        items.set(INTERNAL_SCHEDULE_SLOT, ItemStack.EMPTY);
-        setChanged();
     }
 }

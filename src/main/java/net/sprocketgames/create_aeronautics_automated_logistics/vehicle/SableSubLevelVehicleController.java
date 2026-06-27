@@ -6,11 +6,17 @@ import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.Sable;
 import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.sublevel.storage.holding.GlobalSavedSubLevelPointer;
+import dev.ryanhcode.sable.sublevel.tracking_points.SubLevelTrackingPointSavedData;
+import dev.ryanhcode.sable.sublevel.tracking_points.TrackingPoint;
 import dev.simulated_team.simulated.content.blocks.docking_connector.DockingConnectorBlockEntity;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.WeakHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.resources.ResourceKey;
@@ -42,6 +48,8 @@ public class SableSubLevelVehicleController implements VehicleController {
     private static final double MAX_HOLD_VERTICAL_CHANGE = 0.7D;
     private static final double TICKS_PER_SECOND = 20.0D;
     private static final int MOVEMENT_LOG_INTERVAL_TICKS = 20;
+    private static final long RESOLVE_MISS_LOG_HEARTBEAT_TICKS = 1200L;
+    private static final Map<ServerLevel, Map<ResolveMissLogKey, Long>> RESOLVE_MISS_LOGS = new WeakHashMap<>();
 
     public static final ResourceLocation TYPE = ResourceLocation.fromNamespaceAndPath(
             CreateAeronauticsAutomatedLogistics.MOD_ID,
@@ -60,7 +68,6 @@ public class SableSubLevelVehicleController implements VehicleController {
     }
 
     public static Optional<SableSubLevelVehicleController> resolve(ServerLevel level, VehicleControllerRef controllerRef) {
-        CreateAeronauticsAutomatedLogistics.debugVehicle("Resolving Sable controller from {}", controllerRef);
         Optional<ServerSubLevel> byId = controllerRef.vehicleId().flatMap(vehicleId -> findSubLevel(level, vehicleId));
         if (byId.isPresent()) {
             BlockPos localPos = resolveControllerLocalPos(byId.get(), controllerRef.controllerPos())
@@ -75,9 +82,9 @@ public class SableSubLevelVehicleController implements VehicleController {
         }
 
         Optional<SableSubLevelVehicleController> resolved = controllerRef.controllerPos()
-                .flatMap(controllerPos -> findSubLevelContainingController(level, controllerPos, ModBlocks.SHIP_TRANSPONDER.get(), true));
-        if (resolved.isEmpty()) {
-            CreateAeronauticsAutomatedLogistics.debugVehicleWarn(
+                .flatMap(controllerPos -> findSubLevelContainingController(level, controllerPos, ModBlocks.SHIP_TRANSPONDER.get(), false));
+        if (resolved.isEmpty() && shouldLogResolveMiss(level, controllerRef)) {
+            CreateAeronauticsAutomatedLogistics.debugVehicle(
                     "Could not resolve linked Sable controller from {}. storedLocalController={} vehicleId={}",
                     controllerRef,
                     controllerRef.controllerPos().map(BlockPos::toShortString).orElse("missing"),
@@ -85,6 +92,24 @@ public class SableSubLevelVehicleController implements VehicleController {
             );
         }
         return resolved;
+    }
+
+    private static boolean shouldLogResolveMiss(ServerLevel level, VehicleControllerRef controllerRef) {
+        ResolveMissLogKey key = new ResolveMissLogKey(
+                controllerRef.vehicleId(),
+                controllerRef.controllerPos(),
+                controllerRef.dimension().location().toString()
+        );
+        long gameTime = level.getGameTime();
+        synchronized (RESOLVE_MISS_LOGS) {
+            Map<ResolveMissLogKey, Long> levelLogs = RESOLVE_MISS_LOGS.computeIfAbsent(level, ignored -> new HashMap<>());
+            Long previous = levelLogs.get(key);
+            if (previous != null && gameTime - previous < RESOLVE_MISS_LOG_HEARTBEAT_TICKS) {
+                return false;
+            }
+            levelLogs.put(key, gameTime);
+            return true;
+        }
     }
 
     private static Optional<BlockPos> resolveControllerLocalPos(ServerSubLevel subLevel, Optional<BlockPos> storedPos) {
@@ -115,6 +140,21 @@ public class SableSubLevelVehicleController implements VehicleController {
         return findSubLevelContainingController(level, controllerPos, expectedBlock, false);
     }
 
+    public static Optional<SableSubLevelVehicleController> resolveControllerBlock(
+            ServerLevel level,
+            UUID subLevelId,
+            BlockPos localControllerPos
+    ) {
+        return findSubLevel(level, subLevelId)
+                .filter(subLevel -> isInsideStorageBounds(subLevel, localControllerPos))
+                .filter(subLevel -> hasControllerBlockAtStorage(subLevel, localControllerPos, ModBlocks.SHIP_TRANSPONDER.get()))
+                .map(subLevel -> new SableSubLevelVehicleController(
+                        subLevel,
+                        localControllerPos.immutable(),
+                        Vec3.atCenterOf(localControllerPos)
+                ));
+    }
+
     public List<BlockPos> dockingConnectorPositionsNearController(int radius) {
         ServerLevel level = subLevel.getLevel();
         return BlockPos.betweenClosedStream(
@@ -141,6 +181,31 @@ public class SableSubLevelVehicleController implements VehicleController {
                 Optional.of(subLevel.getUniqueId()),
                 Optional.of(localControllerPos)
         );
+    }
+
+    public Optional<GlobalSavedSubLevelPointer> lastSerializationPointer() {
+        return Optional.ofNullable(subLevel.getLastSerializationPointer());
+    }
+
+    public UUID ensureMaterializationTrackingPoint(Optional<UUID> existingTrackingPointId) {
+        SubLevelTrackingPointSavedData trackingPoints = SubLevelTrackingPointSavedData.getOrLoad(subLevel.getLevel());
+        UUID trackingPointId = existingTrackingPointId.orElseGet(UUID::randomUUID);
+        GlobalSavedSubLevelPointer pointer = subLevel.getLastSerializationPointer();
+        Vector3d localPoint = new Vector3d(localAnchor.x, localAnchor.y, localAnchor.z);
+        Vector3d globalPlaceholder = pointer == null
+                ? subLevel.logicalPose().transformPosition(new Vector3d(localPoint))
+                : null;
+        TrackingPoint expected = new TrackingPoint(
+                true,
+                subLevel.getUniqueId(),
+                pointer,
+                localPoint,
+                globalPlaceholder
+        );
+        if (!expected.equals(trackingPoints.getTrackingPoint(trackingPointId))) {
+            trackingPoints.setTrackingPoint(trackingPointId, expected);
+        }
+        return trackingPointId;
     }
 
     @Override
@@ -583,5 +648,12 @@ public class SableSubLevelVehicleController implements VehicleController {
             );
             return false;
         }
+    }
+
+    private record ResolveMissLogKey(
+            Optional<UUID> vehicleId,
+            Optional<BlockPos> controllerPos,
+            String dimension
+    ) {
     }
 }

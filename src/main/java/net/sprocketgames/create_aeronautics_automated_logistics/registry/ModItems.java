@@ -5,7 +5,6 @@ import net.minecraft.world.item.Item;
 import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
-import net.sprocketgames.create_aeronautics_automated_logistics.item.AirshipScheduleItem;
 import net.sprocketgames.create_aeronautics_automated_logistics.item.LogisticsBlockItem;
 
 public final class ModItems {
@@ -27,11 +26,6 @@ public final class ModItems {
                     new Item.Properties(),
                     "block.create_aeronautics_automated_logistics.ship_transponder.tooltip"
             )
-    );
-
-    public static final DeferredItem<Item> AIRSHIP_SCHEDULE = ITEMS.register(
-            "airship_schedule",
-            () -> new AirshipScheduleItem(new Item.Properties().stacksTo(1))
     );
 
     private ModItems() {

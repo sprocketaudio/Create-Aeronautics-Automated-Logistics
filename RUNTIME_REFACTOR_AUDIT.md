@@ -1722,3 +1722,87 @@ ScheduleRuntimeStateMachine
 This lets 0.5 experimental drive mode and 1.0 Advanced Transponder work reuse
 the same route/runtime/materialization foundation without forcing recorded
 playback bugs into drive mode.
+
+## I. 0.5 Release Hardening Audit
+
+The P0-P10 architecture audit found no confirmed blocker to releasing 0.5, but
+identified three small safety items worth fixing before a public/server release.
+These are hardening changes, not intended behavior changes.
+
+### I.1 Persistent Route Directory Retention
+
+Finding:
+
+- `AirshipStationBlockEntity.addRouteSegment` keeps only a short local history
+  per station pair/transponder.
+- The station index sync path used that capped local history to replace the
+  persistent route segment directory for the start station.
+- That meant normal route recording could remove older persistent route segment
+  directory records even though no station, transponder, stop, or route had been
+  explicitly deleted.
+
+Release rule:
+
+- Local route-history trimming must not be treated as persistent route truth
+  deletion.
+- Explicit cleanup paths may still delete route directory records when the proof
+  source is station delete, transponder delete, stop delete, user route delete,
+  or proven structural corruption.
+
+Applied hardening:
+
+- Station index sync now registers current station-owned segments into the
+  persistent directory without replacing all existing directory records for that
+  start station.
+- Explicit delete paths still call the route directory removal/deferred-delete
+  APIs directly.
+
+### I.2 Packet Decode Bounds
+
+Finding:
+
+- Several custom payload codecs read list counts directly from the network and
+  allocated collections before checking reasonable maximums.
+- The server-bound route preview packet and schedule update path were the most
+  important release risks because a malicious client could send oversized data
+  while a menu is open.
+
+Release rule:
+
+- Custom payload codecs should reject impossible or excessive counts at decode
+  time.
+- Server-side schedule writes should refuse oversized decoded schedules before
+  mutating the transponder schedule.
+
+Applied hardening:
+
+- Added shared network count limits for route previews, visual previews,
+  identity sync, dock/cargo prompts, and active visual ship sync.
+- Added server-side schedule size checks for entry, condition-group, and
+  condition totals before writing a schedule update.
+
+### I.3 Runtime Reset Hygiene
+
+Finding:
+
+- `VehicleRoutePlaybackService.resetRuntime` cleared active playback state but
+  left the docking issue notice cooldown map intact.
+- This could suppress future owner-facing docking notices after a runtime reset
+  in an integrated-server or reload scenario.
+
+Applied hardening:
+
+- Runtime reset now clears the docking issue notice cooldown map with the rest
+  of playback runtime state.
+
+### Deferred Post-Release Items
+
+These are not required to ship 0.5 if current gameplay testing remains stable:
+
+- Make full Sable stored-body repository rescans staged or more aggressively
+  throttled so cache misses cannot create large main-thread IO spikes on old or
+  very large worlds.
+- Replace station chunk-loading nested ownership scans with per-chunk reference
+  counts if multiplayer scale testing shows measurable TPS cost.
+- Continue behavior-preserving extraction from the large runtime/menu classes
+  only after release-hardening tests are stable.

@@ -18,6 +18,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.service.Automati
 import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RecordingServerEvents;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.SableSubLevelForceLoadService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.StationChunkLoadingService;
 import org.slf4j.Logger;
 
@@ -122,6 +123,7 @@ public class CreateAeronauticsAutomatedLogistics {
     }
 
     public CreateAeronauticsAutomatedLogistics(IEventBus modEventBus, ModContainer modContainer) {
+        SableSubLevelForceLoadService.bootstrap();
         modEventBus.addListener(ModNetworking::register);
         ModBlocks.BLOCKS.register(modEventBus);
         ModItems.ITEMS.register(modEventBus);
@@ -138,6 +140,7 @@ public class CreateAeronauticsAutomatedLogistics {
         NeoForge.EVENT_BUS.addListener(StationChunkLoadingService::onServerStarted);
         NeoForge.EVENT_BUS.addListener(StationChunkLoadingService::onServerTickPre);
         NeoForge.EVENT_BUS.addListener(StationChunkLoadingService::onServerTick);
+        NeoForge.EVENT_BUS.addListener(SableSubLevelForceLoadService::onServerStopped);
         NeoForge.EVENT_BUS.addListener(AutomationVisualServerEvents::onPlayerLogin);
         NeoForge.EVENT_BUS.addListener(DockLinkInteractionService::onRightClickBlock);
         NeoForge.EVENT_BUS.addListener(CargoLinkInteractionService::onRightClickBlock);

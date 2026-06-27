@@ -19,7 +19,7 @@ public record SyncAutomatedShipVisualsPayload(List<UUID> shipIds) implements Cus
             StreamCodec.ofMember(SyncAutomatedShipVisualsPayload::write, SyncAutomatedShipVisualsPayload::read);
 
     private static SyncAutomatedShipVisualsPayload read(RegistryFriendlyByteBuf buffer) {
-        int count = buffer.readVarInt();
+        int count = NetworkLimits.readBoundedCount(buffer, NetworkLimits.MAX_ACTIVE_VISUAL_SHIPS, "active automated ship visuals");
         List<UUID> shipIds = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             shipIds.add(buffer.readUUID());

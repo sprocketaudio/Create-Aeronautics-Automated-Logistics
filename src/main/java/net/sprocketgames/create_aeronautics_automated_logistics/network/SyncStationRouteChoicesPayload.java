@@ -50,11 +50,24 @@ public record SyncStationRouteChoicesPayload(
                     && (screen.stationMenu().stationPos().equals(payload.stationPos())
                     || screen.stationMenu().stationPos().equals(zero))) {
                 screen.stationMenu().applyClientRouteChoicesSync(payload.stationPos(), payload.routeChoices());
-                var previewedRouteId = LogisticsClientOverlays.previewedRouteId();
-                if (previewedRouteId.isPresent()
-                        && payload.routeChoices().stream().noneMatch(route -> route.id().equals(previewedRouteId.get()))) {
+                var previewedRouteIds = LogisticsClientOverlays.previewedRouteIds();
+                if (!previewedRouteIds.isEmpty()
+                        && !payload.routeChoices().stream().map(AirshipStationMenu.RouteChoiceSummary::id).toList().containsAll(previewedRouteIds)) {
                     LogisticsClientOverlays.clearFlightPath();
                     screen.clearPreviewedRouteSelection();
+                    return;
+                }
+                var stationPreview = LogisticsClientOverlays.previewedStationRoute();
+                if (stationPreview.isPresent()
+                        && screen.stationMenu().stationId().filter(stationPreview.get().stationId()::equals).isPresent()) {
+                    boolean hasMatchingRoute = stationPreview.get().filterTransponderId()
+                            .map(transponderId -> payload.routeChoices().stream()
+                                    .anyMatch(route -> route.transponderId().equals(transponderId)))
+                            .orElse(!payload.routeChoices().isEmpty());
+                    if (!hasMatchingRoute) {
+                        LogisticsClientOverlays.clearFlightPath();
+                        screen.clearPreviewedRouteSelection();
+                    }
                 }
             }
         });

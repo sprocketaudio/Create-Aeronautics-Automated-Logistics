@@ -11,6 +11,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationSnapshot;
+import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityDirectorySavedData;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipScheduleMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleEntry;
@@ -53,7 +54,7 @@ public record SelectAirshipScheduleStationPayload(int entryIndex, String filter)
         }
 
         String filter = payload.filter == null ? "" : payload.filter.trim().toLowerCase(java.util.Locale.ROOT);
-        List<AirshipStationSnapshot> stations = AirshipStationRegistry.knownStations(player.level().dimension()).stream()
+        List<AirshipStationSnapshot> stations = stationChoices(player).stream()
                 .filter(station -> filter.isBlank() || station.stationName().toLowerCase(java.util.Locale.ROOT).contains(filter))
                 .toList();
         if (stations.isEmpty()) {
@@ -71,5 +72,13 @@ public record SelectAirshipScheduleStationPayload(int entryIndex, String filter)
         List<AirshipScheduleEntry> entries = new ArrayList<>(schedule.entries());
         entries.set(payload.entryIndex, entries.get(payload.entryIndex).withTargetStation(station.stationId(), station.stationName()));
         menu.writeSchedule(player, schedule.withEntries(entries));
+    }
+
+    private static List<AirshipStationSnapshot> stationChoices(ServerPlayer player) {
+        List<AirshipStationSnapshot> persisted = IdentityDirectorySavedData.get(player.server)
+                .stationSnapshots(player.level().dimension());
+        return persisted.isEmpty()
+                ? AirshipStationRegistry.knownStations(player.level().dimension())
+                : persisted;
     }
 }

@@ -40,7 +40,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.identity.Airship
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.ShipTransponderMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.CancelTransponderRouteRecordingPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.FinishTransponderRouteRecordingPayload;
-import net.sprocketgames.create_aeronautics_automated_logistics.network.OpenInstalledScheduleEditorPayload;
+import net.sprocketgames.create_aeronautics_automated_logistics.network.OpenScheduleEditorPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.ShipTransponderMenuActionPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.StartTransponderRouteRecordingPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.UpdateIdentityNamePayload;
@@ -218,7 +218,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                 this.leftPos + 137,
                 this.topPos + 83,
                 EDIT_SCHEDULE_ICON,
-                this::openInstalledScheduleEditor,
+                this::openScheduleEditor,
                 Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.edit_schedule.tooltip"),
                 Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.edit_schedule.tooltip_skip")
                         .withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC)
@@ -934,7 +934,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         );
     }
 
-    private void openInstalledScheduleEditor() {
+    private void openScheduleEditor() {
         if (this.minecraft == null || this.minecraft.player == null) {
             return;
         }
@@ -946,7 +946,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                 this.menu.ownedStopCount(this.minecraft.player),
                 this.menu.canControlTransponderLocally(this.minecraft.player)
         );
-        PacketDistributor.sendToServer(new OpenInstalledScheduleEditorPayload(this.menu.transponderPos(), recordingMode));
+        PacketDistributor.sendToServer(new OpenScheduleEditorPayload(this.menu.transponderPos(), recordingMode));
     }
 
     private Component routePreviewButtonText() {
@@ -1148,8 +1148,6 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         }
         boolean isOp = this.minecraft.player.hasPermissions(2);
         return AirshipStationRegistry.knownStations(this.minecraft.level.dimension()).stream()
-                .filter(station -> this.minecraft.level.getBlockEntity(station.stationPos()) instanceof AirshipStationBlockEntity blockEntity
-                        && blockEntity.stationId().equals(station.stationId()))
                 .filter(station -> StationPermissionService.canControl(this.minecraft.player.getUUID(), isOp, station))
                 .toList();
     }

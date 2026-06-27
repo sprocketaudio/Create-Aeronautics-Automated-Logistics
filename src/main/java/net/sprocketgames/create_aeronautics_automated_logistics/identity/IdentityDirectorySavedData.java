@@ -64,19 +64,53 @@ public class IdentityDirectorySavedData extends SavedData {
         }
     }
 
-    public static void upsertStation(MinecraftServer server, AirshipStationSnapshot snapshot) {
+    public static StationIdentityClaim claimStation(MinecraftServer server, AirshipStationSnapshot snapshot) {
         IdentityDirectorySavedData data = get(server);
         PersistedStationIdentity identity = PersistedStationIdentity.from(snapshot);
-        PersistedStationIdentity previous = data.stations.put(identity.stationId(), identity);
-        if (!identity.equals(previous)) {
-            data.setDirty();
+        synchronized (data.stations) {
+            PersistedStationIdentity previous = data.stations.get(identity.stationId());
+            if (previous != null
+                    && (!previous.dimension().equals(identity.dimension())
+                    || !previous.stationPos().equals(identity.stationPos()))) {
+                return StationIdentityClaim.conflict(previous);
+            }
+            data.stations.put(identity.stationId(), identity);
+            if (!identity.equals(previous)) {
+                data.setDirty();
+            }
         }
+        return StationIdentityClaim.success();
     }
 
-    public static void removeStation(MinecraftServer server, UUID stationId) {
+    public static boolean ownsStationPosition(
+            MinecraftServer server,
+            UUID stationId,
+            ResourceKey<Level> dimension,
+            BlockPos stationPos
+    ) {
+        return get(server).station(stationId)
+                .filter(identity -> identity.dimension().equals(dimension))
+                .filter(identity -> identity.stationPos().equals(stationPos))
+                .isPresent();
+    }
+
+    public static boolean removeStationIfOwned(
+            MinecraftServer server,
+            UUID stationId,
+            ResourceKey<Level> dimension,
+            BlockPos stationPos
+    ) {
         IdentityDirectorySavedData data = get(server);
-        if (data.stations.remove(stationId) != null) {
+        synchronized (data.stations) {
+            PersistedStationIdentity existing = data.stations.get(stationId);
+            if (existing == null
+                    || !existing.dimension().equals(dimension)
+                    || !existing.stationPos().equals(stationPos)) {
+                return false;
+            }
+            data.stations.remove(stationId);
             data.setDirty();
+            return true;
         }
     }
 
@@ -100,6 +134,64 @@ public class IdentityDirectorySavedData extends SavedData {
 
     public Optional<PersistedStationIdentity> station(UUID stationId) {
         return Optional.ofNullable(stations.get(stationId));
+    }
+
+    public List<AirshipStationSnapshot> stationSnapshots(ResourceKey<Level> dimension) {
+        return allStations().stream()
+                .filter(station -> station.dimension().equals(dimension))
+                .map(station -> new AirshipStationSnapshot(
+                        station.stationId(),
+                        station.stationName(),
+                        station.dimension(),
+                        station.stationPos(),
+                        station.ownerId(),
+                        station.ownerName()
+                ))
+                .toList();
+    }
+
+    public List<AirshipStationSnapshot> stationSnapshots() {
+        return allStations().stream()
+                .map(station -> new AirshipStationSnapshot(
+                        station.stationId(),
+                        station.stationName(),
+                        station.dimension(),
+                        station.stationPos(),
+                        station.ownerId(),
+                        station.ownerName()
+                ))
+                .toList();
+    }
+
+    public List<ShipTransponderSnapshot> shipSnapshots(ResourceKey<Level> dimension) {
+        return allShips().stream()
+                .filter(ship -> ship.dimension().equals(dimension))
+                .map(ship -> new ShipTransponderSnapshot(
+                        ship.transponderId(),
+                        ship.shipName(),
+                        ship.dimension(),
+                        ship.transponderPos(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        ship.lastKnownPosition(),
+                        ship.lastSeenGameTime()
+                ))
+                .toList();
+    }
+
+    public List<ShipTransponderSnapshot> shipSnapshots() {
+        return allShips().stream()
+                .map(ship -> new ShipTransponderSnapshot(
+                        ship.transponderId(),
+                        ship.shipName(),
+                        ship.dimension(),
+                        ship.transponderPos(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        ship.lastKnownPosition(),
+                        ship.lastSeenGameTime()
+                ))
+                .toList();
     }
 
     @Override
@@ -246,6 +338,19 @@ public class IdentityDirectorySavedData extends SavedData {
                     snapshot.dimension(),
                     snapshot.stationPos().immutable()
             );
+        }
+    }
+
+    public record StationIdentityClaim(
+            boolean accepted,
+            Optional<PersistedStationIdentity> conflictingIdentity
+    ) {
+        private static StationIdentityClaim success() {
+            return new StationIdentityClaim(true, Optional.empty());
+        }
+
+        private static StationIdentityClaim conflict(PersistedStationIdentity identity) {
+            return new StationIdentityClaim(false, Optional.of(identity));
         }
     }
 }

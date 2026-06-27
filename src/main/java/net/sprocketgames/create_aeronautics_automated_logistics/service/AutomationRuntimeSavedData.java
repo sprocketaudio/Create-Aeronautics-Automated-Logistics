@@ -7,6 +7,7 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
+import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockingRuntime;
 
 public class AutomationRuntimeSavedData extends SavedData {
     private static final String DATA_NAME = "create_aeronautics_automated_logistics_runtime";
@@ -61,6 +62,7 @@ public class AutomationRuntimeSavedData extends SavedData {
 
     public void apply(MinecraftServer server) {
         logSnapshot("applying to server", true);
+        DockingRuntime.resetRuntimeState("automation_runtime_apply");
         AutomatedLogisticsServices.SCHEDULES.loadRuntime(server, scheduleTag);
         AutomatedLogisticsServices.PLAYBACK.loadRuntime(server, playbackTag);
     }
