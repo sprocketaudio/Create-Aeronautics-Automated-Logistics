@@ -35,6 +35,8 @@ bin/
 
 ### Minecraft Modding ###
 run/
+local-jars/*
+!local-jars/.gitkeep
 resources/
 !**/src/**/run/
 **/src/generated/**/.cache/

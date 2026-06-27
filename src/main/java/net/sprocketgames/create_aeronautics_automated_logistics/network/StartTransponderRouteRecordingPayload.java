@@ -28,8 +28,8 @@ import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteOpe
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RecordingSession;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.StationPermissionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.TransponderPermissionService;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.ShipMaterializationService;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleController;
-import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerResolver;
 
 public record StartTransponderRouteRecordingPayload(BlockPos transponderPos, UUID originStationId, UUID destinationStationId)
         implements CustomPacketPayload {
@@ -96,7 +96,7 @@ public record StartTransponderRouteRecordingPayload(BlockPos transponderPos, UUI
                 .filter(ship -> ship.dimension().equals(level.dimension()));
         Optional<VehicleController> controller = shipSnapshot
                 .flatMap(ShipTransponderSnapshot::controllerRef)
-                .flatMap(controllerRef -> VehicleControllerResolver.resolve(level, controllerRef));
+                .flatMap(controllerRef -> resolveLiveController(level, transponder.transponderId(), controllerRef, "start_transponder_route_recording"));
         if (shipSnapshot.isEmpty() || controller.isEmpty()) {
             fail(player, Component.translatable("message.create_aeronautics_automated_logistics.recording.selected_ship_unavailable"));
             return;
@@ -135,6 +135,28 @@ public record StartTransponderRouteRecordingPayload(BlockPos transponderPos, UUI
         double landingRadiusSqr = landingRadius * landingRadius;
         Vec3 position = controller.position();
         return station.stationPos().distToCenterSqr(position.x, position.y, position.z) <= landingRadiusSqr;
+    }
+
+    static Optional<VehicleController> resolveLiveController(
+            ServerLevel level,
+            UUID transponderId,
+            net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerRef controllerRef,
+            String source
+    ) {
+        return AutomatedLogisticsServices.MATERIALIZATION.resolveLiveBody(
+                new ShipMaterializationService.LiveBodyLookupRequest(
+                        level.getServer(),
+                        level.dimension(),
+                        controllerRef,
+                        Optional.of(transponderId),
+                        controllerRef.vehicleId(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        source,
+                        "recording_live_lookup"
+                )
+        ).controller();
     }
 
     static Component recordingFailureMessage(RecordingFailure failure) {

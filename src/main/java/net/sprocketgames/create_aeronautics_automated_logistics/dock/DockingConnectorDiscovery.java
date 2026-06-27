@@ -54,6 +54,39 @@ public final class DockingConnectorDiscovery {
                 && secondDock.isLocked();
     }
 
+    public static String lockDiagnostic(ServerLevel level, BlockPos first, BlockPos second) {
+        Optional<DockingConnectorBlockEntity> firstConnector = dockingConnector(level, first);
+        Optional<DockingConnectorBlockEntity> secondConnector = dockingConnector(level, second);
+        return "first=" + connectorDiagnostic(level, first, second, firstConnector)
+                + ", second=" + connectorDiagnostic(level, second, first, secondConnector);
+    }
+
+    private static String connectorDiagnostic(
+            ServerLevel level,
+            BlockPos pos,
+            BlockPos expectedOther,
+            Optional<DockingConnectorBlockEntity> connector
+    ) {
+        if (connector.isEmpty()) {
+            return "{pos=" + pos.toShortString()
+                    + ", loaded=" + level.isLoaded(pos)
+                    + ", present=false}";
+        }
+        DockingConnectorBlockEntity dock = connector.get();
+        return "{pos=" + pos.toShortString()
+                + ", loaded=" + level.isLoaded(pos)
+                + ", present=true"
+                + ", extended=" + dock.isExtended()
+                + ", feetExtended=" + dock.isFeetExtended()
+                + ", locked=" + dock.isLocked()
+                + ", other=" + (dock.otherConnectorPosition == null
+                        ? "none"
+                        : dock.otherConnectorPosition.toShortString())
+                + ", expectedOther=" + expectedOther.toShortString()
+                + ", expectedPair=" + expectedOther.equals(dock.otherConnectorPosition)
+                + "}";
+    }
+
     public static DockDiscoveryResult discoverAround(ServerLevel level, BlockPos center, int radius) {
         List<BlockPos> candidates = BlockPos.betweenClosedStream(
                         center.offset(-radius, -radius, -radius),
@@ -63,7 +96,7 @@ public final class DockingConnectorDiscovery {
                 .filter(pos -> isDock(level, pos))
                 .sorted(Comparator.comparingDouble(pos -> pos.distSqr(center)))
                 .toList();
-        CreateAeronauticsAutomatedLogistics.debugLog(
+        CreateAeronauticsAutomatedLogistics.debugDocking(
                 "Dock discovery at {} radius {} found {} candidate(s): {}",
                 center,
                 radius,

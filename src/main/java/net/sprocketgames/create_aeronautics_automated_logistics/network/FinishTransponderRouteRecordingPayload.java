@@ -29,7 +29,6 @@ import net.sprocketgames.create_aeronautics_automated_logistics.service.StationP
 import net.sprocketgames.create_aeronautics_automated_logistics.service.TransponderPermissionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleController;
 import java.util.ArrayList;
-import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerResolver;
 
 public record FinishTransponderRouteRecordingPayload(BlockPos transponderPos, UUID destinationStationId, boolean appendToSchedule)
         implements CustomPacketPayload {
@@ -93,7 +92,12 @@ public record FinishTransponderRouteRecordingPayload(BlockPos transponderPos, UU
         Optional<VehicleController> controller = ShipTransponderRegistry.snapshot(transponder.transponderId())
                 .filter(ship -> ship.dimension().equals(level.dimension()))
                 .flatMap(ShipTransponderSnapshot::controllerRef)
-                .flatMap(controllerRef -> VehicleControllerResolver.resolve(level, controllerRef));
+                .flatMap(controllerRef -> StartTransponderRouteRecordingPayload.resolveLiveController(
+                        level,
+                        transponder.transponderId(),
+                        controllerRef,
+                        "finish_transponder_route_recording"
+                ));
         if (controller.isEmpty()) {
             StartTransponderRouteRecordingPayload.fail(
                     player,

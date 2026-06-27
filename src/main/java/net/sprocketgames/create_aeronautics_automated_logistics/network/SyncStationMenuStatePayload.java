@@ -43,14 +43,28 @@ public record SyncStationMenuStatePayload(
 
     public static void handle(SyncStationMenuStatePayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
+            CreateAeronauticsAutomatedLogistics.debugUi(
+                    "Station sync payload received pos={} selectedId={} selectedShip='{}' shipChoices={} routeChoices={} selectedPresent={} selectedRuntime={} selectedCanRun={} selectedCanStop={}",
+                    payload.stationPos(),
+                    payload.state().selectedTransponderId().map(java.util.UUID::toString).orElse("<none>"),
+                    payload.state().selectedShipName(),
+                    payload.state().shipChoices().size(),
+                    payload.state().routeChoices().size(),
+                    payload.state().selectedShipState().present(),
+                    payload.state().selectedShipState().runtimeStatus(),
+                    payload.state().selectedShipState().canRun(),
+                    payload.state().selectedShipState().canStop()
+            );
+            BlockPos zero = BlockPos.ZERO;
             if (Minecraft.getInstance().player != null
                     && Minecraft.getInstance().player.containerMenu instanceof AirshipStationMenu menu
-                    && menu.stationPos().equals(payload.stationPos())) {
-                menu.setClientState(payload.state());
+                    && (menu.stationPos().equals(payload.stationPos()) || menu.stationPos().equals(zero))) {
+                menu.applyClientStateSync(payload.stationPos(), payload.state());
             }
             if (Minecraft.getInstance().screen instanceof AirshipStationScreen screen
-                    && screen.stationMenu().stationPos().equals(payload.stationPos())) {
-                screen.stationMenu().setClientState(payload.state());
+                    && (screen.stationMenu().stationPos().equals(payload.stationPos())
+                    || screen.stationMenu().stationPos().equals(zero))) {
+                screen.stationMenu().applyClientStateSync(payload.stationPos(), payload.state());
             }
         });
     }

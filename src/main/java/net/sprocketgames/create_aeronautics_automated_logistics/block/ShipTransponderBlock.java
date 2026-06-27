@@ -30,12 +30,14 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.Containers;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
+import net.sprocketgames.create_aeronautics_automated_logistics.cargo.CargoLinkSupport;
+import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.LogisticsClientOverlays;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityDirectorySavedData;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.ShipTransponderMenu;
+import net.sprocketgames.create_aeronautics_automated_logistics.materialization.ShipBodyDirectorySavedData;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.FailureReason;
@@ -46,6 +48,8 @@ import net.sprocketgames.create_aeronautics_automated_logistics.service.Automate
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteBlockBreakProtection;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.List;
 
 public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock {
     public static final MapCodec<ShipTransponderBlock> CODEC = simpleCodec(ShipTransponderBlock::new);
@@ -139,23 +143,53 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
         }
         if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer
                 && level.getBlockEntity(pos) instanceof ShipTransponderBlockEntity transponder) {
-            if (DockLinkInteractionService.cancelPendingIfSource(serverPlayer, pos)) {
+            if (!serverPlayer.isSpectator() && DockLinkInteractionService.cancelPendingIfSource(serverPlayer, pos)) {
                 return InteractionResult.CONSUME;
             }
-            if (CargoLinkInteractionService.cancelPendingIfSource(serverPlayer, pos)) {
+            if (!serverPlayer.isSpectator() && CargoLinkInteractionService.cancelPendingIfSource(serverPlayer, pos)) {
                 return InteractionResult.CONSUME;
             }
-            transponder.refreshRuntimeShip((ServerLevel) level);
-            transponder.pruneInvalidOwnedSchedule((ServerLevel) level);
+            RouteStatus projectedRuntimeStatus = AutomatedLogisticsServices.SCHEDULES.projectRuntimeStatus((ServerLevel) level, transponder);
             ShipTransponderMenu.InitialRecordingState recordingState =
                     ShipTransponderMenu.resolveInitialRecordingState(serverPlayer, transponder, false);
-            CreateAeronauticsAutomatedLogistics.debugLog(
-                    "Transponder openMenu id={} pos={} linkedCargoCount={} cargoSummary={}",
+            ShipTransponderMenu statusMenu = new ShipTransponderMenu(
+                    0,
+                    serverPlayer.getInventory(),
+                    pos,
+                    recordingState.recordingMode(),
+                    recordingState.recordingSessionActive(),
+                    recordingState.appendToSchedule(),
+                    transponder.recordingDestinationStationId(),
+                    projectedRuntimeStatus,
+                    transponder.dockOutputActive(),
+                    transponder.hasOwnedStops(),
+                    transponder.ownedSchedule(),
+                    transponder.linkedCargoRevision(),
+                    transponder.linkedCargoSummary(),
+                    transponder.linkedCargo(),
+                    AutomatedLogisticsServices.SCHEDULES.lastCargoFailureContext(transponder.transponderId()),
+                    AutomatedLogisticsServices.SCHEDULES.lastFailure(transponder.transponderId()),
+                    ShipTransponderMenu.StatusSnapshot.idle()
+            );
+            ShipTransponderMenu.StatusSnapshot statusSnapshot = statusMenu.buildStatusSnapshot(serverPlayer);
+            CreateAeronauticsAutomatedLogistics.debugUi(
+                    "Transponder openMenu id={} pos={} player={} spectator={} runtimeStatus={} scheduleActive={} scheduleHeld={} dockOutput={} hasOwnedStops={} ownedStopsCount={} linkedCargoCount={} cargoSummary={} snapshotText='{}' snapshotColor={}",
                     transponder.transponderId(),
                     pos,
+                    serverPlayer.getName().getString(),
+                    serverPlayer.isSpectator(),
+                    projectedRuntimeStatus,
+                    transponder.scheduleActive(),
+                    transponder.scheduleHeld(),
+                    transponder.dockOutputActive(),
+                    transponder.hasOwnedStops(),
+                    transponder.ownedSchedule().entries().size(),
                     transponder.linkedCargo().size(),
-                    transponder.linkedCargoSummary()
+                    transponder.linkedCargoSummary(),
+                    statusSnapshot.text(),
+                    Integer.toHexString(statusSnapshot.color())
             );
+            net.sprocketgames.create_aeronautics_automated_logistics.network.SyncIdentityDirectoryPayload.sendTo(serverPlayer);
             serverPlayer.openMenu(transponder, buffer -> {
                 buffer.writeBlockPos(pos);
                 buffer.writeBoolean(recordingState.recordingMode());
@@ -163,7 +197,7 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
                 buffer.writeBoolean(recordingState.appendToSchedule());
                 buffer.writeBoolean(transponder.recordingDestinationStationId().isPresent());
                 transponder.recordingDestinationStationId().ifPresent(buffer::writeUUID);
-                buffer.writeEnum(transponder.runtimeStatus());
+                buffer.writeEnum(projectedRuntimeStatus);
                 buffer.writeBoolean(transponder.dockOutputActive());
                 buffer.writeBoolean(transponder.hasOwnedStops());
                 buffer.writeNbt(AirshipScheduleNbtSerializer.write(transponder.ownedSchedule()));
@@ -174,6 +208,11 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
                         buffer,
                         AutomatedLogisticsServices.SCHEDULES.lastCargoFailureContext(transponder.transponderId())
                 );
+                ShipTransponderMenu.writePlaybackFailure(
+                        buffer,
+                        AutomatedLogisticsServices.SCHEDULES.lastFailure(transponder.transponderId())
+                );
+                ShipTransponderMenu.writeStatusSnapshot(buffer, statusSnapshot);
             });
         }
         return InteractionResult.CONSUME;
@@ -228,29 +267,43 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
     protected void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (!state.is(newState.getBlock())
                 && level.getBlockEntity(pos) instanceof ShipTransponderBlockEntity transponder) {
-            if (!transponder.installedScheduleStack().isEmpty()) {
-                Containers.dropItemStack(
-                        level,
-                        pos.getX() + 0.5D,
-                        pos.getY() + 0.5D,
-                        pos.getZ() + 0.5D,
-                        transponder.installedScheduleStack().copy()
-                );
-                transponder.clearContent();
+            if (level.isClientSide) {
+                LogisticsClientOverlays.clearFlightPathIfPreviewingTransponder(pos);
+                LogisticsClientOverlays.clearFlightPathIfPreviewingTransponderRoutes(transponder.transponderId());
+                LogisticsClientOverlays.clearShipTransponderHighlightIfMatches(pos);
+                LogisticsClientOverlays.clearDockIfMatches(transponder.shipDockPos());
+                List<List<BlockPos>> cargoGroups = CargoLinkSupport.expandPreviewPositionGroups(level, pos, 6, transponder.linkedCargo());
+                if (cargoGroups.isEmpty()) {
+                    cargoGroups = transponder.linkedCargo().stream()
+                            .map(entry -> java.util.List.of(entry.pos()))
+                            .toList();
+                }
+                LogisticsClientOverlays.clearCargoIfMatches(cargoGroups);
             }
             if (level instanceof ServerLevel serverLevel) {
                 transponder.refreshRuntimeShip(serverLevel);
+                java.util.Optional<net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderSnapshot> teardownSnapshot =
+                        ShipTransponderRegistry.snapshot(transponder.transponderId());
+                java.util.Optional<net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerRef> teardownControllerRef =
+                        transponder.controllerRef(serverLevel).or(() -> teardownSnapshot.flatMap(net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderSnapshot::controllerRef));
+                java.util.Optional<java.util.UUID> teardownRuntimeShipId =
+                        transponder.runtimeShipId().or(() -> teardownSnapshot.flatMap(net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderSnapshot::runtimeShipId));
                 AutomatedLogisticsServices.SCHEDULES.stop(serverLevel, transponder.transponderId());
-                transponder.controllerRef(serverLevel).ifPresent(controllerRef -> {
-                    AutomatedLogisticsServices.PLAYBACK.stopLinkedPlaybacks(serverLevel, controllerRef, FailureReason.NONE);
-                    AutomatedLogisticsServices.RECORDING.cancelRecordingForController(serverLevel, controllerRef);
-                });
+                AutomatedLogisticsServices.PLAYBACK.stopLinkedPlaybacks(
+                        serverLevel,
+                        teardownControllerRef,
+                        teardownRuntimeShipId,
+                        FailureReason.NONE
+                );
+                teardownControllerRef.ifPresent(controllerRef ->
+                        AutomatedLogisticsServices.RECORDING.cancelRecordingForController(serverLevel, controllerRef));
                 transponder.setRecordingDestinationStationId(java.util.Optional.empty());
-                transponder.setDockOutputActive(false);
+                transponder.forceClearDockOutput("transponder_removed");
                 transponder.setRuntimeStatus(RouteStatus.IDLE);
                 ScheduleRouteCleanup.removeRoutesForDeletedTransponder(serverLevel, transponder.transponderId());
                 ShipTransponderRegistry.unregister(transponder.transponderId());
                 IdentityDirectorySavedData.removeShip(serverLevel.getServer(), transponder.transponderId());
+                ShipBodyDirectorySavedData.removeForDeletedTransponder(serverLevel.getServer(), transponder.transponderId());
             }
         }
         super.onRemove(state, level, pos, newState, isMoving);

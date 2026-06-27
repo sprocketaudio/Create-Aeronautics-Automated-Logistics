@@ -9,6 +9,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipScheduleMenu;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleCondition;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
 
 public record UpdateAirshipSchedulePayload(CompoundTag scheduleTag) implements CustomPacketPayload {
@@ -39,6 +41,36 @@ public record UpdateAirshipSchedulePayload(CompoundTag scheduleTag) implements C
         if (!(player.containerMenu instanceof AirshipScheduleMenu menu)) {
             return;
         }
-        menu.writeSchedule(player, AirshipScheduleNbtSerializer.read(payload.scheduleTag()));
+        AirshipSchedule schedule = AirshipScheduleNbtSerializer.read(payload.scheduleTag());
+        if (!withinScheduleLimits(schedule)) {
+            CreateAeronauticsAutomatedLogistics.LOGGER.warn(
+                    "Rejected oversized airship schedule update from {}: entries={}",
+                    player.getGameProfile().getName(),
+                    schedule.entries().size()
+            );
+            return;
+        }
+        menu.writeSchedule(player, schedule);
+    }
+
+    private static boolean withinScheduleLimits(AirshipSchedule schedule) {
+        if (schedule.entries().size() > NetworkLimits.MAX_SCHEDULE_ENTRIES) {
+            return false;
+        }
+        int groups = 0;
+        int conditions = 0;
+        for (var entry : schedule.entries()) {
+            groups += entry.effectiveConditionGroups().size();
+            if (groups > NetworkLimits.MAX_SCHEDULE_CONDITION_GROUPS) {
+                return false;
+            }
+            for (java.util.List<AirshipScheduleCondition> group : entry.effectiveConditionGroups()) {
+                conditions += group.size();
+                if (conditions > NetworkLimits.MAX_SCHEDULE_CONDITIONS) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 }

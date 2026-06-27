@@ -40,7 +40,8 @@ import net.sprocketgames.create_aeronautics_automated_logistics.identity.Airship
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.ShipTransponderMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.CancelTransponderRouteRecordingPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.FinishTransponderRouteRecordingPayload;
-import net.sprocketgames.create_aeronautics_automated_logistics.network.OpenInstalledScheduleEditorPayload;
+import net.sprocketgames.create_aeronautics_automated_logistics.network.OpenScheduleEditorPayload;
+import net.sprocketgames.create_aeronautics_automated_logistics.network.ShipTransponderMenuActionPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.StartTransponderRouteRecordingPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.UpdateIdentityNamePayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.StationPermissionService;
@@ -124,6 +125,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
 
     private final List<ButtonTooltip> buttonTooltips = new ArrayList<>();
     private EditBox nameBox;
+    private String pendingSubmittedName;
     private IconButton playButton;
     private IconButton stopButton;
     private IconButton recordButton;
@@ -172,9 +174,6 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         recordingMode = this.menu.initialRecordingMode();
         recordingSessionActive = this.menu.initialRecordingSessionActive();
         recordingDestinationStationId = this.menu.initialRecordingDestinationStationId();
-        if (this.minecraft != null && this.minecraft.player != null) {
-            this.menu.primeClientRuntimeState(this.minecraft.player);
-        }
         if (recordingSessionActive) {
             recordingMode = true;
         }
@@ -219,7 +218,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                 this.leftPos + 137,
                 this.topPos + 83,
                 EDIT_SCHEDULE_ICON,
-                this::openInstalledScheduleEditor,
+                this::openScheduleEditor,
                 Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.edit_schedule.tooltip"),
                 Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.edit_schedule.tooltip_skip")
                         .withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC)
@@ -306,6 +305,14 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         if (nameBox != null && !nameBox.isFocused()) {
             if (this.minecraft != null && this.minecraft.player != null) {
                 String authoritativeName = this.menu.shipName(this.minecraft.player);
+                if (pendingSubmittedName != null) {
+                    if (pendingSubmittedName.equals(authoritativeName)) {
+                        pendingSubmittedName = null;
+                    } else {
+                        centerNameBox();
+                        return;
+                    }
+                }
                 if (!nameBox.getValue().equals(authoritativeName)) {
                     nameBox.setValue(authoritativeName);
                 }
@@ -393,14 +400,14 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             dockPreviewButton.active = !recordingMode
                     && this.minecraft != null
                     && this.minecraft.player != null
-                    && menu.dockPreviewPos(this.minecraft.player).isPresent();
+                    && menu.hasLinkedDock(this.minecraft.player);
         }
         if (cargoPreviewButton != null) {
             cargoPreviewButton.visible = !recordingMode;
             cargoPreviewButton.active = !recordingMode
                     && this.minecraft != null
                     && this.minecraft.player != null
-                    && !menu.cargoPreviewPositionGroups(this.minecraft.player).isEmpty();
+                    && menu.hasLinkedCargo(this.minecraft.player);
         }
         if (dockLinkButton != null) {
             dockLinkButton.visible = !recordingMode;
@@ -411,7 +418,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             dockClearButton.active = !recordingMode
                     && this.minecraft != null
                     && this.minecraft.player != null
-                    && menu.dockPreviewPos(this.minecraft.player).isPresent();
+                    && menu.hasLinkedDock(this.minecraft.player);
         }
         if (cargoLinkButton != null) {
             cargoLinkButton.visible = !recordingMode;
@@ -428,10 +435,10 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             if (!previewButton.active) {
                 LogisticsClientOverlays.clearFlightPath();
             }
-            previewButton.green = LogisticsClientOverlays.hasFlightPath();
+            previewButton.green = ownsFlightPathPreview();
         }
         if (!recordingMode && dockPreviewButton != null && this.minecraft != null && this.minecraft.player != null) {
-            boolean hasLinkedDock = menu.dockPreviewPos(this.minecraft.player).isPresent();
+            boolean hasLinkedDock = menu.hasLinkedDock(this.minecraft.player);
             if (!hasLinkedDock) {
                 LogisticsClientOverlays.clearDock();
             }
@@ -442,15 +449,23 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         }
         if (!recordingMode && dockClearButton != null && this.minecraft != null && this.minecraft.player != null) {
             boolean pendingDockLink = DockLinkPromptClientState.isPendingForTransponder(this.menu.transponderPos());
-            dockClearButton.active = pendingDockLink || menu.dockPreviewPos(this.minecraft.player).isPresent();
+            dockClearButton.active = pendingDockLink || menu.hasLinkedDock(this.minecraft.player);
             dockClearButton.green = pendingDockLink;
         }
         if (!recordingMode && cargoPreviewButton != null && this.minecraft != null && this.minecraft.player != null) {
             List<List<BlockPos>> cargoPreview = menu.cargoPreviewPositionGroups(this.minecraft.player);
             if (cargoPreview.isEmpty()) {
+                CreateAeronauticsAutomatedLogistics.debugUi(
+                        "Transponder cargo preview tick clear player={} spectator={} menuPos={} buttonActive={} buttonGreenBeforeClear={}",
+                        this.minecraft.player.getName().getString(),
+                        this.minecraft.player.isSpectator(),
+                        this.menu.transponderPos(),
+                        cargoPreviewButton.active,
+                        cargoPreviewButton.green
+                );
                 LogisticsClientOverlays.clearCargo();
             }
-            cargoPreviewButton.active = !cargoPreview.isEmpty();
+            cargoPreviewButton.active = menu.hasLinkedCargo(this.minecraft.player);
             cargoPreviewButton.green = LogisticsClientOverlays.isCargoVisibleGroups(cargoPreview);
         }
         if (!recordingMode && cargoClearButton != null && this.minecraft != null && this.minecraft.player != null) {
@@ -812,22 +827,41 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
 
     private void saveName() {
         if (this.minecraft != null && this.nameBox != null) {
-            PacketDistributor.sendToServer(new UpdateIdentityNamePayload(this.menu.transponderPos(), this.nameBox.getValue()));
+            pendingSubmittedName = this.nameBox.getValue();
+            PacketDistributor.sendToServer(new UpdateIdentityNamePayload(this.menu.transponderPos(), pendingSubmittedName));
         }
     }
 
     private void pressAction(int actionId) {
-        if (this.minecraft != null && this.minecraft.gameMode != null) {
+        if (this.minecraft == null || this.minecraft.player == null) {
+            return;
+        }
+        if (this.minecraft.player.isSpectator()) {
+            PacketDistributor.sendToServer(new ShipTransponderMenuActionPayload(
+                    this.menu.containerId,
+                    this.menu.transponderPos(),
+                    actionId
+            ));
+            return;
+        }
+        if (this.minecraft.gameMode != null) {
             this.minecraft.gameMode.handleInventoryButtonClick(this.menu.containerId, actionId);
         }
     }
 
     private void togglePreview() {
-        if (LogisticsClientOverlays.hasFlightPath()) {
+        if (ownsFlightPathPreview()) {
             LogisticsClientOverlays.clearFlightPath();
             return;
         }
         pressAction(ShipTransponderMenu.ACTION_TOGGLE_PREVIEW);
+    }
+
+    private boolean ownsFlightPathPreview() {
+        return LogisticsClientOverlays.hasFlightPath()
+                && LogisticsClientOverlays.previewedTransponderPos()
+                .map(menu.transponderPos()::equals)
+                .orElse(false);
     }
 
     private void toggleDockPreview() {
@@ -846,9 +880,26 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         }
         List<List<BlockPos>> cargoPreview = this.menu.cargoPreviewPositionGroups(this.minecraft.player);
         if (cargoPreview.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugUi(
+                    "Transponder cargo preview toggle clear player={} spectator={} menuPos={} active={} green={}",
+                    this.minecraft.player.getName().getString(),
+                    this.minecraft.player.isSpectator(),
+                    this.menu.transponderPos(),
+                    cargoPreviewButton != null && cargoPreviewButton.active,
+                    cargoPreviewButton != null && cargoPreviewButton.green
+            );
             LogisticsClientOverlays.clearCargo();
             return;
         }
+        CreateAeronauticsAutomatedLogistics.debugUi(
+                "Transponder cargo preview toggle show player={} spectator={} menuPos={} groups={} flatPositions={} currentlyVisible={}",
+                this.minecraft.player.getName().getString(),
+                this.minecraft.player.isSpectator(),
+                this.menu.transponderPos(),
+                cargoPreview.size(),
+                cargoPreview.stream().mapToInt(List::size).sum(),
+                LogisticsClientOverlays.isCargoVisibleGroups(cargoPreview)
+        );
         LogisticsClientOverlays.toggleCargoGroups(cargoPreview);
     }
 
@@ -883,16 +934,24 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         );
     }
 
-    private void openInstalledScheduleEditor() {
+    private void openScheduleEditor() {
         if (this.minecraft == null || this.minecraft.player == null) {
             return;
         }
-        PacketDistributor.sendToServer(new OpenInstalledScheduleEditorPayload(this.menu.transponderPos(), recordingMode));
+        CreateAeronauticsAutomatedLogistics.debugUi(
+                "Transponder schedule editor click pos={} spectator={} hasOwnedStops={} scheduleEntries={} canControl={}",
+                this.menu.transponderPos(),
+                this.minecraft.player.isSpectator(),
+                this.menu.hasOwnedStops(this.minecraft.player),
+                this.menu.ownedStopCount(this.minecraft.player),
+                this.menu.canControlTransponderLocally(this.minecraft.player)
+        );
+        PacketDistributor.sendToServer(new OpenScheduleEditorPayload(this.menu.transponderPos(), recordingMode));
     }
 
     private Component routePreviewButtonText() {
         return Component.translatable(
-                LogisticsClientOverlays.hasFlightPath()
+                ownsFlightPathPreview()
                         ? "gui.create_aeronautics_automated_logistics.ship_transponder.hide_flight_path"
                         : "gui.create_aeronautics_automated_logistics.ship_transponder.show_flight_path"
         );
@@ -1089,8 +1148,6 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         }
         boolean isOp = this.minecraft.player.hasPermissions(2);
         return AirshipStationRegistry.knownStations(this.minecraft.level.dimension()).stream()
-                .filter(station -> this.minecraft.level.getBlockEntity(station.stationPos()) instanceof AirshipStationBlockEntity blockEntity
-                        && blockEntity.stationId().equals(station.stationId()))
                 .filter(station -> StationPermissionService.canControl(this.minecraft.player.getUUID(), isOp, station))
                 .toList();
     }

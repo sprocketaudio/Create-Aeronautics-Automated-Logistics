@@ -40,9 +40,50 @@ public record ReopenShipTransponderPayload(BlockPos transponderPos, boolean reco
         if (!(player.level().getBlockEntity(payload.transponderPos()) instanceof ShipTransponderBlockEntity transponder)) {
             return;
         }
-        transponder.refreshRuntimeShip(player.serverLevel());
+        net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus projectedRuntimeStatus =
+                net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES
+                        .projectRuntimeStatus(player.serverLevel(), transponder);
         ShipTransponderMenu.InitialRecordingState recordingState =
                 ShipTransponderMenu.resolveInitialRecordingState(player, transponder, payload.recordingMode());
+        ShipTransponderMenu statusMenu = new ShipTransponderMenu(
+                0,
+                player.getInventory(),
+                payload.transponderPos(),
+                recordingState.recordingMode(),
+                recordingState.recordingSessionActive(),
+                recordingState.appendToSchedule(),
+                transponder.recordingDestinationStationId(),
+                projectedRuntimeStatus,
+                transponder.dockOutputActive(),
+                transponder.hasOwnedStops(),
+                transponder.ownedSchedule(),
+                transponder.linkedCargoRevision(),
+                transponder.linkedCargoSummary(),
+                transponder.linkedCargo(),
+                net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES
+                        .lastCargoFailureContext(transponder.transponderId()),
+                net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES
+                        .lastFailure(transponder.transponderId()),
+                ShipTransponderMenu.StatusSnapshot.idle()
+        );
+        ShipTransponderMenu.StatusSnapshot statusSnapshot = statusMenu.buildStatusSnapshot(player);
+        CreateAeronauticsAutomatedLogistics.debugUi(
+                "Transponder reopenMenu id={} pos={} player={} spectator={} recordingMode={} runtimeStatus={} scheduleActive={} scheduleHeld={} dockOutput={} hasOwnedStops={} ownedStopsCount={} snapshotText='{}' snapshotColor={}",
+                transponder.transponderId(),
+                payload.transponderPos(),
+                player.getName().getString(),
+                player.isSpectator(),
+                recordingState.recordingMode(),
+                projectedRuntimeStatus,
+                transponder.scheduleActive(),
+                transponder.scheduleHeld(),
+                transponder.dockOutputActive(),
+                transponder.hasOwnedStops(),
+                transponder.ownedSchedule().entries().size(),
+                statusSnapshot.text(),
+                Integer.toHexString(statusSnapshot.color())
+        );
+        SyncIdentityDirectoryPayload.sendTo(player);
         player.openMenu(transponder, buffer -> {
             buffer.writeBlockPos(payload.transponderPos());
             buffer.writeBoolean(recordingState.recordingMode());
@@ -50,7 +91,7 @@ public record ReopenShipTransponderPayload(BlockPos transponderPos, boolean reco
             buffer.writeBoolean(recordingState.appendToSchedule());
             buffer.writeBoolean(transponder.recordingDestinationStationId().isPresent());
             transponder.recordingDestinationStationId().ifPresent(buffer::writeUUID);
-            buffer.writeEnum(transponder.runtimeStatus());
+            buffer.writeEnum(projectedRuntimeStatus);
             buffer.writeBoolean(transponder.dockOutputActive());
             buffer.writeBoolean(transponder.hasOwnedStops());
             buffer.writeNbt(AirshipScheduleNbtSerializer.write(transponder.ownedSchedule()));
@@ -62,6 +103,12 @@ public record ReopenShipTransponderPayload(BlockPos transponderPos, boolean reco
                     net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES
                             .lastCargoFailureContext(transponder.transponderId())
             );
+            ShipTransponderMenu.writePlaybackFailure(
+                    buffer,
+                    net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES
+                            .lastFailure(transponder.transponderId())
+            );
+            ShipTransponderMenu.writeStatusSnapshot(buffer, statusSnapshot);
         });
     }
 }

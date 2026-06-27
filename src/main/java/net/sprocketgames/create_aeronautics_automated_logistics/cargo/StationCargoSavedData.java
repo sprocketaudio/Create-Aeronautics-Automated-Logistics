@@ -33,14 +33,14 @@ public class StationCargoSavedData extends SavedData {
     public static List<LinkedCargoEntry> entries(MinecraftServer server, UUID stationId, BlockPos anchorPos) {
         StoredCargo storedCargo = get(server).cargoByStation.get(stationId);
         if (storedCargo == null) {
-            CreateAeronauticsAutomatedLogistics.debugLog(
+            CreateAeronauticsAutomatedLogistics.debugCargo(
                     "StationCargoSavedData entries miss id={} anchor={}",
                     stationId,
                     anchorPos
             );
             return List.of();
         }
-        CreateAeronauticsAutomatedLogistics.debugLog(
+        CreateAeronauticsAutomatedLogistics.debugCargo(
                 "StationCargoSavedData entries hit id={} anchor={} storedCount={} relative={}",
                 stationId,
                 anchorPos,
@@ -79,7 +79,7 @@ public class StationCargoSavedData extends SavedData {
         if (!normalized.equals(previous)) {
             data.setDirty();
         }
-        CreateAeronauticsAutomatedLogistics.debugLog(
+        CreateAeronauticsAutomatedLogistics.debugCargo(
                 "StationCargoSavedData put id={} anchor={} count={} dirty={}",
                 stationId,
                 anchorPos,
@@ -92,10 +92,10 @@ public class StationCargoSavedData extends SavedData {
         StationCargoSavedData data = get(server);
         if (data.cargoByStation.remove(stationId) != null) {
             data.setDirty();
-            CreateAeronauticsAutomatedLogistics.debugLog("StationCargoSavedData remove id={} removed=true", stationId);
+            CreateAeronauticsAutomatedLogistics.debugCargo("StationCargoSavedData remove id={} removed=true", stationId);
             return;
         }
-        CreateAeronauticsAutomatedLogistics.debugLog("StationCargoSavedData remove id={} removed=false", stationId);
+        CreateAeronauticsAutomatedLogistics.debugCargo("StationCargoSavedData remove id={} removed=false", stationId);
     }
 
     @Override
@@ -119,7 +119,7 @@ public class StationCargoSavedData extends SavedData {
     private static StationCargoSavedData load(CompoundTag tag, HolderLookup.Provider registries) {
         StationCargoSavedData data = new StationCargoSavedData();
         if (!tag.contains(STATIONS, Tag.TAG_LIST)) {
-            CreateAeronauticsAutomatedLogistics.debugLog("StationCargoSavedData load no stations tag");
+            CreateAeronauticsAutomatedLogistics.debugCargo("StationCargoSavedData load no stations tag");
             return data;
         }
         ListTag stationList = tag.getList(STATIONS, Tag.TAG_COMPOUND);
@@ -142,7 +142,7 @@ public class StationCargoSavedData extends SavedData {
                 );
             }
         }
-        CreateAeronauticsAutomatedLogistics.debugLog(
+        CreateAeronauticsAutomatedLogistics.debugCargo(
                 "StationCargoSavedData load loadedStations={}",
                 data.cargoByStation.size()
         );

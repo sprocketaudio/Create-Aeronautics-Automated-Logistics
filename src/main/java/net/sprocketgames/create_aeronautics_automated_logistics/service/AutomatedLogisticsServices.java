@@ -6,6 +6,7 @@ public final class AutomatedLogisticsServices {
     public static final VehicleRouteRecordingService RECORDING = new VehicleRouteRecordingService();
     public static final VehicleRoutePlaybackService PLAYBACK = new VehicleRoutePlaybackService();
     public static final AirshipScheduleExecutionService SCHEDULES = new AirshipScheduleExecutionService();
+    public static final ShipMaterializationService MATERIALIZATION = new ShipMaterializationService();
     private static MinecraftServer loadedRuntimeServer;
 
     private AutomatedLogisticsServices() {

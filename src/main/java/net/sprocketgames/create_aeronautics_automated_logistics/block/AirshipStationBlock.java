@@ -31,6 +31,8 @@ import net.minecraft.world.level.BlockGetter;
 import net.minecraft.network.chat.Component;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity;
+import net.sprocketgames.create_aeronautics_automated_logistics.cargo.CargoLinkSupport;
+import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.LogisticsClientOverlays;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityDirectorySavedData;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipStationMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.ShipTransponderMenu;
@@ -39,8 +41,11 @@ import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoLin
 import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteBlockBreakProtection;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.StationChunkLoadingService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.List;
 
 public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock {
     public static final MapCodec<AirshipStationBlock> CODEC = simpleCodec(AirshipStationBlock::new);
@@ -121,22 +126,23 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
         if (!(player instanceof ServerPlayer serverPlayer)) {
             return InteractionResult.CONSUME;
         }
-        if (DockLinkInteractionService.cancelPendingIfSource(serverPlayer, pos)) {
+        if (!serverPlayer.isSpectator() && DockLinkInteractionService.cancelPendingIfSource(serverPlayer, pos)) {
             return InteractionResult.CONSUME;
         }
-        if (CargoLinkInteractionService.cancelPendingIfSource(serverPlayer, pos)) {
+        if (!serverPlayer.isSpectator() && CargoLinkInteractionService.cancelPendingIfSource(serverPlayer, pos)) {
             return InteractionResult.CONSUME;
         }
         if (!(level.getBlockEntity(pos) instanceof AirshipStationBlockEntity station)) {
             return InteractionResult.CONSUME;
         }
-        CreateAeronauticsAutomatedLogistics.debugLog(
+        CreateAeronauticsAutomatedLogistics.debugUi(
                 "Station openMenu id={} pos={} linkedCargoCount={} cargoSummary={}",
                 station.stationId(),
                 pos,
                 station.linkedCargo().size(),
                 station.linkedCargoSummary()
         );
+        net.sprocketgames.create_aeronautics_automated_logistics.network.SyncIdentityDirectoryPayload.sendTo(serverPlayer);
         serverPlayer.openMenu(station, buffer -> {
             buffer.writeBlockPos(pos);
             buffer.writeBoolean(station.selectedTransponderId().isPresent());
@@ -217,10 +223,37 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
     @Override
     protected void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (!state.is(newState.getBlock())
-                && level.getBlockEntity(pos) instanceof AirshipStationBlockEntity station
-                && level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
-            ScheduleRouteCleanup.removeRoutesForDeletedStation(serverLevel, station.stationId());
-            IdentityDirectorySavedData.removeStation(serverLevel.getServer(), station.stationId());
+                && level.getBlockEntity(pos) instanceof AirshipStationBlockEntity station) {
+            if (level.isClientSide) {
+                LogisticsClientOverlays.clearLandingAreaIfMatches(pos);
+                LogisticsClientOverlays.clearFlightPathIfPreviewingStationRoutes(station.stationId());
+                LogisticsClientOverlays.clearDockIfMatches(station.groundDockPos());
+                List<List<BlockPos>> cargoGroups = CargoLinkSupport.expandPreviewPositionGroups(level, pos, 6, station.linkedCargo());
+                if (cargoGroups.isEmpty()) {
+                    cargoGroups = station.linkedCargo().stream()
+                            .map(entry -> java.util.List.of(entry.pos()))
+                            .toList();
+                }
+                LogisticsClientOverlays.clearCargoIfMatches(cargoGroups);
+            }
+            if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+                boolean deletionAccepted = ScheduleRouteCleanup.removeRoutesForDeletedStation(
+                        serverLevel,
+                        station.stationId(),
+                        pos
+                );
+                if (deletionAccepted) {
+                    StationChunkLoadingService.untrack(serverLevel.getServer(), station.stationId());
+                    IdentityDirectorySavedData.removeStationIfOwned(
+                            serverLevel.getServer(),
+                            station.stationId(),
+                            serverLevel.dimension(),
+                            pos
+                    );
+                    net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationRegistry
+                            .unregister(station.stationId());
+                }
+            }
         }
         super.onRemove(state, level, pos, newState, isMoving);
     }

@@ -23,7 +23,7 @@ public record SetDockLinkPromptPayload(boolean active, boolean shipPrompt, Block
         boolean active = buffer.readBoolean();
         boolean shipPrompt = buffer.readBoolean();
         BlockPos sourcePos = buffer.readBlockPos();
-        int count = buffer.readVarInt();
+        int count = NetworkLimits.readBoundedCount(buffer, NetworkLimits.MAX_LINK_PROMPT_POSITIONS, "dock link prompt positions");
         List<BlockPos> candidatePositions = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             candidatePositions.add(buffer.readBlockPos().immutable());

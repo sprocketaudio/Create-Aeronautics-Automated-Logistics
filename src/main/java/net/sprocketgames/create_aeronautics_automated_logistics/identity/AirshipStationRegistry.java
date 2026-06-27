@@ -1,5 +1,6 @@
 package net.sprocketgames.create_aeronautics_automated_logistics.identity;
 
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +22,16 @@ public final class AirshipStationRegistry {
 
     public static void unregister(UUID stationId) {
         STATIONS.remove(stationId);
+    }
+
+    public static void replaceAll(Collection<AirshipStationSnapshot> snapshots) {
+        STATIONS.clear();
+        if (snapshots == null) {
+            return;
+        }
+        for (AirshipStationSnapshot snapshot : snapshots) {
+            register(snapshot);
+        }
     }
 
     public static Optional<AirshipStationSnapshot> snapshot(UUID stationId) {

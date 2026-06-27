@@ -22,6 +22,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.Do
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.CargoLinkPromptClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.LogisticsClientOverlays;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.MenuActionBarClientState;
+import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.ShipTransponderHighlightClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModMenus;
 
 @Mod(value = CreateAeronauticsAutomatedLogistics.MOD_ID, dist = Dist.CLIENT)
@@ -46,6 +47,7 @@ public class CreateAeronauticsAutomatedLogisticsClient {
         AutomatedShipVisualClientState.clearIfWorldMissing();
         DockLinkPromptClientState.tick();
         CargoLinkPromptClientState.tick();
+        ShipTransponderHighlightClientState.tick();
         MenuActionBarClientState.tick();
         LogisticsClientOverlays.refresh();
     }

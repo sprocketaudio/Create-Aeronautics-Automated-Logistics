@@ -1010,7 +1010,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         int boxW = 176;
         int boxH = 136;
         int x = this.leftPos + (this.imageWidth - boxW) / 2;
-        int y = this.topPos + 58;
+        int y = this.topPos + 28;
         guiGraphics.fill(x - 1, y - 1, x + boxW + 1, y + boxH + 1, 0xFF111111);
         guiGraphics.fill(x, y, x + boxW, y + boxH, 0xF0292A2E);
         guiGraphics.drawCenteredString(this.font, "Delete stop?", x + boxW / 2, y + 6, 0xFFFFC66E);
@@ -1462,7 +1462,15 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             playUiButtonClick();
             saveTitle();
             if (this.minecraft != null && this.minecraft.player != null) {
-                this.minecraft.player.closeContainer();
+                if (this.menu.originTransponderPos().isPresent()) {
+                    PacketDistributor.sendToServer(new ReopenShipTransponderPayload(
+                            this.menu.originTransponderPos().get(),
+                            this.menu.returnToRecordingMode()
+                    ));
+                    this.reopenSourceScreenOnClose = false;
+                } else {
+                    this.minecraft.player.closeContainer();
+                }
             }
             return true;
         }
@@ -3037,7 +3045,7 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         int boxW = 176;
         int boxH = 136;
         int x = this.leftPos + (this.imageWidth - boxW) / 2;
-        int y = this.topPos + 58;
+        int y = this.topPos + 28;
         if (inside((int) mouseX, (int) mouseY, x + 20, y + boxH - 19, 52, 14)) {
             confirmDeleteStop();
             return true;
@@ -3184,20 +3192,14 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         if (this.minecraft == null || this.minecraft.level == null) {
             return List.of();
         }
-        return AirshipStationRegistry.knownStations(this.minecraft.level.dimension()).stream()
-                .filter(station -> this.minecraft.level.getBlockEntity(station.stationPos()) instanceof AirshipStationBlockEntity blockEntity
-                        && blockEntity.stationId().equals(station.stationId()))
-                .toList();
+        return AirshipStationRegistry.knownStations(this.minecraft.level.dimension());
     }
 
     private List<ShipTransponderSnapshot> availableShips() {
         if (this.minecraft == null || this.minecraft.level == null) {
             return List.of();
         }
-        return ShipTransponderRegistry.knownShips(this.minecraft.level.dimension()).stream()
-                .filter(ship -> this.minecraft.level.getBlockEntity(ship.transponderPos()) instanceof ShipTransponderBlockEntity blockEntity
-                        && blockEntity.transponderId().equals(ship.transponderId()))
-                .toList();
+        return ShipTransponderRegistry.knownShips(this.minecraft.level.dimension());
     }
 
     private double distanceToPlayer(ShipTransponderSnapshot ship) {

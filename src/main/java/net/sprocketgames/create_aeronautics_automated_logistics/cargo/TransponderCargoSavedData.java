@@ -33,14 +33,14 @@ public class TransponderCargoSavedData extends SavedData {
     public static List<LinkedCargoEntry> entries(MinecraftServer server, UUID transponderId, BlockPos anchorPos) {
         StoredCargo storedCargo = get(server).cargoByTransponder.get(transponderId);
         if (storedCargo == null) {
-            CreateAeronauticsAutomatedLogistics.debugLog(
+            CreateAeronauticsAutomatedLogistics.debugCargo(
                     "TransponderCargoSavedData entries miss id={} anchor={}",
                     transponderId,
                     anchorPos
             );
             return List.of();
         }
-        CreateAeronauticsAutomatedLogistics.debugLog(
+        CreateAeronauticsAutomatedLogistics.debugCargo(
                 "TransponderCargoSavedData entries hit id={} anchor={} storedCount={} relative={}",
                 transponderId,
                 anchorPos,
@@ -79,7 +79,7 @@ public class TransponderCargoSavedData extends SavedData {
         if (!normalized.equals(previous)) {
             data.setDirty();
         }
-        CreateAeronauticsAutomatedLogistics.debugLog(
+        CreateAeronauticsAutomatedLogistics.debugCargo(
                 "TransponderCargoSavedData put id={} anchor={} count={} dirty={}",
                 transponderId,
                 anchorPos,
@@ -92,10 +92,10 @@ public class TransponderCargoSavedData extends SavedData {
         TransponderCargoSavedData data = get(server);
         if (data.cargoByTransponder.remove(transponderId) != null) {
             data.setDirty();
-            CreateAeronauticsAutomatedLogistics.debugLog("TransponderCargoSavedData remove id={} removed=true", transponderId);
+            CreateAeronauticsAutomatedLogistics.debugCargo("TransponderCargoSavedData remove id={} removed=true", transponderId);
             return;
         }
-        CreateAeronauticsAutomatedLogistics.debugLog("TransponderCargoSavedData remove id={} removed=false", transponderId);
+        CreateAeronauticsAutomatedLogistics.debugCargo("TransponderCargoSavedData remove id={} removed=false", transponderId);
     }
 
     @Override
@@ -119,7 +119,7 @@ public class TransponderCargoSavedData extends SavedData {
     private static TransponderCargoSavedData load(CompoundTag tag, HolderLookup.Provider registries) {
         TransponderCargoSavedData data = new TransponderCargoSavedData();
         if (!tag.contains(TRANSPONDERS, Tag.TAG_LIST)) {
-            CreateAeronauticsAutomatedLogistics.debugLog("TransponderCargoSavedData load no transponders tag");
+            CreateAeronauticsAutomatedLogistics.debugCargo("TransponderCargoSavedData load no transponders tag");
             return data;
         }
         ListTag transponderList = tag.getList(TRANSPONDERS, Tag.TAG_COMPOUND);
@@ -142,7 +142,7 @@ public class TransponderCargoSavedData extends SavedData {
                 );
             }
         }
-        CreateAeronauticsAutomatedLogistics.debugLog(
+        CreateAeronauticsAutomatedLogistics.debugCargo(
                 "TransponderCargoSavedData load loadedTransponders={}",
                 data.cargoByTransponder.size()
         );

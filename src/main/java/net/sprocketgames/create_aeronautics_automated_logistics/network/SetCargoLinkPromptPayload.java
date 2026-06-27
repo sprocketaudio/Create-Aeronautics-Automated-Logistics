@@ -24,10 +24,15 @@ public record SetCargoLinkPromptPayload(boolean active, boolean shipPrompt, Bloc
         boolean active = buffer.readBoolean();
         boolean shipPrompt = buffer.readBoolean();
         BlockPos sourcePos = buffer.readBlockPos();
-        int groupCount = buffer.readVarInt();
+        int groupCount = NetworkLimits.readBoundedCount(buffer, NetworkLimits.MAX_LINK_PROMPT_GROUPS, "cargo link prompt groups");
         List<List<BlockPos>> candidateGroups = new ArrayList<>(groupCount);
+        int totalPositions = 0;
         for (int groupIndex = 0; groupIndex < groupCount; groupIndex++) {
-            int groupSize = buffer.readVarInt();
+            int groupSize = NetworkLimits.readBoundedCount(buffer, NetworkLimits.MAX_LINK_PROMPT_POSITIONS, "cargo link prompt group positions");
+            totalPositions += groupSize;
+            if (totalPositions > NetworkLimits.MAX_LINK_PROMPT_POSITIONS) {
+                throw new io.netty.handler.codec.DecoderException("cargo link prompt positions exceed " + NetworkLimits.MAX_LINK_PROMPT_POSITIONS);
+            }
             List<BlockPos> group = new ArrayList<>(groupSize);
             for (int i = 0; i < groupSize; i++) {
                 group.add(buffer.readBlockPos().immutable());

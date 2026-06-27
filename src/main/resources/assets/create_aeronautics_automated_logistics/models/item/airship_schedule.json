@@ -1,6 +1,0 @@
-{
-  "parent": "minecraft:item/generated",
-  "textures": {
-    "layer0": "create_aeronautics_automated_logistics:item/airship_schedule"
-  }
-}
