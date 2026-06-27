@@ -99,7 +99,7 @@ public class AutomatedLogisticsConfig {
         STATION_INTERACTION_CHUNK_RADIUS = BUILDER
                 .comment("Extra station-centered chunk radius to temporarily force-load while a ship is docking.")
                 .comment("0 loads only the station chunk, 1 loads a 3x3 chunk square, and 2 loads a 5x5 chunk square.")
-                .defineInRange("stationInteractionChunkRadius", 0, 0, 2);
+                .defineInRange("stationInteractionChunkRadius", 1, 0, 2);
         BUILDER.pop();
 
         BUILDER.push("limits");
