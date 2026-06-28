@@ -45,6 +45,11 @@ public final class ModNetworking {
                 AirshipStationMenuActionPayload::handle
         );
         registrar.playToServer(
+                AirshipScheduleMenuActionPayload.TYPE,
+                AirshipScheduleMenuActionPayload.STREAM_CODEC,
+                AirshipScheduleMenuActionPayload::handle
+        );
+        registrar.playToServer(
                 PreviewStationRoutesPayload.TYPE,
                 PreviewStationRoutesPayload.STREAM_CODEC,
                 PreviewStationRoutesPayload::handle

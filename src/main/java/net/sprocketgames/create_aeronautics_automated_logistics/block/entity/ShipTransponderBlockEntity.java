@@ -70,6 +70,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     private static final String SHIP_DOCK_POS = "shipDockPos";
     private static final String SHIP_DOCK_STATUS = "shipDockStatus";
     private static final String DOCK_OUTPUT_ACTIVE = "dockOutputActive";
+    private static final String DOCK_OUTPUT_OWNER = "dockOutputOwner";
     private static final String APPEND_TO_SCHEDULE = "appendToSchedule";
     private static final String OWNED_SCHEDULE = "ownedSchedule";
     private static final String RECORDING_DESTINATION_STATION_ID = "recordingDestinationStationId";
@@ -819,6 +820,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                 : shipDockStatus;
         tag.putString(SHIP_DOCK_STATUS, savedDockStatus.name());
         tag.putBoolean(DOCK_OUTPUT_ACTIVE, dockOutputActive);
+        dockOutputOwner.ifPresent(routeId -> tag.putUUID(DOCK_OUTPUT_OWNER, routeId.value()));
         tag.putBoolean(APPEND_TO_SCHEDULE, appendToSchedule);
         if (includeOwnedSchedule) {
             tag.put(OWNED_SCHEDULE, AirshipScheduleNbtSerializer.write(ownedSchedule()));
@@ -883,6 +885,18 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
                 : Optional.empty();
         shipDockStatus = readDockStatus(tag);
         dockOutputActive = tag.getBoolean(DOCK_OUTPUT_ACTIVE);
+        dockOutputOwner = tag.hasUUID(DOCK_OUTPUT_OWNER)
+                ? Optional.of(new RouteId(tag.getUUID(DOCK_OUTPUT_OWNER)))
+                : Optional.empty();
+        if (dockOutputActive && dockOutputOwner.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugDockingWarn(
+                    "Transponder load cleared incomplete dock output state: transponderId={} pos={} active={} reason=missing_persisted_owner",
+                    transponderId,
+                    worldPosition,
+                    dockOutputActive
+            );
+            dockOutputActive = false;
+        }
         appendToSchedule = tag.getBoolean(APPEND_TO_SCHEDULE);
         ownedSchedule = tag.contains(OWNED_SCHEDULE, Tag.TAG_COMPOUND)
                 ? bindScheduleToThisTransponder(AirshipScheduleNbtSerializer.read(tag.getCompound(OWNED_SCHEDULE)))

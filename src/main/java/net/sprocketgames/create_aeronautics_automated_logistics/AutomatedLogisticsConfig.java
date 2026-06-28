@@ -145,27 +145,27 @@ public class AutomatedLogisticsConfig {
     }
 
     public static boolean debugLogging() {
-        return DEBUG_LOGGING.get();
+        return safeBoolean(DEBUG_LOGGING, false);
     }
 
     public static boolean debugPlayback() {
-        return debugLogging() && DEBUG_PLAYBACK.get();
+        return debugLogging() && safeBoolean(DEBUG_PLAYBACK, true);
     }
 
     public static boolean debugVehicle() {
-        return debugLogging() && DEBUG_VEHICLE.get();
+        return debugLogging() && safeBoolean(DEBUG_VEHICLE, true);
     }
 
     public static boolean debugDocking() {
-        return debugLogging() && DEBUG_DOCKING.get();
+        return debugLogging() && safeBoolean(DEBUG_DOCKING, true);
     }
 
     public static boolean debugCargo() {
-        return debugLogging() && DEBUG_CARGO.get();
+        return debugLogging() && safeBoolean(DEBUG_CARGO, true);
     }
 
     public static boolean debugUiSync() {
-        return debugLogging() && DEBUG_UI_SYNC.get();
+        return debugLogging() && safeBoolean(DEBUG_UI_SYNC, true);
     }
 
     public static boolean requireCrouchToBreakRouteBlocks() {
@@ -182,6 +182,14 @@ public class AutomatedLogisticsConfig {
 
     public static int stationInteractionChunkRadius() {
         return STATION_INTERACTION_CHUNK_RADIUS.get();
+    }
+
+    private static boolean safeBoolean(ModConfigSpec.BooleanValue value, boolean fallback) {
+        try {
+            return value.get();
+        } catch (IllegalStateException ignored) {
+            return fallback;
+        }
     }
 
 }

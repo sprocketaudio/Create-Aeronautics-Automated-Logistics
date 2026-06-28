@@ -46,6 +46,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStop;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitCondition;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerRef;
+import net.sprocketgames.create_aeronautics_automated_logistics.dock.session.DockRequestId;
 
 public class AirshipScheduleExecutionService {
     public enum CompletionAdvanceResult {
@@ -59,6 +60,7 @@ public class AirshipScheduleExecutionService {
     private static final String ACTIVE_SCHEDULES = "activeSchedules";
     private static final String LAST_FAILURES = "lastStartFailures";
     private static final String TRANSPONDER_ID = "transponderId";
+    private static final String EXECUTION_ID = "executionId";
     private static final String TRANSPONDER_POS = "transponderPos";
     private static final String DIMENSION = "dimension";
     private static final String SCHEDULE = "schedule";
@@ -113,9 +115,13 @@ public class AirshipScheduleExecutionService {
             CreateAeronauticsAutomatedLogistics.debugPlayback("Loaded schedule runtime: no saved active schedules");
             return;
         }
+        int migratedExecutionIds = 0;
         if (tag.contains(ACTIVE_SCHEDULES, Tag.TAG_LIST)) {
             ListTag schedules = tag.getList(ACTIVE_SCHEDULES, Tag.TAG_COMPOUND);
             for (int i = 0; i < schedules.size(); i++) {
+                if (!schedules.getCompound(i).hasUUID(EXECUTION_ID)) {
+                    migratedExecutionIds++;
+                }
                 readActiveSchedule(schedules.getCompound(i)).ifPresent(active -> activeSchedules.put(active.transponderId(), active));
             }
         }
@@ -143,9 +149,10 @@ public class AirshipScheduleExecutionService {
             }
         }
         CreateAeronauticsAutomatedLogistics.debugPlayback(
-                "Loaded schedule runtime: {} active schedule(s), {} stored failure(s)",
+                "Loaded schedule runtime: {} active schedule(s), {} stored failure(s), {} execution identity migration(s)",
                 activeSchedules.size(),
-                lastStartFailures.size()
+                lastStartFailures.size(),
+                migratedExecutionIds
         );
     }
 
@@ -212,6 +219,7 @@ public class AirshipScheduleExecutionService {
 
         ActiveAirshipSchedule active = new ActiveAirshipSchedule(
                 transponderId,
+                UUID.randomUUID(),
                 transponder.getBlockPos().immutable(),
                 player.serverLevel().dimension(),
                 schedule,
@@ -315,7 +323,6 @@ public class AirshipScheduleExecutionService {
         }
 
         UUID transponderId = transponder.transponderId();
-        Optional<UUID> canonicalStartStationId = canonicalStartStationId(level, schedule, transponderId);
         List<AirshipScheduleEntry> entries = schedule.entries();
 
         for (AirshipStationBlockEntity station : nearbyStations) {
@@ -323,17 +330,14 @@ public class AirshipScheduleExecutionService {
             String currentStationName = station.stationName();
             BlockPos currentStationPos = station.getBlockPos().immutable();
 
-            if (canonicalStartStationId.isPresent() && canonicalStartStationId.get().equals(currentStationId)) {
-                if (scheduleChainIsValid(level, schedule, currentStationId, transponderId)) {
-                    return Optional.of(new ResolvedStartContext(
-                            station,
-                            currentStationId,
-                            currentStationName,
-                            currentStationPos,
-                            schedule
-                    ));
-                }
-                continue;
+            if (scheduleChainIsValid(level, schedule, currentStationId, transponderId)) {
+                return Optional.of(new ResolvedStartContext(
+                        station,
+                        currentStationId,
+                        currentStationName,
+                        currentStationPos,
+                        schedule
+                ));
             }
 
             for (int i = 0; i < entries.size(); i++) {
@@ -612,18 +616,15 @@ public class AirshipScheduleExecutionService {
         }
         Optional<RouteId> activeRouteId = active.activeRouteId();
         activeRouteId.ifPresent(routeId -> AutomatedLogisticsServices.PLAYBACK.stopPlayback(level, routeId, FailureReason.NONE));
-        stationAt(level, active.currentStationPos()).ifPresent(station -> {
-            activeRouteId.ifPresentOrElse(
-                    station::releaseDockOutput,
-                    () -> station.forceClearDockOutput("schedule_stop_no_route")
-            );
-            station.stopPlayback();
-        });
-        transponderAt(level, active.transponderPos()).ifPresent(transponder ->
-                activeRouteId.ifPresentOrElse(
-                        transponder::releaseDockOutput,
-                        () -> transponder.forceClearDockOutput("schedule_stop_no_route")
-                ));
+        Optional<AirshipStationBlockEntity> station = stationAt(level, active.currentStationPos());
+        Optional<ShipTransponderBlockEntity> transponder = transponderAt(level, active.transponderPos());
+        AutomatedLogisticsServices.DOCK_HANDSHAKE.clearScheduleOutputs(
+                station,
+                transponder,
+                activeRouteId,
+                "schedule_stop_no_route"
+        );
+        station.ifPresent(AirshipStationBlockEntity::stopPlayback);
     }
 
     public boolean stopForExplicitDeletedSegments(
@@ -760,6 +761,32 @@ public class AirshipScheduleExecutionService {
             }
         }
         return Optional.of(Math.max(0, Math.min(active.entryIndex(), displaySchedule.entries().size() - 1)));
+    }
+
+    public Optional<DockRequestId> dockRequestForRoute(Route route) {
+        Objects.requireNonNull(route, "route");
+        return activeSchedules.values().stream()
+                .filter(active -> active.activeRouteId().filter(route.id()::equals).isPresent())
+                .findFirst()
+                .map(active -> DockRequestId.scheduled(
+                        active.transponderId(),
+                        active.executionId(),
+                        route.stops().stream().findFirst().map(RouteStop::id),
+                        route.id()
+                ));
+    }
+
+    public boolean isDockRequestActive(DockRequestId requestId) {
+        Objects.requireNonNull(requestId, "requestId");
+        if (requestId.scheduleExecutionId().isPresent()) {
+            UUID executionId = requestId.scheduleExecutionId().get();
+            return activeSchedules.values().stream()
+                    .anyMatch(active -> active.executionId().equals(executionId)
+                            && requestId.transponderId().filter(active.transponderId()::equals).isPresent());
+        }
+        return requestId.transponderId()
+                .map(activeSchedules::containsKey)
+                .orElse(false);
     }
 
     public Optional<PlaybackFailure> playbackBlocker(ServerLevel level, RouteId routeId) {
@@ -1426,15 +1453,27 @@ public class AirshipScheduleExecutionService {
             );
         }
         Route route = routeFor(active, entry, segment.get(), controllerRef);
+        DockRequestId dockRequestId = DockRequestId.scheduled(
+                active.transponderId(),
+                active.executionId(),
+                route.stops().stream().findFirst().map(RouteStop::id),
+                route.id()
+        );
         if (targetStationMissing) {
             return AutomatedLogisticsServices.PLAYBACK.startHeldFaultPlayback(
                     level,
                     active.currentStationPos(),
                     route,
-                    PlaybackFailure.STATION_MISSING
+                    PlaybackFailure.STATION_MISSING,
+                    dockRequestId
             );
         }
-        PlaybackOperationResult<RouteId> result = AutomatedLogisticsServices.PLAYBACK.startPlayback(level, active.currentStationPos(), route);
+        PlaybackOperationResult<RouteId> result = AutomatedLogisticsServices.PLAYBACK.startPlayback(
+                level,
+                active.currentStationPos(),
+                route,
+                dockRequestId
+        );
         result.failure().ifPresent(failure -> station.failPlayback(failure.failureReason()));
         return result;
     }
@@ -1454,6 +1493,7 @@ public class AirshipScheduleExecutionService {
                 segment.points().size() - 1,
                 entry.primaryEffectiveWaitCondition(),
                 targetStationPos,
+                entry.targetStationId(),
                 conditionGroups
         ));
         return new Route(
@@ -1589,6 +1629,7 @@ public class AirshipScheduleExecutionService {
     private CompoundTag writeActiveSchedule(ActiveAirshipSchedule active) {
         CompoundTag tag = new CompoundTag();
         tag.putUUID(TRANSPONDER_ID, active.transponderId());
+        tag.putUUID(EXECUTION_ID, active.executionId());
         tag.put(TRANSPONDER_POS, NbtUtils.writeBlockPos(active.transponderPos()));
         tag.putString(DIMENSION, active.dimension().location().toString());
         tag.put(SCHEDULE, AirshipScheduleNbtSerializer.write(active.schedule()));
@@ -1631,6 +1672,7 @@ public class AirshipScheduleExecutionService {
                         NbtUtils.readBlockPos(tag, CURRENT_STATION_POS).map(currentStationPos ->
                                 new ActiveAirshipSchedule(
                                         tag.getUUID(TRANSPONDER_ID),
+                                        tag.hasUUID(EXECUTION_ID) ? tag.getUUID(EXECUTION_ID) : UUID.randomUUID(),
                                         transponderPos.immutable(),
                                         dimension,
                                         schedule,

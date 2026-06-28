@@ -110,8 +110,8 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
 
     @Override
     public boolean clickMenuButton(Player player, int id) {
-        if (!(player instanceof ServerPlayer)) {
-            return false;
+        if (player.level().isClientSide) {
+            return id == ACTION_SKIP_CURRENT_STOP;
         }
         return applyAction(player, id);
     }
@@ -576,16 +576,34 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
     private boolean skipCurrentStop(Player player) {
         Optional<ShipTransponderBlockEntity> transponder = editableTransponder(player);
         if (transponder.isEmpty() || !(player instanceof ServerPlayer serverPlayer)) {
+            CreateAeronauticsAutomatedLogistics.debugPlayback(
+                    "Skip-stop request refused: transponder unavailable or player was not server-side"
+            );
             return false;
         }
         if (!TransponderPermissionService.ensureCanControl(serverPlayer, transponder.get())) {
+            CreateAeronauticsAutomatedLogistics.debugPlayback(
+                    "Skip-stop request refused: player={} transponder={} reason=permission_denied",
+                    serverPlayer.getGameProfile().getName(),
+                    transponder.get().transponderId()
+            );
             return false;
         }
         if (!net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES
                 .skipCurrentStop(serverPlayer.serverLevel(), transponder.get().transponderId())) {
+            CreateAeronauticsAutomatedLogistics.debugPlayback(
+                    "Skip-stop request refused: player={} transponder={} reason=runtime_not_waiting",
+                    serverPlayer.getGameProfile().getName(),
+                    transponder.get().transponderId()
+            );
             actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.skip_stop_unavailable"));
             return false;
         }
+        CreateAeronauticsAutomatedLogistics.debugPlayback(
+                "Skip-stop request applied: player={} transponder={}",
+                serverPlayer.getGameProfile().getName(),
+                transponder.get().transponderId()
+        );
         actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.skip_stop_success"));
         return true;
     }

@@ -88,17 +88,19 @@ public final class SableSubLevelForceLoadService {
         if (added == null) {
             return false;
         }
-        ACTIVE_LEASES.computeIfAbsent(level.getServer(), ignored -> new java.util.LinkedHashMap<>())
+        Lease previous = ACTIVE_LEASES
+                .computeIfAbsent(level.getServer(), ignored -> new java.util.LinkedHashMap<>())
                 .put(routeId, new Lease(level.dimension(), shipId, routeId));
-        CreateAeronauticsAutomatedLogistics.debugVehicle(
-                "Sable runtime dock lease {}: route={} ship={} reason={} persistentTicket=false action={}",
-                added ? "acquired" : "refreshed",
-                routeId.value(),
-                shipId,
-                reason,
-                added ? "runtime_active_ticket_added" : "runtime_active_ticket_already_present"
-        );
-        logLeaseDiagnostic(level, shipId, routeId, reason + "_after_acquire");
+        if (added || previous == null || !previous.shipId().equals(shipId)) {
+            CreateAeronauticsAutomatedLogistics.debugVehicle(
+                    "Sable runtime dock lease acquired: route={} ship={} reason={} persistentTicket=false action={}",
+                    routeId.value(),
+                    shipId,
+                    reason,
+                    added ? "runtime_active_ticket_added" : "runtime_lease_tracked"
+            );
+            logLeaseDiagnostic(level, shipId, routeId, reason + "_after_acquire");
+        }
         return true;
     }
 

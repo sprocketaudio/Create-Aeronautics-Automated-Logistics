@@ -32,6 +32,7 @@ public final class ShipMaterializationService {
     private static final long LIVE_LOOKUP_LOG_HEARTBEAT_TICKS = 1200L;
     private static final long EXPECTED_WAIT_LOG_HEARTBEAT_TICKS = 1200L;
     private static final long CONTROLLER_REGISTRATION_WAIT_TICKS = 100L;
+    private static final long HELD_BY_SABLE_SETTLE_TICKS = 20L;
     private static final int MAX_LIVE_LOOKUP_LOG_STATES = 2048;
     private static final Map<MinecraftServer, Map<LiveLookupLogKey, LiveLookupLogState>> LIVE_LOOKUP_LOGS =
             new WeakHashMap<>();
@@ -226,16 +227,16 @@ public final class ShipMaterializationService {
                 : Optional.of(StoredBodyPointer.fromSable(holdingBody.pointer()));
         if (holdingBody != null) {
             lifecycle.transitionToHeldBySable(request, holdingPointer.get(), level.getGameTime(), "sable_holding_body_present");
-            logResult(
-                    "live body lookup result",
-                    request,
-                    new MaterializationResult(
-                            MaterializationResultType.SABLE_HOLDING_BODY_WAITING,
-                            false,
-                            "sable_holding_body_present",
-                            "Sable already owns this body in a holding chunk; lifecycle ownership will decide whether it can be consumed."
-                    )
+            MaterializationResult heldBySable = new MaterializationResult(
+                    MaterializationResultType.SABLE_HOLDING_BODY_WAITING,
+                    false,
+                    "sable_holding_body_present",
+                    "Sable already owns this body in a holding chunk; lifecycle ownership will decide whether it can be consumed."
             );
+            logResult("live body lookup result", request, heldBySable);
+            if (lifecycle.shouldDelayHeldBodyConsumption(holdingPointer.get(), level.getGameTime())) {
+                return heldBySable;
+            }
         }
         logResult(
                 "live body lookup result",
@@ -356,13 +357,6 @@ public final class ShipMaterializationService {
         }
 
         logRequest("restore/materialize attempt", request, MaterializationResultType.STORED_BODY_AVAILABLE, "attempting_materialize");
-        lookup.selected().ifPresent(selected -> SableStoredShipRepository.quarantineDuplicateIndexesExcept(
-                request.server(),
-                request.dimension(),
-                shipId,
-                selected.pointer(),
-                "before_materialize_" + request.reasonCode()
-        ));
         SableStoredShipMaterializer.Result materialized = SableStoredShipMaterializer.materialize(
                 new SableStoredShipMaterializer.Request(
                         request.server(),
@@ -676,6 +670,7 @@ public final class ShipMaterializationService {
         private BodyLifecycleState state = BodyLifecycleState.UNKNOWN;
         private Optional<StoredBodyPointer> activePointer = Optional.empty();
         private long controllerWaitUntil = -1L;
+        private long stateChangedAt = Long.MIN_VALUE;
         private String reason = "none";
 
         private Optional<MaterializationResult> blocker(long gameTime) {
@@ -697,7 +692,23 @@ public final class ShipMaterializationService {
                                 + "; refusing runtime materialization until the index is repaired."
                 ));
             }
+            if (state == BodyLifecycleState.HELD_BY_SABLE
+                    && activePointer.isPresent()
+                    && gameTime - stateChangedAt < HELD_BY_SABLE_SETTLE_TICKS) {
+                return Optional.of(new MaterializationResult(
+                        MaterializationResultType.SABLE_HOLDING_BODY_WAITING,
+                        false,
+                        "held_body_ownership_settling",
+                        "Sable is still the active owner of the holding body; delaying consume/load until ownership settles."
+                ));
+            }
             return Optional.empty();
+        }
+
+        private boolean shouldDelayHeldBodyConsumption(StoredBodyPointer pointer, long gameTime) {
+            return state == BodyLifecycleState.HELD_BY_SABLE
+                    && activePointer.filter(pointer::equals).isPresent()
+                    && gameTime - stateChangedAt < HELD_BY_SABLE_SETTLE_TICKS;
         }
 
         private Optional<MaterializationResult> tryBeginLoad(
@@ -770,6 +781,10 @@ public final class ShipMaterializationService {
                 long gameTime,
                 String reason
         ) {
+            if (state == BodyLifecycleState.HELD_BY_SABLE && activePointer.filter(pointer::equals).isPresent()) {
+                this.reason = reason;
+                return;
+            }
             transition(
                     request,
                     BodyLifecycleState.HELD_BY_SABLE,
@@ -850,6 +865,7 @@ public final class ShipMaterializationService {
             state = BodyLifecycleState.LIVE;
             activePointer = Optional.empty();
             controllerWaitUntil = -1L;
+            stateChangedAt = gameTime;
             this.reason = reason;
             boolean directoryUpdated = false;
             if (request.transponderId().isPresent()
@@ -905,6 +921,7 @@ public final class ShipMaterializationService {
             BodyLifecycleState previous = state;
             state = targetState;
             activePointer = pointer;
+            stateChangedAt = gameTime;
             this.reason = reason;
             if (targetState != BodyLifecycleState.LOADING) {
                 controllerWaitUntil = -1L;

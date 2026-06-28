@@ -53,6 +53,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.identity.Airship
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderSnapshot;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipScheduleMenu;
+import net.sprocketgames.create_aeronautics_automated_logistics.network.AirshipScheduleMenuActionPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.ReopenShipTransponderPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.UpdateAirshipSchedulePayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModItems;
@@ -1458,6 +1459,13 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             }
             return true;
         }
+        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT
+                && skipStopButtonVisible()
+                && inside(mx, my, 43, 196, 18, 18)) {
+            playUiButtonClick();
+            sendServerAction(AirshipScheduleMenu.ACTION_SKIP_CURRENT_STOP);
+            return true;
+        }
         if (inside(mx, my, 214, 196, 18, 18)) {
             playUiButtonClick();
             saveTitle();
@@ -1860,15 +1868,8 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     }
 
     private boolean canSkipStopFromUiState() {
-        if (this.minecraft == null || this.minecraft.player == null) {
-            return false;
-        }
-        if (this.menu.skipStopUiActive(this.minecraft.player)) {
-            return true;
-        }
-        return openedTransponder().map(ShipTransponderBlockEntity::runtimeStatus)
-                .map(status -> status == RouteStatus.WAITING || status == RouteStatus.HELD_FAULTED)
-                .orElse(false);
+        // The server owns skip eligibility. Client BE status can be stale or absent while the ship is moving.
+        return this.minecraft != null && this.minecraft.player != null;
     }
 
     private Optional<ShipTransponderBlockEntity> openedTransponder() {
@@ -2409,9 +2410,13 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     }
 
     private void sendServerAction(int actionId) {
-        if (this.minecraft != null && this.minecraft.gameMode != null) {
-            this.minecraft.gameMode.handleInventoryButtonClick(this.menu.containerId, actionId);
-        }
+        this.menu.originTransponderPos().ifPresent(transponderPos ->
+                PacketDistributor.sendToServer(new AirshipScheduleMenuActionPayload(
+                        this.menu.containerId,
+                        transponderPos,
+                        actionId
+                ))
+        );
     }
 
     private void playUiButtonClick() {

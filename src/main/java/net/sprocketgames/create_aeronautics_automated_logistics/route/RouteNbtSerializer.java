@@ -101,6 +101,7 @@ public final class RouteNbtSerializer {
                 stopTag.putInt("dockY", pos.getY());
                 stopTag.putInt("dockZ", pos.getZ());
             });
+            stop.stationId().ifPresent(id -> stopTag.putUUID("stationId", id));
             list.add(stopTag);
         }
         return list;
@@ -125,6 +126,7 @@ public final class RouteNbtSerializer {
                     pointIndex,
                     readWaitCondition(stopTag.getCompound("waitCondition")),
                     dockPos,
+                    stopTag.hasUUID("stationId") ? Optional.of(stopTag.getUUID("stationId")) : Optional.empty(),
                     stopTag.contains(CONDITION_GROUPS, Tag.TAG_LIST)
                             ? readConditionGroups(stopTag.getList(CONDITION_GROUPS, Tag.TAG_LIST))
                             : List.of()

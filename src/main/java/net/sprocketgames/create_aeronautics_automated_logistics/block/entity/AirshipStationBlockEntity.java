@@ -83,6 +83,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     private static final String GROUND_DOCK_POS = "groundDockPos";
     private static final String GROUND_DOCK_STATUS = "groundDockStatus";
     private static final String DOCK_OUTPUT_ACTIVE = "dockOutputActive";
+    private static final String DOCK_OUTPUT_OWNER = "dockOutputOwner";
     private static final String LINKED_CARGO = "linkedCargo";
     private static final String LINKED_CARGO_TOTAL = "linkedCargoTotal";
     private static final String LINKED_CARGO_VALID = "linkedCargoValid";
@@ -792,6 +793,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
                 : groundDockStatus;
         tag.putString(GROUND_DOCK_STATUS, savedDockStatus.name());
         tag.putBoolean(DOCK_OUTPUT_ACTIVE, dockOutputActive);
+        dockOutputOwner.ifPresent(routeId -> tag.putUUID(DOCK_OUTPUT_OWNER, routeId.value()));
         if (!linkedCargo.isEmpty()) {
             ListTag linkedCargoTag = new ListTag();
             for (LinkedCargoEntry entry : linkedCargo) {
@@ -910,6 +912,18 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
                 : Optional.empty();
         groundDockStatus = readDockStatus(tag);
         dockOutputActive = tag.getBoolean(DOCK_OUTPUT_ACTIVE);
+        dockOutputOwner = tag.hasUUID(DOCK_OUTPUT_OWNER)
+                ? Optional.of(new RouteId(tag.getUUID(DOCK_OUTPUT_OWNER)))
+                : Optional.empty();
+        if (dockOutputActive && dockOutputOwner.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugDockingWarn(
+                    "Station load cleared incomplete dock output state: stationId={} pos={} active={} reason=missing_persisted_owner",
+                    stationId,
+                    worldPosition,
+                    dockOutputActive
+            );
+            dockOutputActive = false;
+        }
         linkedCargo.clear();
         if (tag.contains(LINKED_CARGO, Tag.TAG_LIST)) {
             ListTag linkedCargoTag = tag.getList(LINKED_CARGO, Tag.TAG_COMPOUND);

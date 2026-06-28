@@ -54,6 +54,25 @@ public final class DockingConnectorDiscovery {
                 && secondDock.isLocked();
     }
 
+    public static boolean isExpectedPairExtended(ServerLevel level, BlockPos first, BlockPos second) {
+        Optional<DockingConnectorBlockEntity> firstConnector = dockingConnector(level, first);
+        Optional<DockingConnectorBlockEntity> secondConnector = dockingConnector(level, second);
+        if (firstConnector.isEmpty() || secondConnector.isEmpty()) {
+            return false;
+        }
+
+        DockingConnectorBlockEntity firstDock = firstConnector.get();
+        DockingConnectorBlockEntity secondDock = secondConnector.get();
+        boolean firstPointsAtSecond = second.equals(firstDock.otherConnectorPosition);
+        boolean secondPointsAtFirst = first.equals(secondDock.otherConnectorPosition);
+        return firstPointsAtSecond
+                && secondPointsAtFirst
+                && firstDock.isExtended()
+                && secondDock.isExtended()
+                && firstDock.isFeetExtended()
+                && secondDock.isFeetExtended();
+    }
+
     public static String lockDiagnostic(ServerLevel level, BlockPos first, BlockPos second) {
         Optional<DockingConnectorBlockEntity> firstConnector = dockingConnector(level, first);
         Optional<DockingConnectorBlockEntity> secondConnector = dockingConnector(level, second);
