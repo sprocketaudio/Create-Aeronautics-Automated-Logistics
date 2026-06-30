@@ -537,6 +537,60 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         return activePlayback != null && activePlayback.isWaiting();
     }
 
+    public boolean skipCurrentStop(ServerLevel level, RouteId routeId) {
+        Objects.requireNonNull(level, "level");
+        Objects.requireNonNull(routeId, "routeId");
+
+        ActivePlayback activePlayback = activePlaybacks.get(routeId);
+        if (activePlayback == null || !activePlayback.isWaiting()) {
+            return false;
+        }
+        boolean terminalScheduleStop = activePlayback.waitingStop()
+                .filter(stop -> activePlayback.route().playbackMode()
+                        == net.sprocketgames.create_aeronautics_automated_logistics.route.PlaybackMode.ONE_WAY)
+                .filter(stop -> stop.pointIndex() == activePlayback.route().points().size() - 1)
+                .filter(stop -> activePlayback.targetIndex() == stop.pointIndex())
+                .isPresent();
+        if (!terminalScheduleStop) {
+            CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                    "Refused schedule stop skip for playback {} because the current wait is not a terminal schedule stop",
+                    routeId.value()
+            );
+            return false;
+        }
+        Optional<AirshipStationBlockEntity> station = stationAt(level, activePlayback.stationPos());
+        if (station.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                    "Refused schedule stop skip for playback {} because its station context is unavailable",
+                    routeId.value()
+            );
+            return false;
+        }
+        VehicleController controller = activePlayback.controller(level);
+        if (!controller.isLoaded(level) || !controller.isAssembled()) {
+            CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                    "Refused schedule stop skip for playback {} because its live vehicle is unavailable",
+                    routeId.value()
+            );
+            return false;
+        }
+
+        PlaybackFailure failure = finishWaiting(level, station.get(), activePlayback, controller);
+        if (failure != null || !activePlayback.completed()) {
+            CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                    "Refused schedule stop skip for playback {} because the current wait is not a terminal schedule stop; failure={}",
+                    routeId.value(),
+                    failure
+            );
+            return false;
+        }
+        CreateAeronauticsAutomatedLogistics.debugPlayback(
+                "Completed terminal schedule wait through normal playback handoff after explicit skip: route={}",
+                routeId.value()
+        );
+        return true;
+    }
+
     public boolean holdPlayback(ServerLevel level, RouteId routeId, PlaybackFailure failure) {
         Objects.requireNonNull(level, "level");
         Objects.requireNonNull(routeId, "routeId");

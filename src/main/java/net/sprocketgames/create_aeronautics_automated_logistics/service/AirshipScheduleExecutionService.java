@@ -894,27 +894,14 @@ public class AirshipScheduleExecutionService {
         if (!canSkipCurrentStop(level, transponderId)) {
             return false;
         }
-
-        AutomatedLogisticsServices.PLAYBACK.stopPlayback(level, active.activeRouteId().get(), FailureReason.NONE);
-        clearRememberedStartFailure(transponderId);
-        ActiveAirshipSchedule advanced = active.advance();
-        if (advanced.isFinished()) {
-            if (!advanced.schedule().loop()) {
-                activeSchedules.remove(transponderId);
-                transponderAt(level, active.transponderPos()).ifPresent(transponder -> {
-                    transponder.setRuntimeStatus(RouteStatus.IDLE);
-                    syncTransponderClientState(transponder);
-                });
-                return true;
-            }
-            advanced = advanced.restart();
+        boolean skipped = AutomatedLogisticsServices.PLAYBACK.skipCurrentStop(
+                level,
+                active.activeRouteId().get()
+        );
+        if (skipped) {
+            clearRememberedStartFailure(transponderId);
         }
-        activeSchedules.put(transponderId, advanced);
-        transponderAt(level, advanced.transponderPos()).ifPresent(transponder -> {
-            transponder.setRuntimeStatus(RouteStatus.RUNNING);
-            syncTransponderClientState(transponder);
-        });
-        return true;
+        return skipped;
     }
 
     public void tickAll(MinecraftServer server) {
