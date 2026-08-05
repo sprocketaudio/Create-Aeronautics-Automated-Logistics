@@ -30,6 +30,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSch
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentResolver;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.TransportMode;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitCondition;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.TransponderPermissionService;
@@ -341,7 +342,7 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         if (schedule.entries().isEmpty()) {
             return schedule;
         }
-        List<AirshipStationSnapshot> stations = stationsForScheduleSelection(player);
+        List<AirshipStationSnapshot> stations = stationsForScheduleSelection(player, schedule);
         if (stations.isEmpty()) {
             actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.no_stations"));
             return schedule;
@@ -374,15 +375,31 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
         return schedule.withEntries(entries);
     }
 
-    private List<AirshipStationSnapshot> stationsForScheduleSelection(Player player) {
+    private List<AirshipStationSnapshot> stationsForScheduleSelection(Player player, AirshipSchedule schedule) {
+        List<AirshipStationSnapshot> stations;
         if (player instanceof ServerPlayer serverPlayer) {
             List<AirshipStationSnapshot> persisted = IdentityDirectorySavedData.get(serverPlayer.server)
                     .stationSnapshots(serverPlayer.level().dimension());
             if (!persisted.isEmpty()) {
-                return persisted;
+                stations = persisted;
+            } else {
+                stations = AirshipStationRegistry.knownStations(player.level().dimension());
             }
+        } else {
+            stations = AirshipStationRegistry.knownStations(player.level().dimension());
         }
-        return AirshipStationRegistry.knownStations(player.level().dimension());
+        Optional<TransportMode> scheduleMode = schedule.entries().stream()
+                .map(AirshipScheduleEntry::targetStationId)
+                .flatMap(Optional::stream)
+                .flatMap(stationId -> stations.stream()
+                        .filter(station -> station.stationId().equals(stationId))
+                        .map(AirshipStationSnapshot::transportMode))
+                .findFirst();
+        return scheduleMode
+                .map(mode -> stations.stream()
+                        .filter(station -> station.transportMode() == mode)
+                        .toList())
+                .orElse(stations);
     }
 
     private AirshipSchedule addAlternativeCondition(AirshipSchedule schedule) {
@@ -406,18 +423,22 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
             return schedule;
         }
 
+        Optional<TransportMode> transportMode = transportModeForStation(player, previous.targetStationId().get())
+                .or(() -> transportModeForStation(player, current.targetStationId().get()));
         Optional<RouteSegment> segment = player instanceof ServerPlayer serverPlayer
                 ? RouteSegmentResolver.newestFor(
                         serverPlayer.serverLevel(),
                         previous.targetStationId().get(),
                         current.targetStationId().get(),
-                        Optional.empty()
+                        Optional.empty(),
+                        transportMode.orElse(null)
                 )
                 : RouteSegmentResolver.newestFor(
                         previous.targetStationId().get(),
                         current.targetStationId().get(),
                         player.level().dimension(),
-                        Optional.empty()
+                        Optional.empty(),
+                        transportMode.orElse(null)
                 );
         if (segment.isEmpty()) {
             actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.airship_schedule.no_segment_to_pin"));
@@ -447,6 +468,15 @@ public class AirshipScheduleMenu extends AbstractContainerMenu {
                 .map(AirshipStationSnapshot::stationName)
                 .filter(name -> !name.isBlank())
                 .orElse(fallbackName);
+    }
+
+    private Optional<TransportMode> transportModeForStation(Player player, UUID stationId) {
+        if (player instanceof ServerPlayer serverPlayer) {
+            return IdentityDirectorySavedData.get(serverPlayer.server).station(stationId)
+                    .map(IdentityDirectorySavedData.PersistedStationIdentity::transportMode)
+                    .or(() -> AirshipStationRegistry.snapshot(stationId).map(AirshipStationSnapshot::transportMode));
+        }
+        return AirshipStationRegistry.snapshot(stationId).map(AirshipStationSnapshot::transportMode);
     }
 
     private AirshipSchedule select(AirshipSchedule schedule, int direction) {

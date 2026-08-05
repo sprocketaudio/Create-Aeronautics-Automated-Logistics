@@ -43,6 +43,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegme
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentResolver;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStop;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.TransportMode;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitCondition;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerRef;
@@ -209,7 +210,7 @@ public class AirshipScheduleExecutionService {
             syncTransponderClientState(transponder);
             return PlaybackOperationResult.failure(PlaybackFailure.CARGO_STORAGE_MISSING);
         }
-        if (!scheduleChainIsValid(player.serverLevel(), schedule, station.stationId(), transponderId)) {
+        if (!scheduleChainIsValid(player.serverLevel(), schedule, station.stationId(), transponderId, station.transportMode())) {
             station.setFailure(FailureReason.INVALID_ROUTE_DATA);
             transponder.setRuntimeStatus(RouteStatus.IDLE);
             rememberStartFailure(transponderId, PlaybackFailure.INVALID_ROUTE);
@@ -298,10 +299,12 @@ public class AirshipScheduleExecutionService {
         station.selectShip(new ShipTransponderSnapshot(
                 transponder.transponderId(),
                 transponder.shipName(),
+                transponder.transportMode(player.serverLevel()),
                 player.serverLevel().dimension(),
                 transponder.getBlockPos(),
                 transponder.runtimeShipId(),
                 transponder.controllerRef(player.serverLevel()),
+                transponder.ownerId(),
                 transponder.lastKnownPosition(),
                 transponder.lastSeenGameTime()
         ));
@@ -330,7 +333,7 @@ public class AirshipScheduleExecutionService {
             String currentStationName = station.stationName();
             BlockPos currentStationPos = station.getBlockPos().immutable();
 
-            if (scheduleChainIsValid(level, schedule, currentStationId, transponderId)) {
+            if (scheduleChainIsValid(level, schedule, currentStationId, transponderId, station.transportMode())) {
                 return Optional.of(new ResolvedStartContext(
                         station,
                         currentStationId,
@@ -349,7 +352,7 @@ public class AirshipScheduleExecutionService {
                     continue;
                 }
                 AirshipSchedule runtimeSchedule = schedule.withEntries(runtimeEntries);
-                if (scheduleChainIsValid(level, runtimeSchedule, currentStationId, transponderId)) {
+                if (scheduleChainIsValid(level, runtimeSchedule, currentStationId, transponderId, station.transportMode())) {
                     return Optional.of(new ResolvedStartContext(
                             station,
                             currentStationId,
@@ -471,7 +474,8 @@ public class AirshipScheduleExecutionService {
         if (pinnedStart.isPresent()) {
             return pinnedStart;
         }
-        return RouteSegmentResolver.endingAt(level, firstEntry.targetStationId().get(), Optional.of(transponderId))
+        Optional<TransportMode> transportMode = stationTransportMode(level, firstEntry.targetStationId().get());
+        return RouteSegmentResolver.endingAt(level, firstEntry.targetStationId().get(), Optional.of(transponderId), transportMode.orElse(null))
                 .map(RouteSegment::startStationId);
     }
 
@@ -499,9 +503,11 @@ public class AirshipScheduleExecutionService {
             ServerLevel level,
             AirshipSchedule schedule,
             UUID startStationId,
-            UUID transponderId
+            UUID transponderId,
+            TransportMode transportMode
     ) {
         UUID currentStationId = startStationId;
+        TransportMode mode = transportMode == null ? TransportMode.DEFAULT : transportMode;
         for (AirshipScheduleEntry entry : schedule.entries()) {
             if (entry.targetStationId().isEmpty()) {
                 return false;
@@ -513,7 +519,8 @@ public class AirshipScheduleExecutionService {
                     fromStationId,
                     toStationId,
                     entry.pinnedSegmentId(),
-                    transponderId
+                    transponderId,
+                    mode
             );
             if (segment.isEmpty()) {
                 return false;
@@ -815,7 +822,8 @@ public class AirshipScheduleExecutionService {
                 schedule.currentStationId(),
                 entry.targetStationId().get(),
                 entry.pinnedSegmentId(),
-                schedule.transponderId()
+                schedule.transponderId(),
+                transportModeForStation(level, schedule.currentStationId())
         );
         if (segment.isEmpty()) {
             return Optional.of(PlaybackFailure.INVALID_ROUTE);
@@ -828,14 +836,16 @@ public class AirshipScheduleExecutionService {
             UUID startStationId,
             UUID targetStationId,
             Optional<RouteSegmentId> pinnedSegmentId,
-            UUID transponderId
+            UUID transponderId,
+            TransportMode transportMode
     ) {
         return RouteSegmentResolver.scheduledSegment(
                 level,
                 startStationId,
                 targetStationId,
                 pinnedSegmentId,
-                transponderId
+                transponderId,
+                transportMode
         );
     }
 
@@ -1434,7 +1444,8 @@ public class AirshipScheduleExecutionService {
                 active.currentStationId(),
                 entry.targetStationId().get(),
                 entry.pinnedSegmentId(),
-                active.transponderId()
+                active.transponderId(),
+                transportModeForStation(level, active.currentStationId())
         );
 
         if (segment.isEmpty()) {
@@ -1499,6 +1510,7 @@ public class AirshipScheduleExecutionService {
         return new Route(
                 RouteId.create(),
                 active.currentStationName() + " -> " + entry.displayStationName(),
+                segment.transportMode(),
                 segment.dimension(),
                 segment.points(),
                 controllerRef,
@@ -1514,6 +1526,16 @@ public class AirshipScheduleExecutionService {
             return Optional.of(station);
         }
         return Optional.empty();
+    }
+
+    private TransportMode transportModeForStation(ServerLevel level, UUID stationId) {
+        return stationTransportMode(level, stationId).orElse(TransportMode.DEFAULT);
+    }
+
+    private Optional<TransportMode> stationTransportMode(ServerLevel level, UUID stationId) {
+        return IdentityDirectorySavedData.get(level.getServer()).station(stationId)
+                .map(IdentityDirectorySavedData.PersistedStationIdentity::transportMode)
+                .or(() -> AirshipStationRegistry.snapshot(stationId).map(snapshot -> snapshot.transportMode()));
     }
 
     private boolean dockLinksReadyForSchedule(

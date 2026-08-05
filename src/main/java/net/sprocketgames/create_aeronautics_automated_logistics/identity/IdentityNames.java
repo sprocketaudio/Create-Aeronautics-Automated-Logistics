@@ -13,7 +13,7 @@ public final class IdentityNames {
     }
 
     public static String defaultShipName(UUID id) {
-        return "Ship " + shortId(id);
+        return "Vehicle " + shortId(id);
     }
 
     public static String shortId(UUID id) {

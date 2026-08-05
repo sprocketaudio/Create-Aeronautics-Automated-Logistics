@@ -1,10 +1,12 @@
 # Create Aeronautics: Automated Logistics
 
-Build airship cargo routes that keep running when nobody is nearby.
+Build automated logistics routes that keep running when nobody is nearby.
 
-Create Aeronautics: Automated Logistics adds recorded route automation for Create Aeronautics airships. Fly each route yourself, install a schedule on the ship's **Transponder**, then let it repeat the journey between **Airship Stations**.
+Create Aeronautics: Automated Logistics adds recorded route automation for Create Aeronautics airships. Fly each route yourself, install a schedule on the vehicle's **Transponder**, then let it repeat the journey between **Airship Stations**.
 
 Ships can travel while unloaded, return for physical docking and cargo transfer, wait for conditions, and queue safely when another ship is using the same dock.
+
+Current builds also include experimental transport-gated **Simurail Station** compatibility for recorded train routes, using the same schedule and route-recording model without mixing airship and train station networks. That transport split is also part of the longer-term groundwork for future non-airship vehicle support.
 
 ## Main Features
 
@@ -14,6 +16,15 @@ Ships can travel while unloaded, return for physical docking and cargo transfer,
 - Build a separate route plan for each ship directly through its Transponder.
 - Preview individual routes, every route connected to a station, or routes filtered by ship.
 - Use distinct per-ship route colours to make larger networks easier to read.
+- Airship stations only see and control airship routes and airship-capable transponders.
+- The same transport-aware route/station split is intended to scale later to other supported vehicle types instead of staying airship-only forever.
+
+### Experimental Simurail Compatibility
+
+- Record and run train-only routes through **Simurail Stations**.
+- Train stations only see and control train routes and train-capable transponders.
+- Airship stations and Simurail stations stay separated by transport mode and cannot be linked interchangeably.
+- This is a compatibility layer built on recorded route playback; it is not rail-aware pathfinding, native dispatch logic, or a replacement for future Simurail-native automation.
 
 ### Unloaded Ship Travel
 
@@ -53,10 +64,24 @@ Airship Stations can manage the world chunks needed for unattended logistics:
 
 Docking stops require the station, dock, and any station-side cargo blocks to be in loaded chunks. Increase the interaction radius or provide external chunk loading when a station build extends beyond that area.
 
+### Map Integration
+
+- Named automated vehicles can appear on supported live maps.
+- FTB Chunks and JourneyMap integrations refresh markers on minimaps and fullscreen map views.
+- Marker state is synchronized from the server so long-running routes remain visible while automation is active.
+- Airships use a blimp icon and Simurail trains use a train icon across supported map integrations.
+- A placed **Logistics Terminal** provides an in-mod network view with stations, active vehicles, and recorded routes on a dark abstract logistics map.
+- The Logistics Terminal supports zoom, pan, route hover previews, and right-click tracking without depending on external map mods.
+
 ### Multiplayer And Diagnostics
 
 - Server-known ships and stations remain available to selection menus even when their chunks are not visible to the player opening the UI.
 - Ship and station ownership checks protect important controls.
+- Optional FTB Teams integration can allow same-team or allied players to control owned stations and transponders.
+- Station permissions now distinguish between **station use** and **station control**.
+- Use permission allows landing, queueing, docking, route browsing, and starting or stopping allowed vehicles.
+- Control permission additionally allows station-admin actions such as dock-link and cargo-link changes.
+- Active vehicle limits can be bucketed per owner or per FTB team, depending on configuration.
 - Runtime, recovery, route, and materialization commands help administrators inspect and recover problem setups.
 - Separate debug categories are available for playback, vehicles, docking, cargo, and UI synchronization.
 
@@ -69,6 +94,8 @@ Docking stops require the station, dock, and any station-side cargo blocks to be
 5. Build the ship's stop schedule through the Transponder.
 6. Link any required docks and cargo storage.
 7. Start the schedule from a valid station on its route.
+
+If you are using the current Simurail compatibility layer, use Simurail Stations instead of Airship Stations and keep the recorded network entirely within train-mode stations.
 
 ## Supported Cargo Storage
 
@@ -97,7 +124,8 @@ Compatibility notes:
 - Unloaded travel follows authoritative recorded-route progress; it is not continuous off-screen collision simulation.
 - Recovery may reposition a restored ship onto its authoritative route pose when necessary. Normal loaded travel still follows the recorded path physically.
 - Routes belong to their recorded ship and are not generic paths shared across unrelated ships.
-- Full live-control autopilot and ground-vehicle support are outside the current scope.
+- Simurail train support is a compatibility layer built on recorded route playback, not a replacement for future rail-aware routing.
+- Full live-control autopilot and broader ground-vehicle support are outside the current scope.
 
 ## Requirements
 
@@ -105,8 +133,13 @@ Compatibility notes:
 - NeoForge
 - Create
 - Create Aeronautics
-- Sable
-- Create Simulated for docking support
+
+## Optional Integrations
+
+- **FTB Teams:** team and ally use/control rules, plus team-scoped active vehicle limits
+- **FTB Chunks:** live automated vehicle markers on minimap and fullscreen map
+- **JourneyMap:** live automated vehicle markers on minimap and fullscreen map
+- **Simurail:** experimental train-only station compatibility using recorded-route playback
 
 ## Updating
 

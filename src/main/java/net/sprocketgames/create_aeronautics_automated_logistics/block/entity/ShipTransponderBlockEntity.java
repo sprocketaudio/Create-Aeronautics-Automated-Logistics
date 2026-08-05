@@ -32,6 +32,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronautic
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockDiscoveryResult;
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockLinkStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockingConnectorDiscovery;
+import net.sprocketgames.create_aeronautics_automated_logistics.dock.TrainDockingSupport;
 import net.sprocketgames.create_aeronautics_automated_logistics.cargo.CargoLinkDiscovery;
 import net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry;
 import net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoSummary;
@@ -50,11 +51,13 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSch
 import net.sprocketgames.create_aeronautics_automated_logistics.route.CargoWaitTarget;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteId;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.TransportMode;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoFailureContext;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.SableSubLevelVehicleController;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleControllerRef;
+import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleTransportModeResolver;
 
 public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvider {
     private static final String DATA_VERSION = "dataVersion";
@@ -121,7 +124,15 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     private boolean legacyScheduleSlotNeedsRewrite;
 
     public ShipTransponderBlockEntity(BlockPos pos, BlockState blockState) {
-        super(ModBlockEntities.SHIP_TRANSPONDER.get(), pos, blockState);
+        this(ModBlockEntities.SHIP_TRANSPONDER.get(), pos, blockState);
+    }
+
+    protected ShipTransponderBlockEntity(
+            net.minecraft.world.level.block.entity.BlockEntityType<?> type,
+            BlockPos pos,
+            BlockState blockState
+    ) {
+        super(type, pos, blockState);
     }
 
     public static void serverTick(Level level, BlockPos pos, BlockState state, ShipTransponderBlockEntity transponder) {
@@ -224,6 +235,14 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
 
     public Optional<UUID> runtimeShipId() {
         return runtimeShipId;
+    }
+
+    public TransportMode transportMode(ServerLevel level) {
+        return VehicleTransportModeResolver.resolve(
+                level,
+                resolveControllerRef(level),
+                ShipTransponderRegistry.snapshot(transponderId).map(ShipTransponderSnapshot::transportMode)
+        );
     }
 
     public Optional<UUID> ownerId() {
@@ -511,10 +530,14 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
 
     public Optional<VehicleControllerRef> controllerRef(ServerLevel level) {
         refreshRuntimeShip(level);
+        return resolveControllerRef(level);
+    }
+
+    private Optional<VehicleControllerRef> resolveControllerRef(ServerLevel level) {
         return runtimeShipId.flatMap(shipId -> SableSubLevelVehicleController.resolveControllerBlock(
                 level,
                 worldPosition,
-                ModBlocks.SHIP_TRANSPONDER.get()
+                controllerBlock()
         ).map(SableSubLevelVehicleController::ref));
     }
 
@@ -522,7 +545,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         Optional<SableSubLevelVehicleController> controller = SableSubLevelVehicleController.resolveControllerBlock(
                 level,
                 worldPosition,
-                ModBlocks.SHIP_TRANSPONDER.get()
+                controllerBlock()
         );
         Optional<UUID> previousId = runtimeShipId;
         Optional<Vec3> previousPosition = lastKnownPosition;
@@ -643,24 +666,75 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         if (runtimeShipId.isEmpty()) {
             return false;
         }
-        return SableSubLevelVehicleController.subLevelIdAt(level, dockPos)
+        if (SableSubLevelVehicleController.subLevelIdAt(level, dockPos)
                 .map(runtimeShipId.get()::equals)
-                .orElse(false);
+                .orElse(false)) {
+            return true;
+        }
+        if (transportMode(level) == TransportMode.TRAIN) {
+            return TrainDockingSupport.dockBelongsToConnectedTrain(level, runtimeShipId.get(), dockPos);
+        }
+        return false;
+    }
+
+    public List<BlockPos> discoverDockCandidates(ServerLevel level, int radius) {
+        refreshRuntimeShip(level);
+        if (transportMode(level) == TransportMode.TRAIN && runtimeShipId.isPresent()) {
+            return TrainDockingSupport.discoverConnectedTrainDocks(level, runtimeShipId.get(), worldPosition);
+        }
+        BlockPos min = worldPosition.offset(-radius, -radius, -radius);
+        BlockPos max = worldPosition.offset(radius, radius, radius);
+        return BlockPos.betweenClosedStream(min, max)
+                .map(BlockPos::immutable)
+                .filter(pos -> !pos.equals(worldPosition))
+                .filter(pos -> DockingConnectorDiscovery.isDock(level, pos))
+                .sorted(java.util.Comparator
+                        .comparingDouble((BlockPos pos) -> pos.distSqr(worldPosition))
+                        .thenComparingInt(BlockPos::getY)
+                        .thenComparingInt(BlockPos::getZ)
+                        .thenComparingInt(BlockPos::getX))
+                .toList();
+    }
+
+    public List<List<BlockPos>> discoverCargoCandidateGroups(ServerLevel level, int radius) {
+        refreshRuntimeShip(level);
+        if (transportMode(level) == TransportMode.TRAIN && runtimeShipId.isPresent()) {
+            return CargoLinkSupport.discoverSupportedGroups(
+                    level,
+                    TrainDockingSupport.discoverConnectedTrainPositions(level, runtimeShipId.get(), worldPosition),
+                    worldPosition
+            );
+        }
+        return CargoLinkSupport.discoverSupportedGroups(level, worldPosition, radius);
+    }
+
+    public List<LinkedCargoEntry> discoverLinkedCargoGroup(ServerLevel level, int radius, BlockPos clickedPos) {
+        refreshRuntimeShip(level);
+        if (transportMode(level) == TransportMode.TRAIN && runtimeShipId.isPresent()) {
+            return CargoLinkSupport.discoverLinkedGroup(
+                    level,
+                    TrainDockingSupport.discoverConnectedTrainPositions(level, runtimeShipId.get(), worldPosition),
+                    clickedPos
+            );
+        }
+        return CargoLinkSupport.discoverLinkedGroup(level, worldPosition, radius, clickedPos);
     }
 
     private ShipTransponderSnapshot snapshot(ServerLevel level) {
-        Optional<VehicleControllerRef> controllerRef = runtimeShipId.flatMap(shipId -> SableSubLevelVehicleController.resolveControllerBlock(
-                level,
-                worldPosition,
-                ModBlocks.SHIP_TRANSPONDER.get()
-        ).map(SableSubLevelVehicleController::ref));
+        Optional<VehicleControllerRef> controllerRef = resolveControllerRef(level);
         return new ShipTransponderSnapshot(
                 transponderId,
                 shipName(),
+                VehicleTransportModeResolver.resolve(
+                        level,
+                        controllerRef,
+                        ShipTransponderRegistry.snapshot(transponderId).map(ShipTransponderSnapshot::transportMode)
+                ),
                 level.dimension(),
                 worldPosition,
                 runtimeShipId,
                 controllerRef,
+                ownerId,
                 lastKnownPosition,
                 lastSeenGameTime
         );
@@ -1020,7 +1094,11 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         }
     }
 
-    private void notifyRedstoneNeighbors() {
+    protected net.minecraft.world.level.block.Block controllerBlock() {
+        return ModBlocks.SHIP_TRANSPONDER.get();
+    }
+
+    protected void notifyRedstoneNeighbors() {
         if (level == null || level.isClientSide) {
             return;
         }
@@ -1033,7 +1111,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
             return;
         }
         BlockState current = getBlockState();
-        if (!current.is(ModBlocks.SHIP_TRANSPONDER.get())) {
+        if (!(current.getBlock() instanceof net.sprocketgames.create_aeronautics_automated_logistics.block.ShipTransponderBlock)) {
             return;
         }
         boolean currentPowered = current.getValue(net.sprocketgames.create_aeronautics_automated_logistics.block.ShipTransponderBlock.POWERED);

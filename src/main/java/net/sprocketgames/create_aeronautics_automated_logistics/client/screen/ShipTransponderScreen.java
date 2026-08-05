@@ -30,13 +30,18 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
+import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AdvancedTransponderBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity;
+import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
+import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.AdvancedTransponderOverlayClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.CargoLinkPromptClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.DockLinkPromptClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.LogisticsClientOverlays;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.MenuActionBarClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.AirshipStationSnapshot;
+import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderRegistry;
+import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderSnapshot;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.ShipTransponderMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.CancelTransponderRouteRecordingPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.FinishTransponderRouteRecordingPayload;
@@ -44,6 +49,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.network.OpenSche
 import net.sprocketgames.create_aeronautics_automated_logistics.network.ShipTransponderMenuActionPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.StartTransponderRouteRecordingPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.UpdateIdentityNamePayload;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.TransportMode;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.StationPermissionService;
 import org.lwjgl.glfw.GLFW;
 
@@ -102,6 +108,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     private static final int FOOTER_ROUTE_BUTTON_X = 17;
     private static final int FOOTER_DOCK_BUTTON_X = 38;
     private static final int FOOTER_CARGO_BUTTON_X = 59;
+    private static final int FOOTER_OVERLAY_BUTTON_X = 80;
     private static final int ROUTE_SELECTION_WIDTH = 206;
     private static final int ROUTE_SELECTION_HEIGHT = 101;
     private static final int ROUTE_SELECTION_Y = 43;
@@ -133,6 +140,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     private IconButton previewButton;
     private IconButton dockPreviewButton;
     private IconButton cargoPreviewButton;
+    private IconButton overlayToggleButton;
     private IconButton scheduleEditButton;
     private MiniIconButton dockLinkButton;
     private MiniIconButton dockClearButton;
@@ -236,6 +244,12 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                 SHOW_CARGO_ICON,
                 this::toggleCargoPreview,
                 cargoPreviewTooltip()
+        );
+        overlayToggleButton = addIconButton(
+                this.leftPos + FOOTER_OVERLAY_BUTTON_X,
+                this.topPos + 154,
+                AllIcons.I_TARGET,
+                this::toggleAdvancedOverlay
         );
         addIconButton(
                 this.leftPos + 167,
@@ -408,6 +422,12 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                     && this.minecraft != null
                     && this.minecraft.player != null
                     && menu.hasLinkedCargo(this.minecraft.player);
+        }
+        if (overlayToggleButton != null) {
+            boolean advancedTransponder = isAdvancedTransponderMenu();
+            overlayToggleButton.visible = advancedTransponder;
+            overlayToggleButton.active = advancedTransponder;
+            overlayToggleButton.green = advancedTransponder && advancedOverlayEnabled();
         }
         if (dockLinkButton != null) {
             dockLinkButton.visible = !recordingMode;
@@ -664,6 +684,32 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         return button;
     }
 
+    private void toggleAdvancedOverlay() {
+        AdvancedTransponderOverlayClientState.toggle(menu.transponderPos());
+    }
+
+    private boolean advancedOverlayEnabled() {
+        return AdvancedTransponderOverlayClientState.isEnabled(menu.transponderPos());
+    }
+
+    private boolean isAdvancedTransponderMenu() {
+        return this.minecraft != null
+                && this.minecraft.level != null
+                && this.minecraft.level.getBlockEntity(menu.transponderPos()) instanceof AdvancedTransponderBlockEntity;
+    }
+
+    private List<Component> advancedOverlayTooltip() {
+        return List.of(
+                Component.translatable(
+                        advancedOverlayEnabled()
+                                ? "gui.create_aeronautics_automated_logistics.advanced_transponder.hide_overlay"
+                                : "gui.create_aeronautics_automated_logistics.advanced_transponder.show_overlay"
+                ),
+                Component.translatable("gui.create_aeronautics_automated_logistics.advanced_transponder.overlay.tooltip")
+                        .withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC)
+        );
+    }
+
     private void renderHeaderEditIcon(GuiGraphics guiGraphics) {
         if (nameBox == null || nameBox.isFocused()) {
             return;
@@ -789,11 +835,16 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             );
             return;
         }
+        if (overlayToggleButton != null && overlayToggleButton.isHovered() && isAdvancedTransponderMenu()) {
+            guiGraphics.renderTooltip(this.font, advancedOverlayTooltip(), java.util.Optional.empty(), mouseX, mouseY);
+            return;
+        }
         for (ButtonTooltip tooltip : buttonTooltips) {
             if (tooltip.button() == recordButton
                     || tooltip.button() == previewButton
                     || tooltip.button() == dockPreviewButton
                     || tooltip.button() == cargoPreviewButton
+                    || tooltip.button() == overlayToggleButton
                     || tooltip.button() == dockClearButton
                     || tooltip.button() == cargoClearButton) {
                 continue;
@@ -1147,9 +1198,22 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             return List.of();
         }
         boolean isOp = this.minecraft.player.hasPermissions(2);
-        return AirshipStationRegistry.knownStations(this.minecraft.level.dimension()).stream()
+        TransportMode transportMode = resolvedTransportMode();
+        return AirshipStationRegistry.knownStations(this.minecraft.level.dimension(), transportMode).stream()
                 .filter(station -> StationPermissionService.canControl(this.minecraft.player.getUUID(), isOp, station))
                 .toList();
+    }
+
+    private TransportMode resolvedTransportMode() {
+        if (this.minecraft == null || this.minecraft.level == null) {
+            return TransportMode.DEFAULT;
+        }
+        if (this.minecraft.level.getBlockEntity(this.menu.transponderPos()) instanceof ShipTransponderBlockEntity transponder) {
+            return ShipTransponderRegistry.snapshot(transponder.transponderId())
+                    .map(ShipTransponderSnapshot::transportMode)
+                    .orElse(TransportMode.DEFAULT);
+        }
+        return TransportMode.DEFAULT;
     }
 
     private void saveTransponderRecording() {

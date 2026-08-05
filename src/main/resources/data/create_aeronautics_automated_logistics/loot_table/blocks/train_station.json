@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "bonus_rolls": 0.0,
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "create_aeronautics_automated_logistics:train_station"
+        }
+      ],
+      "rolls": 1.0
+    }
+  ],
+  "random_sequence": "create_aeronautics_automated_logistics:blocks/train_station"
+}

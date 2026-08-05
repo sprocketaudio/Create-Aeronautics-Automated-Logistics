@@ -13,8 +13,9 @@ waits, cargo transfer, unload handling, and restore handling.
 - D5 wait and cargo integration: complete.
 - D6 unloaded and restore cutover: complete.
 
-The refactor is foundational work for 0.6. It should be completed before the
-Advanced Transponder starts depending on docking behavior.
+The refactor is foundational work for 0.6. It should be completed before any
+future Advanced Transponder or drive-mode feature starts depending on docking
+behavior.
 
 The first objective is behavior preservation. New docking or drive-mode
 features should not be added until the existing classic logistics behavior
@@ -728,10 +729,10 @@ The docking refactor is complete when:
 - Existing 0.5.1 gameplay behavior is preserved unless a separately documented
   0.6 behavior change is intentionally approved.
 
-## Relationship to Advanced Transponder Work
+## Relationship to Future Advanced Transponder Work
 
-The Advanced Transponder should integrate through the same coordinator but
-provide a different motion/control adapter.
+Any future Advanced Transponder should integrate through the same coordinator
+but provide a different motion/control adapter.
 
 It may influence approach, alignment, braking, and dock intent. It must not own
 reservations, connector truth, wait timers, cargo completion, restore policy, or

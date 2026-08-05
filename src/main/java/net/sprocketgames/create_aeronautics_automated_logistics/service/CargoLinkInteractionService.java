@@ -36,7 +36,7 @@ public final class CargoLinkInteractionService {
 
     public static void beginTransponderLink(ServerPlayer player, BlockPos transponderPos) {
         PENDING.put(player.getUUID(), new PendingCargoLink(LinkTarget.TRANSPONDER, transponderPos.immutable(), player.level().dimension(), player.level().getGameTime() + LINK_TIMEOUT_TICKS));
-        PacketDistributor.sendToPlayer(player, new SetCargoLinkPromptPayload(true, true, transponderPos.immutable(), discoverCandidateGroups(player, transponderPos)));
+        PacketDistributor.sendToPlayer(player, new SetCargoLinkPromptPayload(true, true, transponderPos.immutable(), discoverTransponderCandidateGroups(player, transponderPos)));
     }
 
     public static boolean hasPendingStationLink(ServerPlayer player, BlockPos stationPos) {
@@ -150,12 +150,17 @@ public final class CargoLinkInteractionService {
             AllSoundEvents.DENY.playOnServer(player.level(), transponderPos, 0.5f, 1.0f);
             return;
         }
-        if (!isWithinRange(transponderPos, clickedPos)) {
+        List<LinkedCargoEntry> entries = transponder.discoverLinkedCargoGroup(
+                player.serverLevel(),
+                CargoLinkDiscovery.DEFAULT_LINK_RADIUS,
+                clickedPos
+        );
+        if (entries.isEmpty()) {
             actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.cargo_link.transponder_invalid"));
             AllSoundEvents.DENY.playOnServer(player.level(), transponderPos, 0.5f, 1.0f);
             return;
         }
-        int added = addEntries(player, transponderPos, clickedPos, transponder::addLinkedCargoEntries);
+        int added = transponder.addLinkedCargoEntries(entries);
         if (added <= 0) {
             actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.cargo_link.already_linked"));
             return;
@@ -209,6 +214,13 @@ public final class CargoLinkInteractionService {
                         .thenComparingInt(group -> group.getFirst().getZ())
                         .thenComparingInt(group -> group.getFirst().getX()))
                 .toList();
+    }
+
+    private static List<List<BlockPos>> discoverTransponderCandidateGroups(ServerPlayer player, BlockPos transponderPos) {
+        if (player.serverLevel().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity transponder) {
+            return transponder.discoverCargoCandidateGroups(player.serverLevel(), CargoLinkDiscovery.DEFAULT_LINK_RADIUS);
+        }
+        return discoverCandidateGroups(player, transponderPos);
     }
 
     @FunctionalInterface

@@ -29,6 +29,11 @@ public final class DockHandshakeService {
     private final Map<UUID, LockClock> lockClocks = new HashMap<>();
     private final Map<UUID, Long> pendingDiagnosticTicks = new HashMap<>();
     private final Map<UUID, Long> transferDiagnosticTicks = new HashMap<>();
+    private final Map<UUID, Integer> lockTimeoutDeferrals = new HashMap<>();
+    private final Map<UUID, Integer> expectedPairResetAttempts = new HashMap<>();
+
+    private static final int MAX_EXPECTED_PAIR_LOCK_TIMEOUT_DEFERRALS = 1;
+    private static final int MAX_EXPECTED_PAIR_RESET_ATTEMPTS = 1;
 
     public DockHandshakeService(
             DockEndpointResolver endpoints,
@@ -83,6 +88,8 @@ public final class DockHandshakeService {
             lockClocks.remove(request.value());
             pendingDiagnosticTicks.remove(request.value());
             transferDiagnosticTicks.remove(request.value());
+            lockTimeoutDeferrals.remove(request.value());
+            expectedPairResetAttempts.remove(request.value());
         });
         ClearResult result = new ClearResult(
                 stationCleared,
@@ -198,6 +205,8 @@ public final class DockHandshakeService {
         lockClocks.clear();
         pendingDiagnosticTicks.clear();
         transferDiagnosticTicks.clear();
+        lockTimeoutDeferrals.clear();
+        expectedPairResetAttempts.clear();
         if (clockCount > 0) {
             CreateAeronauticsAutomatedLogistics.debugDocking(
                     "Dock handshake runtime reset: reason={} lockClocks={}",
@@ -290,6 +299,8 @@ public final class DockHandshakeService {
         if (expectedPairLocked) {
             lockClocks.remove(request.requestId().value());
             pendingDiagnosticTicks.remove(request.requestId().value());
+            lockTimeoutDeferrals.remove(request.requestId().value());
+            expectedPairResetAttempts.remove(request.requestId().value());
             logTransferDiagnostic(request, stationDock, shipDock);
             return HandshakeResult.locked(request.lockTimeoutTicksRemaining());
         }
@@ -302,25 +313,83 @@ public final class DockHandshakeService {
         int remaining = begin ? clock.remainingTicks() : clock.tick(System.nanoTime());
         if (remaining <= 0) {
             if (DockingConnectorDiscovery.isExpectedPairExtended(request.level(), stationDock, shipDock)) {
-                clock.reset(AutomatedLogisticsConfig.DOCK_LOCK_TIMEOUT_TICKS.get());
-                remaining = clock.remainingTicks();
-                CreateAeronauticsAutomatedLogistics.debugDocking(
-                        "Dock handshake lock timeout deferred because expected connector pair is still extended: request={} route={} stationDock={} shipDock={} resetTicks={} diagnostic={}",
+                int deferrals = lockTimeoutDeferrals.getOrDefault(request.requestId().value(), 0);
+                if (deferrals < MAX_EXPECTED_PAIR_LOCK_TIMEOUT_DEFERRALS) {
+                    lockTimeoutDeferrals.put(request.requestId().value(), deferrals + 1);
+                    clock.reset(AutomatedLogisticsConfig.DOCK_LOCK_TIMEOUT_TICKS.get());
+                    remaining = clock.remainingTicks();
+                    CreateAeronauticsAutomatedLogistics.debugDocking(
+                            "Dock handshake lock timeout deferred because expected connector pair is still extended: request={} route={} stationDock={} shipDock={} resetTicks={} deferral={}/{} diagnostic={}",
+                            request.requestId().value(),
+                            request.route().id().value(),
+                            stationDock.toShortString(),
+                            shipDock.toShortString(),
+                            remaining,
+                            deferrals + 1,
+                            MAX_EXPECTED_PAIR_LOCK_TIMEOUT_DEFERRALS,
+                            DockingConnectorDiscovery.lockDiagnostic(request.level(), stationDock, shipDock)
+                    );
+                    logPending(request, endpoint, remaining);
+                    return HandshakeResult.pending(
+                            HandshakeStatus.LOCK_PENDING,
+                            remaining,
+                            true,
+                            "expected_pair_extended_waiting_for_lock"
+                    );
+                }
+                CreateAeronauticsAutomatedLogistics.debugDockingWarn(
+                        "Dock handshake lock timeout exhausted while expected connector pair stayed extended without locking: request={} route={} stationDock={} shipDock={} deferrals={}/{} diagnostic={}",
                         request.requestId().value(),
                         request.route().id().value(),
                         stationDock.toShortString(),
                         shipDock.toShortString(),
-                        remaining,
+                        deferrals,
+                        MAX_EXPECTED_PAIR_LOCK_TIMEOUT_DEFERRALS,
                         DockingConnectorDiscovery.lockDiagnostic(request.level(), stationDock, shipDock)
                 );
-                logPending(request, endpoint, remaining);
-                return HandshakeResult.pending(
-                        HandshakeStatus.LOCK_PENDING,
-                        remaining,
-                        true,
-                        "expected_pair_extended_waiting_for_lock"
-                );
+                int resetAttempts = expectedPairResetAttempts.getOrDefault(request.requestId().value(), 0);
+                if (resetAttempts < MAX_EXPECTED_PAIR_RESET_ATTEMPTS) {
+                    expectedPairResetAttempts.put(request.requestId().value(), resetAttempts + 1);
+                    clearIfOwned(endpoint, request.route().id());
+                    ResetResult reset = resetExpectedPair(
+                            request.level(),
+                            request.station(),
+                            request.route(),
+                            "expected_pair_extended_lock_retry"
+                    );
+                    if (reset.applied()) {
+                        clock.reset(AutomatedLogisticsConfig.DOCK_LOCK_TIMEOUT_TICKS.get());
+                        remaining = clock.remainingTicks();
+                        CreateAeronauticsAutomatedLogistics.debugDocking(
+                                "Dock handshake reset stale extended connector pair for retry: request={} route={} stationDock={} shipDock={} retry={}/{} resetTicks={}",
+                                request.requestId().value(),
+                                request.route().id().value(),
+                                stationDock.toShortString(),
+                                shipDock.toShortString(),
+                                resetAttempts + 1,
+                                MAX_EXPECTED_PAIR_RESET_ATTEMPTS,
+                                remaining
+                        );
+                        return HandshakeResult.pending(
+                                HandshakeStatus.LOCK_PENDING,
+                                remaining,
+                                false,
+                                "expected_pair_reset_retry"
+                        );
+                    }
+                    CreateAeronauticsAutomatedLogistics.debugDockingWarn(
+                            "Dock handshake could not reset stale extended connector pair before failing: request={} route={} stationDock={} shipDock={} retry={}/{} failure={}",
+                            request.requestId().value(),
+                            request.route().id().value(),
+                            stationDock.toShortString(),
+                            shipDock.toShortString(),
+                            resetAttempts + 1,
+                            MAX_EXPECTED_PAIR_RESET_ATTEMPTS,
+                            reset.failure().map(Enum::name).orElse("unknown")
+                    );
+                }
             }
+            pauseLockClock(request.requestId());
             return HandshakeResult.failed(
                     HandshakeStatus.TIMED_OUT,
                     PlaybackFailure.DOCK_LOCK_FAILED,
@@ -335,6 +404,8 @@ public final class DockHandshakeService {
     private void pauseLockClock(DockRequestId requestId) {
         lockClocks.remove(requestId.value());
         pendingDiagnosticTicks.remove(requestId.value());
+        lockTimeoutDeferrals.remove(requestId.value());
+        expectedPairResetAttempts.remove(requestId.value());
     }
 
     private Optional<PlaybackFailure> claimOutputs(

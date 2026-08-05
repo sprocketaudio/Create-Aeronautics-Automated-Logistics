@@ -66,6 +66,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatu
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentId;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.TransportMode;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitCondition;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitDurationUnit;
@@ -1460,7 +1461,9 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             return true;
         }
         if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT
-                && skipStopButtonVisible()
+                && this.skipStopButton != null
+                && this.skipStopButton.visible
+                && this.skipStopButton.active
                 && inside(mx, my, 43, 196, 18, 18)) {
             playUiButtonClick();
             sendServerAction(AirshipScheduleMenu.ACTION_SKIP_CURRENT_STOP);
@@ -1868,8 +1871,11 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
     }
 
     private boolean canSkipStopFromUiState() {
-        // The server owns skip eligibility. Client BE status can be stale or absent while the ship is moving.
-        return this.minecraft != null && this.minecraft.player != null;
+        if (this.minecraft == null || this.minecraft.player == null) {
+            return false;
+        }
+        AirshipScheduleMenu scheduleMenu = this.menu;
+        return scheduleMenu.skipStopUiActive(this.minecraft.player);
     }
 
     private Optional<ShipTransponderBlockEntity> openedTransponder() {
@@ -3197,7 +3203,19 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
         if (this.minecraft == null || this.minecraft.level == null) {
             return List.of();
         }
-        return AirshipStationRegistry.knownStations(this.minecraft.level.dimension());
+        List<AirshipStationSnapshot> stations = AirshipStationRegistry.knownStations(this.minecraft.level.dimension());
+        Optional<TransportMode> scheduleMode = currentSchedule().entries().stream()
+                .map(AirshipScheduleEntry::targetStationId)
+                .flatMap(Optional::stream)
+                .flatMap(stationId -> stations.stream()
+                        .filter(station -> station.stationId().equals(stationId))
+                        .map(AirshipStationSnapshot::transportMode))
+                .findFirst();
+        return scheduleMode
+                .map(mode -> stations.stream()
+                        .filter(station -> station.transportMode() == mode)
+                        .toList())
+                .orElse(stations);
     }
 
     private List<ShipTransponderSnapshot> availableShips() {
@@ -3274,19 +3292,26 @@ public class AirshipScheduleScreen extends AbstractContainerScreen<AirshipSchedu
             return List.of();
         }
         Optional<UUID> startStationId = previousStationId(entryIndex);
+        Optional<TransportMode> transportMode = AirshipStationRegistry.snapshot(endStationId)
+                .map(AirshipStationSnapshot::transportMode)
+                .or(() -> startStationId.flatMap(id -> AirshipStationRegistry.snapshot(id).map(AirshipStationSnapshot::transportMode)));
         if (startStationId.isPresent()) {
             return RouteSegmentRegistry.matching(
                     startStationId.get(),
                     endStationId,
                     this.minecraft.level.dimension(),
                     selectedTransponderId
-            );
+            ).stream()
+                    .filter(segment -> transportMode.map(mode -> segment.transportMode() == mode).orElse(true))
+                    .toList();
         }
         return RouteSegmentRegistry.endingAt(
                 endStationId,
                 this.minecraft.level.dimension(),
                 selectedTransponderId
-        );
+        ).stream()
+                .filter(segment -> transportMode.map(mode -> segment.transportMode() == mode).orElse(true))
+                .toList();
     }
 
     private Optional<UUID> previousStationId(int entryIndex) {

@@ -1,0 +1,13 @@
+{
+  "priority": 2500,
+  "title": {
+    "text": {
+      "translate": "create_aeronautics_automated_logistics.simulated_section.automated_logistics"
+    },
+    "background": "#aa183741",
+    "color": "#ffe1f3f6",
+    "secondary_color": "#ff8fc8b5"
+  },
+  "sprite": "simulated:default_banner",
+  "only_animate_on_hover": true
+}

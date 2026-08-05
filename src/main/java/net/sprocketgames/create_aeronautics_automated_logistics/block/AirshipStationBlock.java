@@ -37,8 +37,10 @@ import net.sprocketgames.create_aeronautics_automated_logistics.identity.Identit
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipStationMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.ShipTransponderMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.TransportMode;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.StationPermissionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteBlockBreakProtection;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.StationChunkLoadingService;
@@ -61,6 +63,10 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
         registerDefaultState(defaultBlockState()
                 .setValue(POWERED, false)
                 .setValue(FACING, net.minecraft.core.Direction.NORTH));
+    }
+
+    public TransportMode transportMode() {
+        return TransportMode.AIRSHIP;
     }
 
     @Override
@@ -133,6 +139,9 @@ public class AirshipStationBlock extends BaseEntityBlock implements EntityBlock 
             return InteractionResult.CONSUME;
         }
         if (!(level.getBlockEntity(pos) instanceof AirshipStationBlockEntity station)) {
+            return InteractionResult.CONSUME;
+        }
+        if (!StationPermissionService.ensureCanUse(serverPlayer, station)) {
             return InteractionResult.CONSUME;
         }
         CreateAeronauticsAutomatedLogistics.debugUi(

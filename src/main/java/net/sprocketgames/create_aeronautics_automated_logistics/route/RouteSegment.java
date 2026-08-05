@@ -10,6 +10,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleC
 
 public record RouteSegment(
         RouteSegmentId id,
+        TransportMode transportMode,
         UUID startStationId,
         String startStationName,
         UUID endStationId,
@@ -24,8 +25,44 @@ public record RouteSegment(
         long createdEpochMillis,
         Optional<UUID> ownerId
 ) {
+    public RouteSegment(
+            RouteSegmentId id,
+            UUID startStationId,
+            String startStationName,
+            UUID endStationId,
+            String endStationName,
+            UUID transponderId,
+            String shipName,
+            Optional<UUID> runtimeShipId,
+            ResourceKey<Level> dimension,
+            List<RoutePoint> points,
+            VehicleControllerRef controllerRef,
+            long createdGameTime,
+            long createdEpochMillis,
+            Optional<UUID> ownerId
+    ) {
+        this(
+                id,
+                TransportMode.DEFAULT,
+                startStationId,
+                startStationName,
+                endStationId,
+                endStationName,
+                transponderId,
+                shipName,
+                runtimeShipId,
+                dimension,
+                points,
+                controllerRef,
+                createdGameTime,
+                createdEpochMillis,
+                ownerId
+        );
+    }
+
     public RouteSegment {
         Objects.requireNonNull(id, "id");
+        transportMode = transportMode == null ? TransportMode.DEFAULT : transportMode;
         Objects.requireNonNull(startStationId, "startStationId");
         Objects.requireNonNull(startStationName, "startStationName");
         Objects.requireNonNull(endStationId, "endStationId");

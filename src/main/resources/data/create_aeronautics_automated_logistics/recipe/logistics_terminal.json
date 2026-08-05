@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "MMM",
+    "ADA",
+    "SSS"
+  ],
+  "key": {
+    "M": {
+      "item": "minecraft:map"
+    },
+    "A": {
+      "item": "create:andesite_casing"
+    },
+    "D": {
+      "item": "create:display_board"
+    },
+    "S": {
+      "item": "create:sturdy_sheet"
+    }
+  },
+  "result": {
+    "count": 1,
+    "id": "create_aeronautics_automated_logistics:logistics_terminal"
+  }
+}

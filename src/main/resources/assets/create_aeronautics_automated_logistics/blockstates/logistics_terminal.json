@@ -1,0 +1,7 @@
+{
+	"variants": {
+		"": {
+			"model": "create_aeronautics_automated_logistics:block/logistics_terminal"
+		}
+	}
+}

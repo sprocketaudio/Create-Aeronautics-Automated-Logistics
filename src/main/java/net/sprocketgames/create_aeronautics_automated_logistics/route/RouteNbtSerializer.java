@@ -51,6 +51,7 @@ public final class RouteNbtSerializer {
         CompoundTag tag = new CompoundTag();
         tag.putUUID(ID, route.id().value());
         tag.putString(NAME, route.name());
+        TransportMode.write(tag, route.transportMode());
         tag.putString(DIMENSION, route.dimension().location().toString());
         tag.put(POINTS, writePoints(route.points()));
         tag.put(STOPS, writeStops(route.stops()));
@@ -65,6 +66,7 @@ public final class RouteNbtSerializer {
         try {
             RouteId id = new RouteId(tag.getUUID(ID));
             String name = tag.getString(NAME);
+            TransportMode transportMode = TransportMode.read(tag);
             ResourceKey<Level> dimension = readDimension(tag.getString(DIMENSION));
             List<RoutePoint> points = readPoints(tag.getList(POINTS, Tag.TAG_COMPOUND), dimension);
             List<RouteStop> stops = tag.contains(STOPS, Tag.TAG_LIST)
@@ -79,7 +81,7 @@ public final class RouteNbtSerializer {
                 return Optional.empty();
             }
 
-            return Optional.of(new Route(id, name, dimension, points, controller, playbackMode, status, stops, ownerId));
+            return Optional.of(new Route(id, name, transportMode, dimension, points, controller, playbackMode, status, stops, ownerId));
         } catch (IllegalArgumentException ignored) {
             return Optional.empty();
         }

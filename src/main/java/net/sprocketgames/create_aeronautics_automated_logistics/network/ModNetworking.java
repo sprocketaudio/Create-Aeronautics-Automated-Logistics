@@ -90,6 +90,31 @@ public final class ModNetworking {
                 SyncIdentityDirectoryPayload::handle
         );
         registrar.playToClient(
+                SyncLogisticsTerminalRoutesPayload.TYPE,
+                SyncLogisticsTerminalRoutesPayload.STREAM_CODEC,
+                SyncLogisticsTerminalRoutesPayload::handle
+        );
+        registrar.playToClient(
+                SyncShipMapMarkersPayload.TYPE,
+                SyncShipMapMarkersPayload.STREAM_CODEC,
+                SyncShipMapMarkersPayload::handle
+        );
+        registrar.playToClient(
+                SyncLogisticsTerminalPreviewRoutesPayload.TYPE,
+                SyncLogisticsTerminalPreviewRoutesPayload.STREAM_CODEC,
+                SyncLogisticsTerminalPreviewRoutesPayload::handle
+        );
+        registrar.playToClient(
+                SyncLogisticsTerminalPreviewMarkersPayload.TYPE,
+                SyncLogisticsTerminalPreviewMarkersPayload.STREAM_CODEC,
+                SyncLogisticsTerminalPreviewMarkersPayload::handle
+        );
+        registrar.playToClient(
+                SyncVisibleLogisticsTerminalPreviewsPayload.TYPE,
+                SyncVisibleLogisticsTerminalPreviewsPayload.STREAM_CODEC,
+                SyncVisibleLogisticsTerminalPreviewsPayload::handle
+        );
+        registrar.playToClient(
                 SetAutomatedShipVisualStatePayload.TYPE,
                 SetAutomatedShipVisualStatePayload.STREAM_CODEC,
                 SetAutomatedShipVisualStatePayload::handle

@@ -57,6 +57,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegme
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentId;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStop;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.TransportMode;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipStationMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
@@ -206,6 +207,13 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         return stationName;
     }
 
+    public TransportMode transportMode() {
+        if (getBlockState().getBlock() instanceof AirshipStationBlock stationBlock) {
+            return stationBlock.transportMode();
+        }
+        return TransportMode.DEFAULT;
+    }
+
     public void setStationName(String stationName) {
         String sanitized = IdentityNames.sanitize(stationName);
         this.stationName = sanitized.isBlank() ? IdentityNames.defaultStationName(stationId) : sanitized;
@@ -260,6 +268,9 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     }
 
     public void selectShip(ShipTransponderSnapshot snapshot) {
+        if (snapshot.transportMode() != transportMode()) {
+            return;
+        }
         selectedTransponderId = Optional.of(snapshot.transponderId());
         selectedShipName = snapshot.shipName();
         failureReason = Optional.empty();
@@ -948,6 +959,18 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         failureReason = readFailureReason(tag);
         recordedRoute = readRecordedRoute(tag);
         status = readStatus(tag, recordedRoute, failureReason);
+        if (dockOutputActive && !liveSync) {
+            CreateAeronauticsAutomatedLogistics.debugDockingWarn(
+                    "Station load cleared stale dock output state: stationId={} pos={} active={} owner={} status={} reason=non_live_saved_state",
+                    stationId,
+                    worldPosition,
+                    dockOutputActive,
+                    dockOutputOwner.map(RouteId::value).map(Object::toString).orElse("none"),
+                    status
+            );
+            dockOutputActive = false;
+            dockOutputOwner = Optional.empty();
+        }
         registerLoadedSnapshot();
     }
 
@@ -1013,6 +1036,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         return new AirshipStationSnapshot(
                 stationId,
                 stationName(),
+                transportMode(),
                 level.dimension(),
                 worldPosition,
                 ownerId,

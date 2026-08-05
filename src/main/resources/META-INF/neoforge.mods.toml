@@ -46,12 +46,15 @@ credits="Built for Create Aeronautics logistics automation." #optional
 
 # The description text for the mod (multi line!) (#mandatory)
 description='''
-Recorded airship routes, unloaded travel, docking queues, cargo transfer, and schedule automation for Create Aeronautics.
+Recorded airship routes, optional Simurail train station support, unloaded travel, docking queues, cargo transfer, and schedule automation for Create Aeronautics.
 '''
 
 # The [[mixins]] block allows you to declare your mixin config to FML so that it gets loaded.
 [[mixins]]
 config="${mod_id}.mixins.json"
+
+[[mixins]]
+config="${mod_id}.simurail.mixins.json"
 
 # The [[accessTransformers]] block allows you to declare where your AT file is.
 # If this block is omitted, a fallback attempt will be made to load an AT from META-INF/accesstransformer.cfg
@@ -105,20 +108,28 @@ config="${mod_id}.mixins.json"
     side="BOTH"
 
 [[dependencies.${mod_id}]]
-    modId="sable"
-    type="required"
-    reason="Automated Logistics resolves and controls assembled Aeronautics ships through Sable sublevels."
-    versionRange="${sable_version_range}"
+    modId="ftbteams"
+    type="optional"
+    reason="FTB Teams enables shared team and allied control of logistics assets."
+    versionRange="[0,)"
     ordering="AFTER"
     side="BOTH"
 
 [[dependencies.${mod_id}]]
-    modId="simulated"
-    type="required"
-    reason="Automated Logistics uses Create Simulated docking connectors for docking-aware waits and cargo inactivity checks."
-    versionRange="${simulated_version_range}"
+    modId="ftbchunks"
+    type="optional"
+    reason="FTB Chunks displays named automated ship markers on its map and minimap."
+    versionRange="[0,)"
     ordering="AFTER"
-    side="BOTH"
+    side="CLIENT"
+
+[[dependencies.${mod_id}]]
+    modId="journeymap"
+    type="optional"
+    reason="JourneyMap displays named automated ship markers on its map and minimap."
+    versionRange="[0,)"
+    ordering="AFTER"
+    side="CLIENT"
 
 # Features are specific properties of the game environment, that you may want to declare you require. This example declares
 # that your mod requires GL version 3.2 or higher. Other features will be added. They are side aware so declaring this won't

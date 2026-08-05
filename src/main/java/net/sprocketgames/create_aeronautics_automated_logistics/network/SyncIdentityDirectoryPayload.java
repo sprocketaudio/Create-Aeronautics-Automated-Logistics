@@ -23,6 +23,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.identity.Airship
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityDirectorySavedData;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderSnapshot;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.TransportMode;
 
 public record SyncIdentityDirectoryPayload(
         List<AirshipStationSnapshot> stations,
@@ -98,6 +99,7 @@ public record SyncIdentityDirectoryPayload(
     private static void writeStation(RegistryFriendlyByteBuf buffer, AirshipStationSnapshot station) {
         buffer.writeUUID(station.stationId());
         buffer.writeUtf(station.stationName(), 64);
+        buffer.writeEnum(station.transportMode());
         buffer.writeResourceLocation(station.dimension().location());
         buffer.writeBlockPos(station.stationPos());
         buffer.writeBoolean(station.ownerId().isPresent());
@@ -108,20 +110,24 @@ public record SyncIdentityDirectoryPayload(
     private static AirshipStationSnapshot readStation(RegistryFriendlyByteBuf buffer) {
         UUID stationId = buffer.readUUID();
         String stationName = buffer.readUtf(64);
+        TransportMode transportMode = buffer.readEnum(TransportMode.class);
         ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, buffer.readResourceLocation());
         BlockPos stationPos = buffer.readBlockPos();
         Optional<UUID> ownerId = buffer.readBoolean() ? Optional.of(buffer.readUUID()) : Optional.empty();
         String ownerName = buffer.readUtf(64);
-        return new AirshipStationSnapshot(stationId, stationName, dimension, stationPos, ownerId, ownerName);
+        return new AirshipStationSnapshot(stationId, stationName, transportMode, dimension, stationPos, ownerId, ownerName);
     }
 
     private static void writeShip(RegistryFriendlyByteBuf buffer, ShipTransponderSnapshot ship) {
         buffer.writeUUID(ship.transponderId());
         buffer.writeUtf(ship.shipName(), 64);
+        buffer.writeEnum(ship.transportMode());
         buffer.writeResourceLocation(ship.dimension().location());
         buffer.writeBlockPos(ship.transponderPos());
         buffer.writeBoolean(ship.runtimeShipId().isPresent());
         ship.runtimeShipId().ifPresent(buffer::writeUUID);
+        buffer.writeBoolean(ship.ownerId().isPresent());
+        ship.ownerId().ifPresent(buffer::writeUUID);
         buffer.writeBoolean(ship.lastKnownPosition().isPresent());
         ship.lastKnownPosition().ifPresent(position -> {
             buffer.writeDouble(position.x);
@@ -134,9 +140,11 @@ public record SyncIdentityDirectoryPayload(
     private static ShipTransponderSnapshot readShip(RegistryFriendlyByteBuf buffer) {
         UUID transponderId = buffer.readUUID();
         String shipName = buffer.readUtf(64);
+        TransportMode transportMode = buffer.readEnum(TransportMode.class);
         ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, buffer.readResourceLocation());
         BlockPos transponderPos = buffer.readBlockPos();
         Optional<UUID> runtimeShipId = buffer.readBoolean() ? Optional.of(buffer.readUUID()) : Optional.empty();
+        Optional<UUID> ownerId = buffer.readBoolean() ? Optional.of(buffer.readUUID()) : Optional.empty();
         Optional<Vec3> lastKnownPosition = buffer.readBoolean()
                 ? Optional.of(new Vec3(buffer.readDouble(), buffer.readDouble(), buffer.readDouble()))
                 : Optional.empty();
@@ -144,10 +152,12 @@ public record SyncIdentityDirectoryPayload(
         return new ShipTransponderSnapshot(
                 transponderId,
                 shipName,
+                transportMode,
                 dimension,
                 transponderPos,
                 runtimeShipId,
                 Optional.empty(),
+                ownerId,
                 lastKnownPosition,
                 lastSeenGameTime
         );
@@ -181,10 +191,12 @@ public record SyncIdentityDirectoryPayload(
         return new ShipTransponderSnapshot(
                 incoming.transponderId(),
                 incoming.shipName(),
+                incoming.transportMode(),
                 incoming.dimension(),
                 incoming.transponderPos(),
                 current.runtimeShipId().or(incoming::runtimeShipId),
                 current.controllerRef().or(incoming::controllerRef),
+                incoming.ownerId().or(current::ownerId),
                 current.lastKnownPosition().or(incoming::lastKnownPosition),
                 Math.max(current.lastSeenGameTime(), incoming.lastSeenGameTime())
         );

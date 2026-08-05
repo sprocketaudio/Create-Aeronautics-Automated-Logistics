@@ -18,15 +18,17 @@ public final class RouteSegmentResolver {
             ResourceKey<Level> dimension,
             Optional<UUID> transponderId
     ) {
+        TransportMode transportMode = station.transportMode();
         if (station.getLevel() instanceof ServerLevel serverLevel) {
-            return mergeDirectoryAndRegistry(
+            return filterTransportMode(mergeDirectoryAndRegistry(
                     RouteSegmentDirectorySavedData.matchingAnyStart(serverLevel.getServer(), station.stationId(), dimension, transponderId),
                     RouteSegmentRegistry.matchingAnyStart(station.stationId(), dimension, transponderId)
-            );
+            ), transportMode);
         }
         return RouteSegmentRegistry.matchingAnyStart(station.stationId(), dimension, transponderId).stream()
                 .filter(segment -> segment.dimension().equals(dimension))
                 .filter(segment -> segment.startStationId().equals(station.stationId()))
+                .filter(segment -> matchesTransportMode(segment, transportMode))
                 .sorted(newestFirst())
                 .toList();
     }
@@ -36,15 +38,18 @@ public final class RouteSegmentResolver {
             ResourceKey<Level> dimension,
             Optional<UUID> transponderId
     ) {
+        TransportMode transportMode = station.transportMode();
         if (station.getLevel() instanceof ServerLevel serverLevel) {
             List<RouteSegment> directorySegments = RouteSegmentDirectorySavedData.connectedToStation(serverLevel.getServer(), station.stationId()).stream()
                     .filter(segment -> segment.dimension().equals(dimension))
                     .filter(segment -> transponderId.map(id -> id.equals(segment.transponderId())).orElse(true))
+                    .filter(segment -> matchesTransportMode(segment, transportMode))
                     .sorted(newestFirst())
                     .toList();
             List<RouteSegment> registrySegments = RouteSegmentRegistry.connectedToStation(station.stationId()).stream()
                     .filter(segment -> segment.dimension().equals(dimension))
                     .filter(segment -> transponderId.map(id -> id.equals(segment.transponderId())).orElse(true))
+                    .filter(segment -> matchesTransportMode(segment, transportMode))
                     .sorted(newestFirst())
                     .toList();
             return mergeDirectoryAndRegistry(directorySegments, registrySegments);
@@ -52,6 +57,7 @@ public final class RouteSegmentResolver {
         return RouteSegmentRegistry.connectedToStation(station.stationId()).stream()
                 .filter(segment -> segment.dimension().equals(dimension))
                 .filter(segment -> transponderId.map(id -> id.equals(segment.transponderId())).orElse(true))
+                .filter(segment -> matchesTransportMode(segment, transportMode))
                 .sorted(newestFirst())
                 .toList();
     }
@@ -77,9 +83,30 @@ public final class RouteSegmentResolver {
             UUID endStationId,
             Optional<UUID> transponderId
     ) {
+        return endingAt(level, endStationId, transponderId, Optional.empty());
+    }
+
+    public static Optional<RouteSegment> endingAt(
+            ServerLevel level,
+            UUID endStationId,
+            Optional<UUID> transponderId,
+            TransportMode transportMode
+    ) {
+        return endingAt(level, endStationId, transponderId, Optional.ofNullable(transportMode));
+    }
+
+    private static Optional<RouteSegment> endingAt(
+            ServerLevel level,
+            UUID endStationId,
+            Optional<UUID> transponderId,
+            Optional<TransportMode> transportMode
+    ) {
         return RouteSegmentDirectorySavedData.endingAt(level.getServer(), endStationId, level.dimension(), transponderId).stream()
+                .filter(segment -> matchesTransportMode(segment, transportMode))
                 .findFirst()
-                .or(() -> RouteSegmentRegistry.endingAt(endStationId, level.dimension(), transponderId).stream().findFirst());
+                .or(() -> RouteSegmentRegistry.endingAt(endStationId, level.dimension(), transponderId).stream()
+                        .filter(segment -> matchesTransportMode(segment, transportMode))
+                        .findFirst());
     }
 
     public static Optional<RouteSegment> newestFor(
@@ -88,6 +115,26 @@ public final class RouteSegmentResolver {
             UUID targetStationId,
             Optional<UUID> transponderId
     ) {
+        return newestFor(level, startStationId, targetStationId, transponderId, Optional.empty());
+    }
+
+    public static Optional<RouteSegment> newestFor(
+            ServerLevel level,
+            UUID startStationId,
+            UUID targetStationId,
+            Optional<UUID> transponderId,
+            TransportMode transportMode
+    ) {
+        return newestFor(level, startStationId, targetStationId, transponderId, Optional.ofNullable(transportMode));
+    }
+
+    private static Optional<RouteSegment> newestFor(
+            ServerLevel level,
+            UUID startStationId,
+            UUID targetStationId,
+            Optional<UUID> transponderId,
+            Optional<TransportMode> transportMode
+    ) {
         return RouteSegmentDirectorySavedData.matching(
                         level.getServer(),
                         startStationId,
@@ -95,9 +142,11 @@ public final class RouteSegmentResolver {
                         level.dimension(),
                         transponderId
                 ).stream()
+                .filter(segment -> matchesTransportMode(segment, transportMode))
                 .findFirst()
                 .or(() -> RouteSegmentRegistry.matching(startStationId, targetStationId, level.dimension(), transponderId)
                         .stream()
+                        .filter(segment -> matchesTransportMode(segment, transportMode))
                         .findFirst());
     }
 
@@ -108,13 +157,36 @@ public final class RouteSegmentResolver {
             Optional<RouteSegmentId> pinnedSegmentId,
             UUID transponderId
     ) {
+        return scheduledSegment(level, startStationId, targetStationId, pinnedSegmentId, transponderId, Optional.empty());
+    }
+
+    public static Optional<RouteSegment> scheduledSegment(
+            ServerLevel level,
+            UUID startStationId,
+            UUID targetStationId,
+            Optional<RouteSegmentId> pinnedSegmentId,
+            UUID transponderId,
+            TransportMode transportMode
+    ) {
+        return scheduledSegment(level, startStationId, targetStationId, pinnedSegmentId, transponderId, Optional.ofNullable(transportMode));
+    }
+
+    private static Optional<RouteSegment> scheduledSegment(
+            ServerLevel level,
+            UUID startStationId,
+            UUID targetStationId,
+            Optional<RouteSegmentId> pinnedSegmentId,
+            UUID transponderId,
+            Optional<TransportMode> transportMode
+    ) {
         return pinnedSegmentId
                 .flatMap(segmentId -> byId(level, segmentId))
                 .filter(candidate -> candidate.startStationId().equals(startStationId))
                 .filter(candidate -> candidate.endStationId().equals(targetStationId))
                 .filter(candidate -> candidate.dimension().equals(level.dimension()))
                 .filter(candidate -> candidate.transponderId().equals(transponderId))
-                .or(() -> newestFor(level, startStationId, targetStationId, Optional.of(transponderId)));
+                .filter(candidate -> matchesTransportMode(candidate, transportMode))
+                .or(() -> newestFor(level, startStationId, targetStationId, Optional.of(transponderId), transportMode));
     }
 
     public static Optional<RouteSegment> newestFor(
@@ -124,6 +196,18 @@ public final class RouteSegmentResolver {
             Optional<UUID> transponderId
     ) {
         return RouteSegmentRegistry.matching(startStationId, targetStationId, dimension, transponderId).stream().findFirst();
+    }
+
+    public static Optional<RouteSegment> newestFor(
+            UUID startStationId,
+            UUID targetStationId,
+            ResourceKey<Level> dimension,
+            Optional<UUID> transponderId,
+            TransportMode transportMode
+    ) {
+        return RouteSegmentRegistry.matching(startStationId, targetStationId, dimension, transponderId).stream()
+                .filter(segment -> matchesTransportMode(segment, transportMode))
+                .findFirst();
     }
 
     private static Comparator<RouteSegment> newestFirst() {
@@ -143,5 +227,21 @@ public final class RouteSegmentResolver {
         return merged.values().stream()
                 .sorted(newestFirst())
                 .toList();
+    }
+
+    private static List<RouteSegment> filterTransportMode(List<RouteSegment> segments, TransportMode transportMode) {
+        return segments.stream()
+                .filter(segment -> matchesTransportMode(segment, transportMode))
+                .toList();
+    }
+
+    private static boolean matchesTransportMode(RouteSegment segment, TransportMode transportMode) {
+        return matchesTransportMode(segment, Optional.ofNullable(transportMode));
+    }
+
+    private static boolean matchesTransportMode(RouteSegment segment, Optional<TransportMode> transportMode) {
+        return transportMode
+                .map(mode -> segment.transportMode() == mode)
+                .orElse(true);
     }
 }

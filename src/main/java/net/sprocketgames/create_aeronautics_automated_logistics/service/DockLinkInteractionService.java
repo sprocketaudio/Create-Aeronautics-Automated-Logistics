@@ -38,7 +38,12 @@ public final class DockLinkInteractionService {
 
     public static void beginTransponderLink(ServerPlayer player, BlockPos transponderPos) {
         PENDING.put(player.getUUID(), new PendingDockLink(LinkTarget.TRANSPONDER, transponderPos.immutable(), player.level().dimension(), player.level().getGameTime() + LINK_TIMEOUT_TICKS));
-        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(true, true, transponderPos.immutable(), discoverCandidates(player, transponderPos, SHIP_LINK_PROMPT_SEARCH_RADIUS)));
+        PacketDistributor.sendToPlayer(player, new SetDockLinkPromptPayload(
+                true,
+                true,
+                transponderPos.immutable(),
+                discoverTransponderCandidates(player, transponderPos, SHIP_LINK_PROMPT_SEARCH_RADIUS)
+        ));
     }
 
     public static void clearPending(ServerPlayer player) {
@@ -190,8 +195,15 @@ public final class DockLinkInteractionService {
                         .comparingDouble((BlockPos pos) -> pos.distSqr(ownerPos))
                         .thenComparingInt(BlockPos::getY)
                         .thenComparingInt(BlockPos::getZ)
-                        .thenComparingInt(BlockPos::getX))
+                .thenComparingInt(BlockPos::getX))
                 .toList();
+    }
+
+    private static List<BlockPos> discoverTransponderCandidates(ServerPlayer player, BlockPos transponderPos, int radius) {
+        if (player.serverLevel().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity transponder) {
+            return transponder.discoverDockCandidates(player.serverLevel(), radius);
+        }
+        return discoverCandidates(player, transponderPos, radius);
     }
 
     private enum LinkTarget {

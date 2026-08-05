@@ -18,6 +18,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.WeakHashMap;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -82,7 +83,7 @@ public class SableSubLevelVehicleController implements VehicleController {
         }
 
         Optional<SableSubLevelVehicleController> resolved = controllerRef.controllerPos()
-                .flatMap(controllerPos -> findSubLevelContainingController(level, controllerPos, ModBlocks.SHIP_TRANSPONDER.get(), false));
+                .flatMap(controllerPos -> findSubLevelContainingAnyTransponderController(level, controllerPos, false));
         if (resolved.isEmpty() && shouldLogResolveMiss(level, controllerRef)) {
             CreateAeronauticsAutomatedLogistics.debugVehicle(
                     "Could not resolve linked Sable controller from {}. storedLocalController={} vehicleId={}",
@@ -118,14 +119,14 @@ public class SableSubLevelVehicleController implements VehicleController {
         }
 
         BlockPos candidate = storedPos.get();
-        if (isInsideStorageBounds(subLevel, candidate) && hasControllerBlockAtStorage(subLevel, candidate, ModBlocks.SHIP_TRANSPONDER.get())) {
+        if (isInsideStorageBounds(subLevel, candidate) && hasAnyTransponderControllerBlockAtStorage(subLevel, candidate)) {
             return Optional.of(candidate);
         }
 
         Vec3 worldAnchor = Vec3.atCenterOf(candidate);
         Vec3 localAnchor = subLevel.logicalPose().transformPositionInverse(worldAnchor);
         BlockPos localPos = BlockPos.containing(localAnchor.x, localAnchor.y, localAnchor.z);
-        if (isInsideStorageBounds(subLevel, localPos) && hasControllerBlockAtStorage(subLevel, localPos, ModBlocks.SHIP_TRANSPONDER.get())) {
+        if (isInsideStorageBounds(subLevel, localPos) && hasAnyTransponderControllerBlockAtStorage(subLevel, localPos)) {
             return Optional.of(localPos);
         }
 
@@ -147,7 +148,7 @@ public class SableSubLevelVehicleController implements VehicleController {
     ) {
         return findSubLevel(level, subLevelId)
                 .filter(subLevel -> isInsideStorageBounds(subLevel, localControllerPos))
-                .filter(subLevel -> hasControllerBlockAtStorage(subLevel, localControllerPos, ModBlocks.SHIP_TRANSPONDER.get()))
+                .filter(subLevel -> hasAnyTransponderControllerBlockAtStorage(subLevel, localControllerPos))
                 .map(subLevel -> new SableSubLevelVehicleController(
                         subLevel,
                         localControllerPos.immutable(),
@@ -166,6 +167,20 @@ public class SableSubLevelVehicleController implements VehicleController {
                 .filter(pos -> level.getBlockEntity(pos) instanceof DockingConnectorBlockEntity)
                 .sorted(Comparator.comparingDouble(pos -> pos.distSqr(localControllerPos)))
                 .toList();
+    }
+
+    public boolean hasBlockFromNamespaceNearController(String namespace, int radius) {
+        ServerLevel level = subLevel.getLevel();
+        return BlockPos.betweenClosedStream(
+                        localControllerPos.offset(-radius, -radius, -radius),
+                        localControllerPos.offset(radius, radius, radius)
+                )
+                .map(BlockPos::immutable)
+                .filter(pos -> isInsideStorageBounds(subLevel, pos))
+                .filter(pos -> level.hasChunk(pos.getX() >> 4, pos.getZ() >> 4))
+                .map(level::getBlockState)
+                .map(state -> BuiltInRegistries.BLOCK.getKey(state.getBlock()))
+                .anyMatch(blockId -> blockId != null && namespace.equals(blockId.getNamespace()));
     }
 
     @Override
@@ -253,18 +268,18 @@ public class SableSubLevelVehicleController implements VehicleController {
     }
 
     @Override
-    public VehicleMotionResult moveToward(ServerLevel level, Vec3 targetPosition, double maxSpeedMultiplier) {
-        return moveToward(level, targetPosition, maxSpeedMultiplier, 1.2D);
+    public VehicleMotionResult moveToward(ServerLevel level, Vec3 targetPosition, double maxSpeedBlocksPerSecond) {
+        return moveToward(level, targetPosition, maxSpeedBlocksPerSecond, 1.2D);
     }
 
     @Override
     public VehicleMotionResult moveToward(
             ServerLevel level,
             Vec3 targetPosition,
-            double maxSpeedMultiplier,
+            double maxSpeedBlocksPerSecond,
             double desiredSpeedBlocksPerTick
     ) {
-        return moveToward(level, targetPosition, Optional.empty(), maxSpeedMultiplier, desiredSpeedBlocksPerTick);
+        return moveToward(level, targetPosition, Optional.empty(), maxSpeedBlocksPerSecond, desiredSpeedBlocksPerTick);
     }
 
     @Override
@@ -272,7 +287,7 @@ public class SableSubLevelVehicleController implements VehicleController {
             ServerLevel level,
             Vec3 targetPosition,
             Optional<RouteRotation> targetRotation,
-            double maxSpeedMultiplier,
+            double maxSpeedBlocksPerSecond,
             double desiredSpeedBlocksPerTick
     ) {
         if (!isLoaded(level) || !isAssembled()) {
@@ -292,11 +307,11 @@ public class SableSubLevelVehicleController implements VehicleController {
         }
 
         double requestedSpeedBlocksPerSecond = Math.max(0.0D, desiredSpeedBlocksPerTick * TICKS_PER_SECOND);
-        double maxSpeedBlocksPerSecond = requestedSpeedBlocksPerSecond * maxSpeedMultiplier;
+        double cappedSpeedBlocksPerSecond = Math.min(requestedSpeedBlocksPerSecond, Math.max(0.0D, maxSpeedBlocksPerSecond));
         double maxOneTickTravelSpeed = distance * TICKS_PER_SECOND;
         Vec3 desiredVelocity = distance < 1.0E-6D
                 ? Vec3.ZERO
-                : delta.normalize().scale(Math.min(maxOneTickTravelSpeed, maxSpeedBlocksPerSecond));
+                : delta.normalize().scale(Math.min(maxOneTickTravelSpeed, cappedSpeedBlocksPerSecond));
         Vector3dc currentVelocity = handle.getLinearVelocity(new Vector3d());
         Vector3dc currentAngularVelocity = handle.getAngularVelocity(new Vector3d());
         Vector3d velocityChange = new Vector3d(
@@ -551,6 +566,28 @@ public class SableSubLevelVehicleController implements VehicleController {
         return Optional.empty();
     }
 
+    private static Optional<SableSubLevelVehicleController> findSubLevelContainingAnyTransponderController(
+            ServerLevel level,
+            BlockPos controllerPos,
+            boolean logFailures
+    ) {
+        Optional<SableSubLevelVehicleController> normal = findSubLevelContainingController(
+                level,
+                controllerPos,
+                ModBlocks.SHIP_TRANSPONDER.get(),
+                logFailures
+        );
+        if (normal.isPresent()) {
+            return normal;
+        }
+        return findSubLevelContainingController(
+                level,
+                controllerPos,
+                ModBlocks.ADVANCED_TRANSPONDER.get(),
+                logFailures
+        );
+    }
+
     private static Optional<SableSubLevelVehicleController> findBySableHelper(
             ServerLevel level,
             BlockPos controllerPos,
@@ -648,6 +685,11 @@ public class SableSubLevelVehicleController implements VehicleController {
             );
             return false;
         }
+    }
+
+    private static boolean hasAnyTransponderControllerBlockAtStorage(ServerSubLevel subLevel, BlockPos pos) {
+        return hasControllerBlockAtStorage(subLevel, pos, ModBlocks.SHIP_TRANSPONDER.get())
+                || hasControllerBlockAtStorage(subLevel, pos, ModBlocks.ADVANCED_TRANSPONDER.get());
     }
 
     private record ResolveMissLogKey(

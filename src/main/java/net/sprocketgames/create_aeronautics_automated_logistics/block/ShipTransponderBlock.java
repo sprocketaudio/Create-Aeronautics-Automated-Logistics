@@ -47,6 +47,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoLin
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RouteBlockBreakProtection;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.ScheduleRouteCleanup;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.TransponderPermissionService;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
@@ -143,6 +144,9 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
         }
         if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer
                 && level.getBlockEntity(pos) instanceof ShipTransponderBlockEntity transponder) {
+            if (!TransponderPermissionService.ensureCanControl(serverPlayer, transponder)) {
+                return InteractionResult.CONSUME;
+            }
             if (!serverPlayer.isSpectator() && DockLinkInteractionService.cancelPendingIfSource(serverPlayer, pos)) {
                 return InteractionResult.CONSUME;
             }

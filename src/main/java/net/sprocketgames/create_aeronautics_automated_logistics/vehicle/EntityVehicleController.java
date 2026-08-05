@@ -87,15 +87,15 @@ public class EntityVehicleController implements VehicleController {
     }
 
     @Override
-    public VehicleMotionResult moveToward(ServerLevel level, Vec3 targetPosition, double maxSpeedMultiplier) {
-        return moveToward(level, targetPosition, maxSpeedMultiplier, 0.35D);
+    public VehicleMotionResult moveToward(ServerLevel level, Vec3 targetPosition, double maxSpeedBlocksPerSecond) {
+        return moveToward(level, targetPosition, maxSpeedBlocksPerSecond, 0.35D);
     }
 
     @Override
     public VehicleMotionResult moveToward(
             ServerLevel level,
             Vec3 targetPosition,
-            double maxSpeedMultiplier,
+            double maxSpeedBlocksPerSecond,
             double desiredSpeedBlocksPerTick
     ) {
         if (!isLoaded(level) || !entity.isAlive()) {
@@ -108,7 +108,8 @@ public class EntityVehicleController implements VehicleController {
             return VehicleMotionResult.moved();
         }
 
-        double maxSpeed = Math.max(0.0D, desiredSpeedBlocksPerTick * maxSpeedMultiplier);
+        double requestedSpeedBlocksPerSecond = Math.max(0.0D, desiredSpeedBlocksPerTick * 20.0D);
+        double maxSpeed = Math.max(0.0D, Math.min(requestedSpeedBlocksPerSecond, maxSpeedBlocksPerSecond) / 20.0D);
         Vec3 velocity = delta.normalize().scale(Math.min(distance, maxSpeed));
         entity.setDeltaMovement(velocity);
         entity.hasImpulse = true;

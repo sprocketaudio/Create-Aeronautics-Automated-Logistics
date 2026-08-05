@@ -68,8 +68,14 @@ def localTomsStorageJarPath = resolveLocalJarPath('toms_storage_jar', 'TOMS_STOR
 def localSophisticatedStorageJarPath = resolveLocalJarPath('sophisticated_storage_jar', 'SOPHISTICATED_STORAGE_JAR')
 def localFunctionalStorageJarPath = resolveLocalJarPath('functional_storage_jar', 'FUNCTIONAL_STORAGE_JAR')
 def localSophisticatedBackpacksJarPath = resolveLocalJarPath('sophisticated_backpacks_jar', 'SOPHISTICATED_BACKPACKS_JAR')
+def localArchitecturyJarPath = resolveLocalJarPath('architectury_jar', 'ARCHITECTURY_JAR')
+def localFtbLibraryJarPath = resolveLocalJarPath('ftb_library_jar', 'FTB_LIBRARY_JAR')
+def localFtbTeamsJarPath = resolveLocalJarPath('ftb_teams_jar', 'FTB_TEAMS_JAR')
+def localFtbChunksJarPath = resolveLocalJarPath('ftb_chunks_jar', 'FTB_CHUNKS_JAR')
+def localCommonNetworkingJarPath = resolveLocalJarPath('common_networking_jar', 'COMMON_NETWORKING_JAR')
+def localJourneyMapJarPath = resolveLocalJarPath('journeymap_jar', 'JOURNEYMAP_JAR')
 def localDownloadDevStorageMods = resolveLocalBoolean('download_dev_storage_mods', 'DOWNLOAD_DEV_STORAGE_MODS')
-def localModJarPaths = [localAeronauticsJarPath, localSableJarPath].findAll { !it.isBlank() }
+def localModJarPaths = [localAeronauticsJarPath, localSableJarPath, localJourneyMapJarPath].findAll { !it.isBlank() }
 def devCompatProjects = [
         'refined-storage',
         'ae2',
@@ -84,7 +90,7 @@ def devCompatProjects = [
 
 def modrinthApiBase = 'https://api.modrinth.com/v2'
 def devCompatModsDir = layout.buildDirectory.dir('dev-compat-mods')
-def devCompatRunDirs = ['client', 'server', 'gameTestServer'].collect { runName ->
+def devCompatRunDirs = ['client', 'clientTwo', 'server', 'gameTestServer'].collect { runName ->
     layout.projectDirectory.dir("run/${runName}/mods")
 }
 
@@ -240,6 +246,12 @@ runs {
         systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
     }
 
+    clientTwo {
+        runType 'client'
+        systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        arguments.addAll '--username', 'TeamMate'
+    }
+
     server {
         systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         argument '--nogui'
@@ -302,7 +314,13 @@ dependencies {
             localTomsStorageJarPath,
             localSophisticatedStorageJarPath,
             localFunctionalStorageJarPath,
-            localSophisticatedBackpacksJarPath
+            localSophisticatedBackpacksJarPath,
+            localArchitecturyJarPath,
+            localFtbLibraryJarPath,
+            localFtbTeamsJarPath,
+            localFtbChunksJarPath,
+            localCommonNetworkingJarPath,
+            localJourneyMapJarPath
     ].findAll { !it.isBlank() }.each { jarPath ->
         compileOnly files(jarPath)
         localRuntime files(jarPath)
