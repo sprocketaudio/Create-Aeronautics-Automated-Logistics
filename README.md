@@ -2,9 +2,9 @@
 
 Build automated logistics routes that keep running when nobody is nearby.
 
-Create Aeronautics: Automated Logistics adds recorded route automation for Create Aeronautics airships. Fly each route yourself, install a schedule on the vehicle's **Transponder**, then let it repeat the journey between **Airship Stations**.
+Create Aeronautics: Automated Logistics adds recorded route automation for Create Aeronautics airships, with experimental Simurail train compatibility. Fly each route yourself, install a schedule on the vehicle's **Transponder**, then let it repeat the journey between compatible stations.
 
-Ships can travel while unloaded, return for physical docking and cargo transfer, wait for conditions, and queue safely when another ship is using the same dock.
+Vehicles can travel while unloaded, return for physical docking and cargo transfer, wait for conditions, and queue safely when another vehicle is using the same dock.
 
 Current builds also include experimental transport-gated **Simurail Station** compatibility for recorded train routes, using the same schedule and route-recording model without mixing airship and train station networks. That transport split is also part of the longer-term groundwork for future non-airship vehicle support.
 
@@ -28,17 +28,17 @@ Current builds also include experimental transport-gated **Simurail Station** co
 
 ### Unloaded Ship Travel
 
-- Active ships continue progressing along recorded routes while players are elsewhere.
+- Active vehicles continue progressing along recorded routes while players are elsewhere.
 - Route progress and schedules survive chunk unloads, game reloads, and server restarts.
 - Ships return to the world near stops so docking, cargo movement, and other physical interactions still happen normally.
-- Runtime failures remain visible and recoverable instead of silently deleting the ship or its route data.
+- Runtime failures remain visible and recoverable instead of silently deleting the vehicle or its route data.
 
 ### Docking And Queues
 
-- Link a Create Simulated dock to each station and ship.
-- Transfer items and fluids through the physical ship and dock setup.
-- Shared docks use arrival-order reservations so approaching ships do not all converge on the same dock.
-- Waiting ships hold at a configurable clearance distance until the previous ship has departed safely.
+- Link a Create Simulated dock to each station and vehicle.
+- Transfer items and fluids through the physical vehicle and dock setup.
+- Shared docks use arrival-order reservations so approaching vehicles do not all converge on the same dock.
+- Waiting vehicles hold at a configurable clearance distance until the previous vehicle has departed safely.
 
 ### Schedules And Conditions
 
@@ -75,8 +75,8 @@ Docking stops require the station, dock, and any station-side cargo blocks to be
 
 ### Multiplayer And Diagnostics
 
-- Server-known ships and stations remain available to selection menus even when their chunks are not visible to the player opening the UI.
-- Ship and station ownership checks protect important controls.
+- Server-known vehicles and stations remain available to selection menus even when their chunks are not visible to the player opening the UI.
+- Vehicle and station ownership checks protect important controls.
 - Optional FTB Teams integration can allow same-team or allied players to control owned stations and transponders.
 - Station permissions now distinguish between **station use** and **station control**.
 - Use permission allows landing, queueing, docking, route browsing, and starting or stopping allowed vehicles.
@@ -114,16 +114,16 @@ Cargo linking supports item and fluid storage from:
 
 Compatibility notes:
 
-- Functional Storage is not currently recommended on moving ships.
-- Storage Drawers work on ships, but some interaction and display behavior remains limited by underlying Sable compatibility.
+- Functional Storage is not currently recommended on moving vehicles.
+- Storage Drawers work on moving vehicles, but some interaction and display behavior remains limited by underlying Sable compatibility.
 
 ## Important Behavior And Limits
 
 - Routes use the path you recorded. There is no pathfinding, obstacle avoidance, or automatic rerouting.
-- Loaded ships move physically and can collide with terrain or other ships if a route is unsafe.
+- Loaded vehicles move physically and can collide with terrain or other vehicles if a route is unsafe.
 - Unloaded travel follows authoritative recorded-route progress; it is not continuous off-screen collision simulation.
-- Recovery may reposition a restored ship onto its authoritative route pose when necessary. Normal loaded travel still follows the recorded path physically.
-- Routes belong to their recorded ship and are not generic paths shared across unrelated ships.
+- Recovery may reposition a restored vehicle onto its authoritative route pose when necessary. Normal loaded travel still follows the recorded path physically.
+- Routes belong to their recorded vehicle and are not generic paths shared across unrelated vehicles.
 - Simurail train support is a compatibility layer built on recorded route playback, not a replacement for future rail-aware routing.
 - Full live-control autopilot and broader ground-vehicle support are outside the current scope.
 
@@ -143,7 +143,7 @@ Compatibility notes:
 
 ## Updating
 
-Existing worlds from version 0.4.5 are supported. Back up important worlds before updating, particularly when ships have active schedules.
+Existing worlds from version 0.4.5 are supported. Back up important worlds before updating, particularly when vehicles have active schedules.
 
 ## About
 
