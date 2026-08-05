@@ -37,6 +37,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipStat
 import net.sprocketgames.create_aeronautics_automated_logistics.network.AirshipStationMenuActionPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.PreviewStationRoutesPayload;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.UpdateIdentityNamePayload;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.TransportMode;
 import org.lwjgl.glfw.GLFW;
 
 public class AirshipStationScreen extends AbstractContainerScreen<AirshipStationMenu> {
@@ -343,7 +344,8 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         }
         if (dockClearButton != null && this.minecraft != null && this.minecraft.player != null) {
             boolean pendingDockLink = DockLinkPromptClientState.isPendingForStation(this.menu.stationPos());
-            dockClearButton.active = pendingDockLink || menu.hasLinkedDock(this.minecraft.player);
+            dockClearButton.active = menu.canControlStationLocally(this.minecraft.player)
+                    && (pendingDockLink || menu.hasLinkedDock(this.minecraft.player));
             dockClearButton.green = pendingDockLink;
         }
         if (cargoPreviewButton != null && this.minecraft != null && this.minecraft.player != null) {
@@ -356,7 +358,8 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         }
         if (cargoClearButton != null && this.minecraft != null && this.minecraft.player != null) {
             boolean pendingCargoLink = CargoLinkPromptClientState.isPendingForStation(this.menu.stationPos());
-            cargoClearButton.active = pendingCargoLink || menu.hasLinkedCargo(this.minecraft.player);
+            cargoClearButton.active = menu.canControlStationLocally(this.minecraft.player)
+                    && (pendingCargoLink || menu.hasLinkedCargo(this.minecraft.player));
             cargoClearButton.green = pendingCargoLink;
         }
         previewedRouteIds.clear();
@@ -372,14 +375,20 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
                 stopButton.active = menu.canStopSelectedShip(this.minecraft.player);
             }
             if (routesButton != null) {
-                routesButton.active = menu.canControlStationLocally(this.minecraft.player);
+                routesButton.active = menu.canUseStationLocally(this.minecraft.player);
                 routesButton.green = !previewedRouteIds.isEmpty();
+            }
+            if (dockLinkButton != null) {
+                dockLinkButton.active = menu.canControlStationLocally(this.minecraft.player);
+            }
+            if (cargoLinkButton != null) {
+                cargoLinkButton.active = menu.canControlStationLocally(this.minecraft.player);
             }
         }
         super.render(guiGraphics, mouseX, mouseY, partialTick);
         renderHeaderEditIcon(guiGraphics);
         int headerY = this.topPos + 21;
-        guiGraphics.drawCenteredString(this.font, "Station Control", this.leftPos + PANEL_WIDTH / 2, headerY, 0xFFE7D7B3);
+        guiGraphics.drawCenteredString(this.font, stationControlTitle(), this.leftPos + PANEL_WIDTH / 2, headerY, 0xFFE7D7B3);
         renderShipSelector(guiGraphics, mouseX, mouseY);
         renderMainStatus(guiGraphics);
         if (shipDropdownOpen) {
@@ -424,7 +433,7 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         int y = this.topPos + SHIP_BOX_Y;
         guiGraphics.drawString(
                 this.font,
-                Component.literal("SHIP"),
+                Component.literal(vehicleSelectorLabel()),
                 x,
                 y - 12,
                 SECTION_HEADER_COLOR,
@@ -711,7 +720,7 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
             guiGraphics.fill(x + 5, ry, x + width - 5, ry + ROUTES_ROW_FILL_H, rowColor);
             guiGraphics.drawString(
                     this.font,
-                    shortText(Component.literal("Ship: " + route.shipName()), 158),
+                    shortText(Component.literal("Vehicle: " + route.shipName()), 158),
                     x + 9,
                     ry + ROUTES_ROW_TEXT_1_Y,
                     0xFFFFFFFF,
@@ -889,7 +898,7 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
 
     private List<RouteFilterOption> routeFilterOptions() {
         List<RouteFilterOption> options = new ArrayList<>();
-        options.add(new RouteFilterOption(null, "All Ships"));
+        options.add(new RouteFilterOption(null, allRoutesFilterLabel().getString()));
         if (this.minecraft == null || this.minecraft.player == null) {
             return options;
         }
@@ -905,6 +914,14 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
         }
         labels.forEach((transponderId, label) -> options.add(new RouteFilterOption(transponderId, label)));
         return options;
+    }
+
+    private Component allRoutesFilterLabel() {
+        return Component.translatable(
+                isTrainStation()
+                        ? "gui.create_aeronautics_automated_logistics.airship_station.routes_filter.all_trains"
+                        : "gui.create_aeronautics_automated_logistics.airship_station.routes_filter.all_ships"
+        );
     }
 
     private void clampRouteFilterState(List<RouteFilterOption> options) {
@@ -1092,7 +1109,10 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && nameBox != null && !nameBox.isFocused()
                 && mouseY > this.topPos && mouseY < this.topPos + 18
-                && mouseX > this.leftPos && mouseX < this.leftPos + PANEL_WIDTH) {
+                && mouseX > this.leftPos && mouseX < this.leftPos + PANEL_WIDTH
+                && this.minecraft != null
+                && this.minecraft.player != null
+                && menu.canControlStationLocally(this.minecraft.player)) {
             nameBox.setFocused(true);
             nameBox.setHighlightPos(0);
             setFocused(nameBox);
@@ -1499,16 +1519,22 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     private List<Component> landingAreaTooltip() {
         return List.of(
                 landingAreaTooltipTitle(),
-                Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.landing_area.tooltip")
+                Component.translatable(isTrainStation()
+                        ? "gui.create_aeronautics_automated_logistics.train_station.range.tooltip"
+                        : "gui.create_aeronautics_automated_logistics.airship_station.landing_area.tooltip")
                         .withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC)
         );
     }
 
     private Component landingAreaTooltipTitle() {
         return Component.translatable(
-                LogisticsClientOverlays.isLandingAreaVisible(this.menu.stationPos())
+                isTrainStation()
+                        ? (LogisticsClientOverlays.isLandingAreaVisible(this.menu.stationPos())
+                        ? "gui.create_aeronautics_automated_logistics.train_station.hide_range"
+                        : "gui.create_aeronautics_automated_logistics.train_station.show_range")
+                        : (LogisticsClientOverlays.isLandingAreaVisible(this.menu.stationPos())
                         ? "gui.create_aeronautics_automated_logistics.airship_station.hide_landing_area"
-                        : "gui.create_aeronautics_automated_logistics.airship_station.show_landing_area"
+                        : "gui.create_aeronautics_automated_logistics.airship_station.show_landing_area")
         );
     }
 
@@ -1585,6 +1611,22 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
                 : this.title.getString();
     }
 
+    private Component stationControlTitle() {
+        return Component.translatable(isTrainStation()
+                ? "gui.create_aeronautics_automated_logistics.train_station.control"
+                : "gui.create_aeronautics_automated_logistics.airship_station.control");
+    }
+
+    private String vehicleSelectorLabel() {
+        return isTrainStation() ? "TRAIN" : "SHIP";
+    }
+
+    private boolean isTrainStation() {
+        return this.minecraft != null
+                && this.minecraft.player != null
+                && menu.transportMode(this.minecraft.player) == TransportMode.TRAIN;
+    }
+
     private void centerNameBox() {
         if (nameBox == null) {
             return;
@@ -1622,6 +1664,9 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     }
 
     private void openShipDropdown() {
+        if (this.minecraft != null && this.minecraft.player != null && !menu.canUseStationLocally(this.minecraft.player)) {
+            return;
+        }
         shipDropdownOpen = true;
         routesOpen = false;
         routeFilterDropdownOpen = false;

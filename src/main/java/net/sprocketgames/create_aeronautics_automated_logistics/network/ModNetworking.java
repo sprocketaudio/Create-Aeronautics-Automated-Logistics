@@ -45,6 +45,11 @@ public final class ModNetworking {
                 AirshipStationMenuActionPayload::handle
         );
         registrar.playToServer(
+                AirshipScheduleMenuActionPayload.TYPE,
+                AirshipScheduleMenuActionPayload.STREAM_CODEC,
+                AirshipScheduleMenuActionPayload::handle
+        );
+        registrar.playToServer(
                 PreviewStationRoutesPayload.TYPE,
                 PreviewStationRoutesPayload.STREAM_CODEC,
                 PreviewStationRoutesPayload::handle
@@ -83,6 +88,31 @@ public final class ModNetworking {
                 SyncIdentityDirectoryPayload.TYPE,
                 SyncIdentityDirectoryPayload.STREAM_CODEC,
                 SyncIdentityDirectoryPayload::handle
+        );
+        registrar.playToClient(
+                SyncLogisticsTerminalRoutesPayload.TYPE,
+                SyncLogisticsTerminalRoutesPayload.STREAM_CODEC,
+                SyncLogisticsTerminalRoutesPayload::handle
+        );
+        registrar.playToClient(
+                SyncShipMapMarkersPayload.TYPE,
+                SyncShipMapMarkersPayload.STREAM_CODEC,
+                SyncShipMapMarkersPayload::handle
+        );
+        registrar.playToClient(
+                SyncLogisticsTerminalPreviewRoutesPayload.TYPE,
+                SyncLogisticsTerminalPreviewRoutesPayload.STREAM_CODEC,
+                SyncLogisticsTerminalPreviewRoutesPayload::handle
+        );
+        registrar.playToClient(
+                SyncLogisticsTerminalPreviewMarkersPayload.TYPE,
+                SyncLogisticsTerminalPreviewMarkersPayload.STREAM_CODEC,
+                SyncLogisticsTerminalPreviewMarkersPayload::handle
+        );
+        registrar.playToClient(
+                SyncVisibleLogisticsTerminalPreviewsPayload.TYPE,
+                SyncVisibleLogisticsTerminalPreviewsPayload.STREAM_CODEC,
+                SyncVisibleLogisticsTerminalPreviewsPayload::handle
         );
         registrar.playToClient(
                 SetAutomatedShipVisualStatePayload.TYPE,

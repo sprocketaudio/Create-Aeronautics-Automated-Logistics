@@ -9,6 +9,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.TransportMode;
 
 public final class AirshipStationRegistry {
     private static final Map<UUID, AirshipStationSnapshot> STATIONS = new ConcurrentHashMap<>();
@@ -52,6 +53,13 @@ public final class AirshipStationRegistry {
                 .sorted(Comparator
                         .comparing(AirshipStationSnapshot::stationName, String.CASE_INSENSITIVE_ORDER)
                         .thenComparing(snapshot -> snapshot.stationId().toString()))
+                .toList();
+    }
+
+    public static List<AirshipStationSnapshot> knownStations(ResourceKey<Level> dimension, TransportMode transportMode) {
+        TransportMode mode = transportMode == null ? TransportMode.DEFAULT : transportMode;
+        return knownStations(dimension).stream()
+                .filter(snapshot -> snapshot.transportMode() == mode)
                 .toList();
     }
 }

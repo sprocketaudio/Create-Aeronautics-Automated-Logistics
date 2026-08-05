@@ -11,13 +11,26 @@ public record RouteStop(
         int pointIndex,
         WaitCondition waitCondition,
         Optional<BlockPos> dockPos,
+        Optional<UUID> stationId,
         java.util.List<java.util.List<AirshipScheduleCondition>> conditionGroups
 ) {
+    public RouteStop(
+            UUID id,
+            String name,
+            int pointIndex,
+            WaitCondition waitCondition,
+            Optional<BlockPos> dockPos,
+            java.util.List<java.util.List<AirshipScheduleCondition>> conditionGroups
+    ) {
+        this(id, name, pointIndex, waitCondition, dockPos, Optional.empty(), conditionGroups);
+    }
+
     public RouteStop {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(waitCondition, "waitCondition");
         dockPos = Objects.requireNonNull(dockPos, "dockPos");
+        stationId = Objects.requireNonNull(stationId, "stationId");
         conditionGroups = copyConditionGroups(conditionGroups);
         if (name.isBlank()) {
             throw new IllegalArgumentException("name must not be blank");
@@ -28,11 +41,11 @@ public record RouteStop(
     }
 
     public static RouteStop create(String name, int pointIndex, WaitCondition waitCondition) {
-        return new RouteStop(UUID.randomUUID(), name, pointIndex, waitCondition, Optional.empty(), java.util.List.of());
+        return new RouteStop(UUID.randomUUID(), name, pointIndex, waitCondition, Optional.empty(), Optional.empty(), java.util.List.of());
     }
 
     public static RouteStop create(String name, int pointIndex, WaitCondition waitCondition, Optional<BlockPos> dockPos) {
-        return new RouteStop(UUID.randomUUID(), name, pointIndex, waitCondition, dockPos, java.util.List.of());
+        return new RouteStop(UUID.randomUUID(), name, pointIndex, waitCondition, dockPos, Optional.empty(), java.util.List.of());
     }
 
     public static RouteStop create(
@@ -42,15 +55,26 @@ public record RouteStop(
             Optional<BlockPos> dockPos,
             java.util.List<java.util.List<AirshipScheduleCondition>> conditionGroups
     ) {
-        return new RouteStop(UUID.randomUUID(), name, pointIndex, waitCondition, dockPos, conditionGroups);
+        return new RouteStop(UUID.randomUUID(), name, pointIndex, waitCondition, dockPos, Optional.empty(), conditionGroups);
+    }
+
+    public static RouteStop create(
+            String name,
+            int pointIndex,
+            WaitCondition waitCondition,
+            Optional<BlockPos> dockPos,
+            Optional<UUID> stationId,
+            java.util.List<java.util.List<AirshipScheduleCondition>> conditionGroups
+    ) {
+        return new RouteStop(UUID.randomUUID(), name, pointIndex, waitCondition, dockPos, stationId, conditionGroups);
     }
 
     public RouteStop withWaitCondition(WaitCondition waitCondition) {
-        return new RouteStop(id, name, pointIndex, waitCondition, dockPos, conditionGroups);
+        return new RouteStop(id, name, pointIndex, waitCondition, dockPos, stationId, conditionGroups);
     }
 
     public RouteStop withConditionGroups(java.util.List<java.util.List<AirshipScheduleCondition>> conditionGroups) {
-        return new RouteStop(id, name, pointIndex, waitCondition, dockPos, conditionGroups);
+        return new RouteStop(id, name, pointIndex, waitCondition, dockPos, stationId, conditionGroups);
     }
 
     public java.util.List<java.util.List<AirshipScheduleCondition>> effectiveConditionGroups() {

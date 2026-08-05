@@ -44,25 +44,25 @@ public interface VehicleController {
 
     boolean isControlledByPlayer(UUID playerId);
 
-    VehicleMotionResult moveToward(ServerLevel level, Vec3 targetPosition, double maxSpeedMultiplier);
+    VehicleMotionResult moveToward(ServerLevel level, Vec3 targetPosition, double maxSpeedBlocksPerSecond);
 
     default VehicleMotionResult moveToward(
             ServerLevel level,
             Vec3 targetPosition,
-            double maxSpeedMultiplier,
+            double maxSpeedBlocksPerSecond,
             double desiredSpeedBlocksPerTick
     ) {
-        return moveToward(level, targetPosition, maxSpeedMultiplier);
+        return moveToward(level, targetPosition, maxSpeedBlocksPerSecond);
     }
 
     default VehicleMotionResult moveToward(
             ServerLevel level,
             Vec3 targetPosition,
             Optional<RouteRotation> targetRotation,
-            double maxSpeedMultiplier,
+            double maxSpeedBlocksPerSecond,
             double desiredSpeedBlocksPerTick
     ) {
-        return moveToward(level, targetPosition, maxSpeedMultiplier, desiredSpeedBlocksPerTick);
+        return moveToward(level, targetPosition, maxSpeedBlocksPerSecond, desiredSpeedBlocksPerTick);
     }
 
     default void hold(ServerLevel level, Vec3 holdPosition, Optional<RouteRotation> holdRotation) {

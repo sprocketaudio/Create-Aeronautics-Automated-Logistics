@@ -42,6 +42,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.CargoWaitT
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentResolver;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.TransportMode;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitCondition;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AirshipScheduleExecutionService;
@@ -849,7 +850,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         if (!isServerView(player)) {
             return resolvedClientStatusSnapshot().canControl();
         }
-        if (!AutomatedLogisticsConfig.RESTRICT_TRANSPONDER_CONTROL_TO_OWNER.get()) {
+        if (!AutomatedLogisticsConfig.ownershipPermissionsEnabled()) {
             return true;
         }
         if (!(player.level().getBlockEntity(transponderPos) instanceof ShipTransponderBlockEntity transponder)) {
@@ -1022,9 +1023,11 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         AirshipSchedule runtimeSchedule;
         int entryStartIndex = 0;
         int legOrdinal = 0;
+        TransportMode transportMode;
         if (startContext.isPresent()) {
             stationId = startContext.get().stationId();
             runtimeSchedule = startContext.get().runtimeSchedule();
+            transportMode = startContext.get().station().transportMode();
         } else {
             Optional<RouteSegment> firstSegment = firstKnownScheduleSegment(level, schedule, transponder.transponderId());
             if (firstSegment.isEmpty()) {
@@ -1034,6 +1037,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
             stationId = firstSegment.get().endStationId();
             runtimeSchedule = schedule;
             entryStartIndex = 1;
+            transportMode = firstSegment.get().transportMode();
         }
         for (int i = entryStartIndex; i < runtimeSchedule.entries().size(); i++) {
             AirshipScheduleEntry entry = runtimeSchedule.entries().get(i);
@@ -1046,7 +1050,8 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
                     fromStationId,
                     entry.targetStationId().get(),
                     entry.pinnedSegmentId(),
-                    transponder.transponderId()
+                    transponder.transponderId(),
+                    transportMode
             );
             if (segment.isEmpty()) {
                 break;
@@ -1564,6 +1569,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         if (firstSegment.isEmpty()) {
             return false;
         }
+        TransportMode transportMode = firstSegment.get().transportMode();
 
         UUID currentStationId = firstEntry.targetStationId().get();
         for (int i = 1; i < schedule.entries().size(); i++) {
@@ -1578,7 +1584,8 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
                     fromStationId,
                     nextStationId,
                     entry.pinnedSegmentId(),
-                    transponderId
+                    transponderId,
+                    transportMode
             );
             if (segment.isEmpty()) {
                 return false;

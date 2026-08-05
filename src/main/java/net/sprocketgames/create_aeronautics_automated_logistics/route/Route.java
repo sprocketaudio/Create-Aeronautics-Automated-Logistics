@@ -11,6 +11,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleC
 public record Route(
         RouteId id,
         String name,
+        TransportMode transportMode,
         ResourceKey<Level> dimension,
         List<RoutePoint> points,
         VehicleControllerRef linkedController,
@@ -28,7 +29,21 @@ public record Route(
             PlaybackMode playbackMode,
             RouteStatus status
     ) {
-        this(id, name, dimension, points, linkedController, playbackMode, status, List.of(), Optional.empty());
+        this(id, name, TransportMode.DEFAULT, dimension, points, linkedController, playbackMode, status, List.of(), Optional.empty());
+    }
+
+    public Route(
+            RouteId id,
+            String name,
+            ResourceKey<Level> dimension,
+            List<RoutePoint> points,
+            VehicleControllerRef linkedController,
+            PlaybackMode playbackMode,
+            RouteStatus status,
+            List<RouteStop> stops,
+            Optional<UUID> ownerId
+    ) {
+        this(id, name, TransportMode.DEFAULT, dimension, points, linkedController, playbackMode, status, stops, ownerId);
     }
 
     public Route(
@@ -41,12 +56,13 @@ public record Route(
             RouteStatus status,
             Optional<UUID> ownerId
     ) {
-        this(id, name, dimension, points, linkedController, playbackMode, status, List.of(), ownerId);
+        this(id, name, TransportMode.DEFAULT, dimension, points, linkedController, playbackMode, status, List.of(), ownerId);
     }
 
     public Route {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(name, "name");
+        transportMode = transportMode == null ? TransportMode.DEFAULT : transportMode;
         Objects.requireNonNull(dimension, "dimension");
         points = List.copyOf(Objects.requireNonNull(points, "points"));
         Objects.requireNonNull(linkedController, "linkedController");
@@ -66,10 +82,10 @@ public record Route(
     }
 
     public Route withStatus(RouteStatus status) {
-        return new Route(id, name, dimension, points, linkedController, playbackMode, status, stops, ownerId);
+        return new Route(id, name, transportMode, dimension, points, linkedController, playbackMode, status, stops, ownerId);
     }
 
     public Route withStops(List<RouteStop> stops) {
-        return new Route(id, name, dimension, points, linkedController, playbackMode, status, stops, ownerId);
+        return new Route(id, name, transportMode, dimension, points, linkedController, playbackMode, status, stops, ownerId);
     }
 }

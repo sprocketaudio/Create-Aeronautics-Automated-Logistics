@@ -57,6 +57,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegme
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentId;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStop;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.TransportMode;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipStationMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
@@ -83,6 +84,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     private static final String GROUND_DOCK_POS = "groundDockPos";
     private static final String GROUND_DOCK_STATUS = "groundDockStatus";
     private static final String DOCK_OUTPUT_ACTIVE = "dockOutputActive";
+    private static final String DOCK_OUTPUT_OWNER = "dockOutputOwner";
     private static final String LINKED_CARGO = "linkedCargo";
     private static final String LINKED_CARGO_TOTAL = "linkedCargoTotal";
     private static final String LINKED_CARGO_VALID = "linkedCargoValid";
@@ -205,6 +207,13 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         return stationName;
     }
 
+    public TransportMode transportMode() {
+        if (getBlockState().getBlock() instanceof AirshipStationBlock stationBlock) {
+            return stationBlock.transportMode();
+        }
+        return TransportMode.DEFAULT;
+    }
+
     public void setStationName(String stationName) {
         String sanitized = IdentityNames.sanitize(stationName);
         this.stationName = sanitized.isBlank() ? IdentityNames.defaultStationName(stationId) : sanitized;
@@ -259,6 +268,9 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
     }
 
     public void selectShip(ShipTransponderSnapshot snapshot) {
+        if (snapshot.transportMode() != transportMode()) {
+            return;
+        }
         selectedTransponderId = Optional.of(snapshot.transponderId());
         selectedShipName = snapshot.shipName();
         failureReason = Optional.empty();
@@ -792,6 +804,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
                 : groundDockStatus;
         tag.putString(GROUND_DOCK_STATUS, savedDockStatus.name());
         tag.putBoolean(DOCK_OUTPUT_ACTIVE, dockOutputActive);
+        dockOutputOwner.ifPresent(routeId -> tag.putUUID(DOCK_OUTPUT_OWNER, routeId.value()));
         if (!linkedCargo.isEmpty()) {
             ListTag linkedCargoTag = new ListTag();
             for (LinkedCargoEntry entry : linkedCargo) {
@@ -910,6 +923,18 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
                 : Optional.empty();
         groundDockStatus = readDockStatus(tag);
         dockOutputActive = tag.getBoolean(DOCK_OUTPUT_ACTIVE);
+        dockOutputOwner = tag.hasUUID(DOCK_OUTPUT_OWNER)
+                ? Optional.of(new RouteId(tag.getUUID(DOCK_OUTPUT_OWNER)))
+                : Optional.empty();
+        if (dockOutputActive && dockOutputOwner.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugDockingWarn(
+                    "Station load cleared incomplete dock output state: stationId={} pos={} active={} reason=missing_persisted_owner",
+                    stationId,
+                    worldPosition,
+                    dockOutputActive
+            );
+            dockOutputActive = false;
+        }
         linkedCargo.clear();
         if (tag.contains(LINKED_CARGO, Tag.TAG_LIST)) {
             ListTag linkedCargoTag = tag.getList(LINKED_CARGO, Tag.TAG_COMPOUND);
@@ -934,6 +959,18 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         failureReason = readFailureReason(tag);
         recordedRoute = readRecordedRoute(tag);
         status = readStatus(tag, recordedRoute, failureReason);
+        if (dockOutputActive && !liveSync) {
+            CreateAeronauticsAutomatedLogistics.debugDockingWarn(
+                    "Station load cleared stale dock output state: stationId={} pos={} active={} owner={} status={} reason=non_live_saved_state",
+                    stationId,
+                    worldPosition,
+                    dockOutputActive,
+                    dockOutputOwner.map(RouteId::value).map(Object::toString).orElse("none"),
+                    status
+            );
+            dockOutputActive = false;
+            dockOutputOwner = Optional.empty();
+        }
         registerLoadedSnapshot();
     }
 
@@ -999,6 +1036,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         return new AirshipStationSnapshot(
                 stationId,
                 stationName(),
+                transportMode(),
                 level.dimension(),
                 worldPosition,
                 ownerId,

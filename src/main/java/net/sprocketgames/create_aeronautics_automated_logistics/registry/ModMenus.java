@@ -8,6 +8,7 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipScheduleMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.AirshipStationMenu;
+import net.sprocketgames.create_aeronautics_automated_logistics.menu.LogisticsTerminalMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.ShipTransponderMenu;
 
 public final class ModMenus {
@@ -22,6 +23,9 @@ public final class ModMenus {
 
     public static final DeferredHolder<MenuType<?>, MenuType<ShipTransponderMenu>> SHIP_TRANSPONDER =
             MENUS.register("ship_transponder", () -> IMenuTypeExtension.create(ShipTransponderMenu::new));
+
+    public static final DeferredHolder<MenuType<?>, MenuType<LogisticsTerminalMenu>> LOGISTICS_TERMINAL =
+            MENUS.register("logistics_terminal", () -> IMenuTypeExtension.create(LogisticsTerminalMenu::new));
 
     private ModMenus() {
     }

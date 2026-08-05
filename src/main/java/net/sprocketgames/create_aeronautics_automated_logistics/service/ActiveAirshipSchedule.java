@@ -11,6 +11,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteId;
 
 record ActiveAirshipSchedule(
         UUID transponderId,
+        UUID executionId,
         BlockPos transponderPos,
         ResourceKey<Level> dimension,
         AirshipSchedule schedule,
@@ -30,6 +31,7 @@ record ActiveAirshipSchedule(
     ActiveAirshipSchedule withActiveRoute(RouteId routeId) {
         return new ActiveAirshipSchedule(
                 transponderId,
+                executionId,
                 transponderPos,
                 dimension,
                 schedule,
@@ -54,6 +56,7 @@ record ActiveAirshipSchedule(
                 .orElse(currentStationPos);
         return new ActiveAirshipSchedule(
                 transponderId,
+                executionId,
                 transponderPos,
                 dimension,
                 schedule,
@@ -71,6 +74,7 @@ record ActiveAirshipSchedule(
     ActiveAirshipSchedule restart() {
         return new ActiveAirshipSchedule(
                 transponderId,
+                executionId,
                 transponderPos,
                 dimension,
                 schedule,
@@ -88,6 +92,7 @@ record ActiveAirshipSchedule(
     ActiveAirshipSchedule resetProgress() {
         return new ActiveAirshipSchedule(
                 transponderId,
+                executionId,
                 transponderPos,
                 dimension,
                 schedule,

@@ -2,8 +2,19 @@ package net.sprocketgames.create_aeronautics_automated_logistics;
 
 import net.neoforged.neoforge.common.ModConfigSpec;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.PlaybackMode;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.ActiveVehicleLimitMode;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 
 public class AutomatedLogisticsConfig {
+    private static final String LEGACY_OWNERSHIP_KEY = "restrictTransponderControlToOwner";
+    private static final String OWNERSHIP_KEY = "enableOwnershipPermissions";
     private static final ModConfigSpec.Builder BUILDER = new ModConfigSpec.Builder();
 
     public static final ModConfigSpec.IntValue SAMPLE_INTERVAL_TICKS;
@@ -11,7 +22,7 @@ public class AutomatedLogisticsConfig {
     public static final ModConfigSpec.IntValue MAX_ROUTE_POINTS;
 
     public static final ModConfigSpec.EnumValue<PlaybackMode> PLAYBACK_MODE;
-    public static final ModConfigSpec.DoubleValue MAX_SPEED_MULTIPLIER;
+    public static final ModConfigSpec.DoubleValue MAX_PLAYBACK_SPEED_BLOCKS_PER_SECOND;
     public static final ModConfigSpec.DoubleValue MAX_START_JOIN_DISTANCE;
     public static final ModConfigSpec.BooleanValue ALLOW_ONE_WAY_ROUTE_PLANS;
     public static final ModConfigSpec.BooleanValue STOP_ON_COLLISION;
@@ -27,7 +38,16 @@ public class AutomatedLogisticsConfig {
     public static final ModConfigSpec.IntValue STATION_INTERACTION_CHUNK_RADIUS;
 
     public static final ModConfigSpec.IntValue MAX_ACTIVE_VEHICLES_PER_PLAYER;
-    public static final ModConfigSpec.BooleanValue RESTRICT_TRANSPONDER_CONTROL_TO_OWNER;
+    public static final ModConfigSpec.EnumValue<ActiveVehicleLimitMode> ACTIVE_VEHICLE_LIMIT_MODE;
+    public static final ModConfigSpec.BooleanValue ENABLE_OWNERSHIP_PERMISSIONS;
+    public static final ModConfigSpec.BooleanValue ALLOW_TEAM_STATION_USE;
+    public static final ModConfigSpec.BooleanValue ALLOW_ALLIED_STATION_USE;
+    public static final ModConfigSpec.BooleanValue ALLOW_TEAM_STATION_CONTROL;
+    public static final ModConfigSpec.BooleanValue ALLOW_ALLIED_STATION_CONTROL;
+    public static final ModConfigSpec.BooleanValue ALLOW_TEAM_TRANSPONDER_CONTROL;
+    public static final ModConfigSpec.BooleanValue ALLOW_ALLIED_TRANSPONDER_CONTROL;
+    public static final ModConfigSpec.EnumValue<TerminalAudience> LOGISTICS_TERMINAL_PREVIEW_VISIBILITY;
+    public static final ModConfigSpec.EnumValue<TerminalAudience> LOGISTICS_TERMINAL_ACCESS;
     public static final ModConfigSpec.BooleanValue REQUIRE_CROUCH_TO_BREAK_ROUTE_BLOCKS;
     public static final ModConfigSpec.BooleanValue DEBUG_LOGGING;
     public static final ModConfigSpec.BooleanValue DEBUG_PLAYBACK;
@@ -55,9 +75,11 @@ public class AutomatedLogisticsConfig {
         PLAYBACK_MODE = BUILDER
                 .comment("Default route playback mode.")
                 .defineEnum("mode", PlaybackMode.PING_PONG);
-        MAX_SPEED_MULTIPLIER = BUILDER
-                .comment("Maximum playback speed multiplier.")
-                .defineInRange("maxSpeedMultiplier", 1.0D, 0.1D, 10.0D);
+        MAX_PLAYBACK_SPEED_BLOCKS_PER_SECOND = BUILDER
+                .comment("Maximum automated playback speed in blocks per second.")
+                .comment("Default is 60. Higher values can cause overshoot, unstable docking, unloaded-travel issues, reload/recovery faults, or other automation failures on very fast vehicles.")
+                .comment("If higher values break something, please report it at https://github.com/sprocketaudio/Create-Aeronautics-Automated-Logistics/issues")
+                .defineInRange("maxPlaybackSpeedBlocksPerSecond", 60.0D, 1.0D, 1000.0D);
         MAX_START_JOIN_DISTANCE = BUILDER
                 .comment("Maximum distance from the nearest route endpoint allowed when beginning playback.")
                 .defineInRange("maxStartJoinDistance", 24.0D, 0.0D, 512.0D);
@@ -104,11 +126,52 @@ public class AutomatedLogisticsConfig {
 
         BUILDER.push("limits");
         MAX_ACTIVE_VEHICLES_PER_PLAYER = BUILDER
-                .comment("Maximum number of simultaneously active automated vehicles per player.")
+                .comment("Maximum number of simultaneously active automated vehicles in each owner or team limit bucket.")
                 .defineInRange("maxActiveVehiclesPerPlayer", 8, 0, 1024);
-        RESTRICT_TRANSPONDER_CONTROL_TO_OWNER = BUILDER
-                .comment("Restrict Ship Transponder and Airship Station control actions to the owner and server operators.")
-                .define("restrictTransponderControlToOwner", true);
+        ACTIVE_VEHICLE_LIMIT_MODE = BUILDER
+                .comment("How active automated ship limits are pooled: PER_OWNER or PER_TEAM.")
+                .comment("PER_TEAM falls back to PER_OWNER when FTB Teams is not installed or the owner has no team.")
+                .defineEnum("activeVehicleLimitMode", ActiveVehicleLimitMode.PER_TEAM);
+        BUILDER.pop();
+
+        BUILDER.push("permissions");
+        ENABLE_OWNERSHIP_PERMISSIONS = BUILDER
+                .comment("Enable ownership-based permission checks for Ship Transponders, Airship Stations, and related logistics controls.")
+                .comment("When true, owner, team, ally, and operator rules are enforced.")
+                .comment("When false, these blocks behave as unrestricted public controls.")
+                .define("enableOwnershipPermissions", true);
+        ALLOW_TEAM_STATION_USE = BUILDER
+                .comment("Allow FTB Teams members to use stations owned by another member of their team without granting station admin control.")
+                .comment("Use includes landing, queueing, docking, viewing their allowed routes, and starting or stopping their own allowed vehicles.")
+                .comment("Set this to true and allowTeamStationControl to false if you want team members to use stations without editing dock or cargo links.")
+                .define("allowTeamStationUse", true);
+        ALLOW_ALLIED_STATION_USE = BUILDER
+                .comment("Allow FTB Teams allies to use stations without granting station admin control.")
+                .comment("Use includes landing, queueing, docking, viewing their allowed routes, and starting or stopping their own allowed vehicles.")
+                .comment("Set this to true and allowAlliedStationControl to false if you want allies to use stations without editing dock or cargo links.")
+                .define("allowAlliedStationUse", false);
+        ALLOW_TEAM_STATION_CONTROL = BUILDER
+                .comment("Allow FTB Teams members to fully control stations owned by another member of their team.")
+                .comment("Control includes station admin actions such as changing dock links and cargo links.")
+                .define("allowTeamStationControl", true);
+        ALLOW_ALLIED_STATION_CONTROL = BUILDER
+                .comment("Allow FTB Teams allies to fully control stations.")
+                .comment("Control includes station admin actions such as changing dock links and cargo links.")
+                .define("allowAlliedStationControl", false);
+        ALLOW_TEAM_TRANSPONDER_CONTROL = BUILDER
+                .comment("Allow FTB Teams members to control transponders owned by another member of their team.")
+                .define("allowTeamTransponderControl", true);
+        ALLOW_ALLIED_TRANSPONDER_CONTROL = BUILDER
+                .comment("Allow FTB Teams allies to control transponders.")
+                .define("allowAlliedTransponderControl", false);
+        LOGISTICS_TERMINAL_PREVIEW_VISIBILITY = BUILDER
+                .comment("Who can see the passive top-surface preview on nearby Logistics Terminals.")
+                .comment("Options: OWNER_ONLY, OWNER_AND_TEAM, OWNER_TEAM_AND_ALLIES, PUBLIC.")
+                .defineEnum("logisticsTerminalPreviewVisibility", TerminalAudience.OWNER_AND_TEAM);
+        LOGISTICS_TERMINAL_ACCESS = BUILDER
+                .comment("Who can open Logistics Terminals for the read-only network view.")
+                .comment("Options: OWNER_ONLY, OWNER_AND_TEAM, OWNER_TEAM_AND_ALLIES, PUBLIC.")
+                .defineEnum("logisticsTerminalAccess", TerminalAudience.OWNER_AND_TEAM);
         REQUIRE_CROUCH_TO_BREAK_ROUTE_BLOCKS = BUILDER
                 .comment("Require players to crouch while mining Airship Stations and Ship Transponders, because breaking them removes related routes.")
                 .define("requireCrouchToBreakRouteBlocks", true);
@@ -145,31 +208,35 @@ public class AutomatedLogisticsConfig {
     }
 
     public static boolean debugLogging() {
-        return DEBUG_LOGGING.get();
+        return safeBoolean(DEBUG_LOGGING, false);
     }
 
     public static boolean debugPlayback() {
-        return debugLogging() && DEBUG_PLAYBACK.get();
+        return debugLogging() && safeBoolean(DEBUG_PLAYBACK, true);
     }
 
     public static boolean debugVehicle() {
-        return debugLogging() && DEBUG_VEHICLE.get();
+        return debugLogging() && safeBoolean(DEBUG_VEHICLE, true);
     }
 
     public static boolean debugDocking() {
-        return debugLogging() && DEBUG_DOCKING.get();
+        return debugLogging() && safeBoolean(DEBUG_DOCKING, true);
     }
 
     public static boolean debugCargo() {
-        return debugLogging() && DEBUG_CARGO.get();
+        return debugLogging() && safeBoolean(DEBUG_CARGO, true);
     }
 
     public static boolean debugUiSync() {
-        return debugLogging() && DEBUG_UI_SYNC.get();
+        return debugLogging() && safeBoolean(DEBUG_UI_SYNC, true);
     }
 
     public static boolean requireCrouchToBreakRouteBlocks() {
         return REQUIRE_CROUCH_TO_BREAK_ROUTE_BLOCKS.get();
+    }
+
+    public static boolean ownershipPermissionsEnabled() {
+        return ENABLE_OWNERSHIP_PERMISSIONS.get();
     }
 
     public static boolean allowOneWayRoutePlans() {
@@ -182,6 +249,190 @@ public class AutomatedLogisticsConfig {
 
     public static int stationInteractionChunkRadius() {
         return STATION_INTERACTION_CHUNK_RADIUS.get();
+    }
+
+    public static TerminalAudience logisticsTerminalPreviewVisibility() {
+        return LOGISTICS_TERMINAL_PREVIEW_VISIBILITY.get();
+    }
+
+    public static TerminalAudience logisticsTerminalAccess() {
+        return LOGISTICS_TERMINAL_ACCESS.get();
+    }
+
+    private static boolean safeBoolean(ModConfigSpec.BooleanValue value, boolean fallback) {
+        try {
+            return value.get();
+        } catch (IllegalStateException ignored) {
+            return fallback;
+        }
+    }
+
+    public static void migrateLegacyOwnershipPermissions(Path configFile) {
+        if (!Files.isRegularFile(configFile)) {
+            return;
+        }
+        try {
+            List<String> originalLines = Files.readAllLines(configFile, StandardCharsets.UTF_8);
+            List<String> migratedLines = migrateLegacyOwnershipPermissions(originalLines);
+            if (!migratedLines.equals(originalLines)) {
+                Files.write(configFile, migratedLines, StandardCharsets.UTF_8);
+            }
+        } catch (IOException exception) {
+            CreateAeronauticsAutomatedLogistics.LOGGER.warn("Failed to migrate legacy ownership permission config in {}", configFile, exception);
+        }
+    }
+
+    private static List<String> migrateLegacyOwnershipPermissions(List<String> sourceLines) {
+        List<String> lines = new ArrayList<>(sourceLines);
+        lines = moveSectionBefore(lines, "[permissions]", "[debug]");
+        int sectionStart = findSectionStart(lines, "[permissions]");
+        if (sectionStart < 0) {
+            return sourceLines;
+        }
+        int sectionEnd = findSectionEnd(lines, sectionStart + 1);
+        int legacyIndex = findKeyIndex(lines, sectionStart + 1, sectionEnd, LEGACY_OWNERSHIP_KEY);
+        if (legacyIndex < 0) {
+            return reorderPermissionEntries(lines, sectionStart);
+        }
+        Boolean legacyValue = parseBooleanValue(lines.get(legacyIndex));
+        if (legacyValue == null) {
+            return reorderPermissionEntries(lines, sectionStart);
+        }
+
+        int existingNewIndex = findKeyIndex(lines, sectionStart + 1, sectionEnd, OWNERSHIP_KEY);
+        if (existingNewIndex >= 0) {
+            removeEntryWithLeadingComments(lines, existingNewIndex, sectionStart);
+            sectionEnd = findSectionEnd(lines, sectionStart + 1);
+            legacyIndex = findKeyIndex(lines, sectionStart + 1, sectionEnd, LEGACY_OWNERSHIP_KEY);
+        }
+
+        removeEntryWithLeadingComments(lines, legacyIndex, sectionStart);
+        int insertIndex = sectionStart + 1;
+        lines.add(insertIndex++, "\t#Enable ownership-based permission checks for Ship Transponders, Airship Stations, and related logistics controls.");
+        lines.add(insertIndex++, "\t#When true, owner, team, ally, and operator rules are enforced.");
+        lines.add(insertIndex++, "\t#When false, these blocks behave as unrestricted public controls.");
+        lines.add(insertIndex, "\t" + OWNERSHIP_KEY + " = " + legacyValue);
+        return reorderPermissionEntries(lines, sectionStart);
+    }
+
+    private static int findSectionStart(List<String> lines, String header) {
+        for (int i = 0; i < lines.size(); i++) {
+            if (header.equals(lines.get(i).trim())) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int findSectionEnd(List<String> lines, int fromIndex) {
+        for (int i = fromIndex; i < lines.size(); i++) {
+            String trimmed = lines.get(i).trim();
+            if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+                return i;
+            }
+        }
+        return lines.size();
+    }
+
+    private static int findKeyIndex(List<String> lines, int fromIndex, int toIndexExclusive, String key) {
+        for (int i = fromIndex; i < toIndexExclusive; i++) {
+            String trimmed = lines.get(i).trim();
+            if (trimmed.startsWith(key + " =")) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static Boolean parseBooleanValue(String line) {
+        int separator = line.indexOf('=');
+        if (separator < 0) {
+            return null;
+        }
+        String value = line.substring(separator + 1).trim().toLowerCase(Locale.ROOT);
+        return switch (value) {
+            case "true" -> Boolean.TRUE;
+            case "false" -> Boolean.FALSE;
+            default -> null;
+        };
+    }
+
+    private static void removeEntryWithLeadingComments(List<String> lines, int keyIndex, int sectionStart) {
+        int removeStart = keyIndex;
+        while (removeStart > sectionStart + 1 && lines.get(removeStart - 1).trim().startsWith("#")) {
+            removeStart--;
+        }
+        for (int i = keyIndex; i >= removeStart; i--) {
+            lines.remove(i);
+        }
+    }
+
+    private static List<String> moveSectionBefore(List<String> sourceLines, String sectionHeader, String beforeHeader) {
+        List<String> lines = new ArrayList<>(sourceLines);
+        int sectionStart = findSectionStart(lines, sectionHeader);
+        int beforeStart = findSectionStart(lines, beforeHeader);
+        if (sectionStart < 0 || beforeStart < 0 || sectionStart < beforeStart) {
+            return lines;
+        }
+
+        int sectionEnd = findSectionEnd(lines, sectionStart + 1);
+        List<String> sectionLines = new ArrayList<>(lines.subList(sectionStart, sectionEnd));
+        for (int i = sectionEnd - 1; i >= sectionStart; i--) {
+            lines.remove(i);
+        }
+
+        int insertAt = findSectionStart(lines, beforeHeader);
+        if (insertAt < 0) {
+            return sourceLines;
+        }
+        lines.addAll(insertAt, sectionLines);
+        return lines;
+    }
+
+    private static List<String> reorderPermissionEntries(List<String> sourceLines, int sectionStart) {
+        int sectionEnd = findSectionEnd(sourceLines, sectionStart + 1);
+        String[] orderedKeys = {
+                OWNERSHIP_KEY,
+                "allowTeamStationUse",
+                "allowAlliedStationUse",
+                "allowTeamStationControl",
+                "allowAlliedStationControl",
+                "allowTeamTransponderControl",
+                "allowAlliedTransponderControl",
+                "logisticsTerminalPreviewVisibility",
+                "logisticsTerminalAccess",
+                "requireCrouchToBreakRouteBlocks"
+        };
+
+        List<String> lines = new ArrayList<>(sourceLines);
+        List<List<String>> entries = new ArrayList<>();
+        for (String key : orderedKeys) {
+            int keyIndex = findKeyIndex(lines, sectionStart + 1, sectionEnd, key);
+            if (keyIndex < 0) {
+                continue;
+            }
+            int entryStart = keyIndex;
+            while (entryStart > sectionStart + 1 && lines.get(entryStart - 1).trim().startsWith("#")) {
+                entryStart--;
+            }
+            List<String> entryLines = new ArrayList<>(lines.subList(entryStart, keyIndex + 1));
+            entries.add(entryLines);
+        }
+
+        if (entries.isEmpty()) {
+            return sourceLines;
+        }
+
+        for (int i = sectionEnd - 1; i > sectionStart; i--) {
+            lines.remove(i);
+        }
+
+        int insertIndex = sectionStart + 1;
+        for (List<String> entry : entries) {
+            lines.addAll(insertIndex, entry);
+            insertIndex += entry.size();
+        }
+        return lines;
     }
 
 }

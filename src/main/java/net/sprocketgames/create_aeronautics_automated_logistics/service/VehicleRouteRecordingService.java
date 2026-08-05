@@ -27,6 +27,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegme
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteRotation;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStop;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.TransportMode;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitCondition;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.WaitConditionType;
 import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.VehicleController;
@@ -124,6 +125,7 @@ public class VehicleRouteRecordingService implements RouteRecordingService {
         Route route = new Route(
                 activeRecording.session().routeId(),
                 "Recorded Route " + activeRecording.session().routeId().value().toString().substring(0, 8),
+                station.get().transportMode(),
                 activeRecording.dimension(),
                 activeRecording.points(),
                 activeRecording.session().controllerRef(),
@@ -160,6 +162,12 @@ public class VehicleRouteRecordingService implements RouteRecordingService {
         Optional<AirshipStationBlockEntity> endStation = stationAt(level, endStationPos);
         if (startStation.isEmpty() || endStation.isEmpty()) {
             return RouteOperationResult.failure(RecordingFailure.STATION_MISSING);
+        }
+        TransportMode transportMode = startStation.get().transportMode();
+        if (transportMode != endStation.get().transportMode()) {
+            activeRecordings.remove(activeRecording.get().session().routeId());
+            startStation.get().failRecording(RecordingFailure.STATION_TYPE_MISMATCH.failureReason());
+            return RouteOperationResult.failure(RecordingFailure.STATION_TYPE_MISMATCH);
         }
         Optional<UUID> selectedTransponderId = startStation.get().selectedTransponderId();
         if (selectedTransponderId.isEmpty()) {
@@ -203,6 +211,7 @@ public class VehicleRouteRecordingService implements RouteRecordingService {
         Route route = new Route(
                 recording.session().routeId(),
                 startStation.get().stationName() + " -> " + endStation.get().stationName(),
+                transportMode,
                 recording.dimension(),
                 recording.points(),
                 recording.controller().ref(),
@@ -213,6 +222,7 @@ public class VehicleRouteRecordingService implements RouteRecordingService {
         );
         RouteSegment segment = new RouteSegment(
                 RouteSegmentId.create(),
+                transportMode,
                 startStation.get().stationId(),
                 startStation.get().stationName(),
                 endStation.get().stationId(),

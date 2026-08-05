@@ -11,6 +11,7 @@ final class NetworkLimits {
     static final int MAX_LINK_PROMPT_POSITIONS = 4_096;
     static final int MAX_ACTIVE_VISUAL_SHIPS = 4_096;
     static final int MAX_IDENTITY_SNAPSHOTS = 8_192;
+    static final int MAX_TERMINAL_ROUTE_SEGMENTS = 8_192;
     static final int MAX_SCHEDULE_ENTRIES = 512;
     static final int MAX_SCHEDULE_CONDITION_GROUPS = 4_096;
     static final int MAX_SCHEDULE_CONDITIONS = 8_192;

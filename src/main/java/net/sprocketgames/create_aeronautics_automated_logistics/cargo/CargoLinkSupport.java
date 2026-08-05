@@ -80,6 +80,39 @@ public final class CargoLinkSupport {
                 .toList();
     }
 
+    public static List<LinkedCargoEntry> discoverLinkedGroup(Level level, Iterable<BlockPos> candidatePositions, BlockPos clickedPos) {
+        Optional<LinkedCargoEntry> clickedEntry = supportedEntryAt(level, clickedPos);
+        if (clickedEntry.isEmpty()) {
+            return List.of();
+        }
+
+        CargoStorageRootResolver.StorageRoot targetRoot = CargoStorageRootResolver.resolve(level, clickedPos);
+        Map<BlockPos, LinkedCargoEntry> found = new LinkedHashMap<>();
+        for (BlockPos candidate : candidatePositions) {
+            Optional<LinkedCargoEntry> maybeEntry = supportedEntryAt(level, candidate);
+            if (maybeEntry.isEmpty()) {
+                continue;
+            }
+            LinkedCargoEntry entry = maybeEntry.get();
+            CargoStorageRootResolver.StorageRoot root = CargoStorageRootResolver.resolve(level, entry.pos());
+            if (!sameRoot(targetRoot, root)) {
+                continue;
+            }
+            found.put(entry.pos(), entry);
+        }
+
+        if (found.isEmpty()) {
+            found.put(clickedEntry.get().pos(), clickedEntry.get());
+        }
+
+        return found.values().stream()
+                .sorted(Comparator
+                        .comparingInt((LinkedCargoEntry entry) -> entry.pos().getY())
+                        .thenComparingInt(entry -> entry.pos().getZ())
+                        .thenComparingInt(entry -> entry.pos().getX()))
+                .toList();
+    }
+
     public static List<BlockPos> expandPreviewPositions(Level level, BlockPos ownerOrigin, int radius, List<LinkedCargoEntry> linkedEntries) {
         return expandPreviewPositionGroups(level, ownerOrigin, radius, linkedEntries).stream()
                 .flatMap(List::stream)
@@ -160,6 +193,38 @@ public final class CargoLinkSupport {
                 .filter(positions -> !positions.isEmpty())
                 .sorted(Comparator
                         .comparingInt((List<BlockPos> positions) -> positions.getFirst().getY())
+                        .thenComparingInt(positions -> positions.getFirst().getZ())
+                        .thenComparingInt(positions -> positions.getFirst().getX()))
+                .toList();
+    }
+
+    public static List<List<BlockPos>> discoverSupportedGroups(Level level, Iterable<BlockPos> candidatePositions, BlockPos ownerOrigin) {
+        Map<CargoStorageRootResolver.StorageRoot, Set<BlockPos>> positionsByRoot = new LinkedHashMap<>();
+        for (BlockPos candidate : candidatePositions) {
+            BlockPos immutablePos = candidate.immutable();
+            if (immutablePos.equals(ownerOrigin)) {
+                continue;
+            }
+            Optional<LinkedCargoEntry> maybeEntry = supportedEntryAt(level, immutablePos);
+            if (maybeEntry.isEmpty()) {
+                continue;
+            }
+            CargoStorageRootResolver.StorageRoot root = CargoStorageRootResolver.resolve(level, immutablePos);
+            positionsByRoot.computeIfAbsent(root, ignored -> new LinkedHashSet<>()).add(immutablePos);
+        }
+
+        return positionsByRoot.values().stream()
+                .map(positions -> positions.stream()
+                        .distinct()
+                        .sorted(Comparator
+                                .comparingInt((BlockPos pos) -> pos.getY())
+                                .thenComparingInt(pos -> pos.getZ())
+                                .thenComparingInt(pos -> pos.getX()))
+                        .toList())
+                .filter(positions -> !positions.isEmpty())
+                .sorted(Comparator
+                        .comparingDouble((List<BlockPos> positions) -> positions.getFirst().distSqr(ownerOrigin))
+                        .thenComparingInt(positions -> positions.getFirst().getY())
                         .thenComparingInt(positions -> positions.getFirst().getZ())
                         .thenComparingInt(positions -> positions.getFirst().getX()))
                 .toList();

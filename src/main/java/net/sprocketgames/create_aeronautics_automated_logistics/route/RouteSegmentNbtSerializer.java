@@ -44,6 +44,7 @@ public final class RouteSegmentNbtSerializer {
         CompoundTag tag = new CompoundTag();
         tag.putInt(DATA_VERSION, CURRENT_DATA_VERSION);
         tag.putUUID(ID, segment.id().value());
+        TransportMode.write(tag, segment.transportMode());
         tag.putUUID(START_STATION_ID, segment.startStationId());
         tag.putString(START_STATION_NAME, segment.startStationName());
         tag.putUUID(END_STATION_ID, segment.endStationId());
@@ -73,6 +74,7 @@ public final class RouteSegmentNbtSerializer {
                     : Optional.empty();
             return Optional.of(new RouteSegment(
                     new RouteSegmentId(tag.getUUID(ID)),
+                    TransportMode.read(tag),
                     tag.getUUID(START_STATION_ID),
                     tag.getString(START_STATION_NAME),
                     tag.getUUID(END_STATION_ID),

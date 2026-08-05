@@ -19,6 +19,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.phys.Vec3;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.TransportMode;
 
 public class IdentityDirectorySavedData extends SavedData {
     private static final String DATA_NAME = "create_aeronautics_automated_logistics_identity_directory";
@@ -28,6 +29,7 @@ public class IdentityDirectorySavedData extends SavedData {
     private static final String SHIP_NAME = "shipName";
     private static final String STATION_ID = "stationId";
     private static final String STATION_NAME = "stationName";
+    private static final String TRANSPORT_MODE = TransportMode.NBT_KEY;
     private static final String OWNER_ID = "ownerId";
     private static final String OWNER_NAME = "ownerName";
     private static final String DIMENSION = "dimension";
@@ -142,6 +144,7 @@ public class IdentityDirectorySavedData extends SavedData {
                 .map(station -> new AirshipStationSnapshot(
                         station.stationId(),
                         station.stationName(),
+                        station.transportMode(),
                         station.dimension(),
                         station.stationPos(),
                         station.ownerId(),
@@ -155,6 +158,7 @@ public class IdentityDirectorySavedData extends SavedData {
                 .map(station -> new AirshipStationSnapshot(
                         station.stationId(),
                         station.stationName(),
+                        station.transportMode(),
                         station.dimension(),
                         station.stationPos(),
                         station.ownerId(),
@@ -169,10 +173,12 @@ public class IdentityDirectorySavedData extends SavedData {
                 .map(ship -> new ShipTransponderSnapshot(
                         ship.transponderId(),
                         ship.shipName(),
+                        ship.transportMode(),
                         ship.dimension(),
                         ship.transponderPos(),
                         Optional.empty(),
                         Optional.empty(),
+                        ship.ownerId(),
                         ship.lastKnownPosition(),
                         ship.lastSeenGameTime()
                 ))
@@ -184,10 +190,12 @@ public class IdentityDirectorySavedData extends SavedData {
                 .map(ship -> new ShipTransponderSnapshot(
                         ship.transponderId(),
                         ship.shipName(),
+                        ship.transportMode(),
                         ship.dimension(),
                         ship.transponderPos(),
                         Optional.empty(),
                         Optional.empty(),
+                        ship.ownerId(),
                         ship.lastKnownPosition(),
                         ship.lastSeenGameTime()
                 ))
@@ -201,6 +209,8 @@ public class IdentityDirectorySavedData extends SavedData {
             CompoundTag shipTag = new CompoundTag();
             shipTag.putUUID(TRANSPONDER_ID, ship.transponderId());
             shipTag.putString(SHIP_NAME, ship.shipName());
+            shipTag.putString(TRANSPORT_MODE, ship.transportMode().serializedName());
+            ship.ownerId().ifPresent(id -> shipTag.putUUID(OWNER_ID, id));
             shipTag.putString(DIMENSION, ship.dimension().location().toString());
             shipTag.put(POS, NbtUtils.writeBlockPos(ship.transponderPos()));
             ship.lastKnownPosition().ifPresent(pos -> {
@@ -218,6 +228,7 @@ public class IdentityDirectorySavedData extends SavedData {
             CompoundTag stationTag = new CompoundTag();
             stationTag.putUUID(STATION_ID, station.stationId());
             stationTag.putString(STATION_NAME, station.stationName());
+            stationTag.putString(TRANSPORT_MODE, station.transportMode().serializedName());
             station.ownerId().ifPresent(id -> stationTag.putUUID(OWNER_ID, id));
             stationTag.putString(OWNER_NAME, station.ownerName());
             stationTag.putString(DIMENSION, station.dimension().location().toString());
@@ -259,6 +270,8 @@ public class IdentityDirectorySavedData extends SavedData {
         return NbtUtils.readBlockPos(tag, POS).map(pos -> new PersistedShipIdentity(
                 tag.getUUID(TRANSPONDER_ID),
                 IdentityNames.sanitize(tag.getString(SHIP_NAME)),
+                TransportMode.read(tag),
+                tag.hasUUID(OWNER_ID) ? Optional.of(tag.getUUID(OWNER_ID)) : Optional.empty(),
                 ResourceKey.create(Registries.DIMENSION, dimensionId),
                 pos.immutable(),
                 tag.contains(LAST_X, Tag.TAG_ANY_NUMERIC)
@@ -284,6 +297,7 @@ public class IdentityDirectorySavedData extends SavedData {
         return NbtUtils.readBlockPos(tag, POS).map(pos -> new PersistedStationIdentity(
                 tag.getUUID(STATION_ID),
                 IdentityNames.sanitize(tag.getString(STATION_NAME)),
+                TransportMode.read(tag),
                 tag.hasUUID(OWNER_ID) ? Optional.of(tag.getUUID(OWNER_ID)) : Optional.empty(),
                 tag.contains(OWNER_NAME, Tag.TAG_STRING) ? IdentityNames.sanitize(tag.getString(OWNER_NAME)) : "",
                 ResourceKey.create(Registries.DIMENSION, dimensionId),
@@ -294,6 +308,8 @@ public class IdentityDirectorySavedData extends SavedData {
     public record PersistedShipIdentity(
             UUID transponderId,
             String shipName,
+            TransportMode transportMode,
+            Optional<UUID> ownerId,
             ResourceKey<Level> dimension,
             BlockPos transponderPos,
             Optional<Vec3> lastKnownPosition,
@@ -301,12 +317,16 @@ public class IdentityDirectorySavedData extends SavedData {
     ) {
         public PersistedShipIdentity {
             shipName = IdentityNames.sanitize(shipName);
+            transportMode = transportMode == null ? TransportMode.DEFAULT : transportMode;
+            ownerId = ownerId == null ? Optional.empty() : ownerId;
         }
 
         public static PersistedShipIdentity from(ShipTransponderSnapshot snapshot) {
             return new PersistedShipIdentity(
                     snapshot.transponderId(),
                     snapshot.shipName(),
+                    snapshot.transportMode(),
+                    snapshot.ownerId(),
                     snapshot.dimension(),
                     snapshot.transponderPos().immutable(),
                     snapshot.lastKnownPosition(),
@@ -318,6 +338,7 @@ public class IdentityDirectorySavedData extends SavedData {
     public record PersistedStationIdentity(
             UUID stationId,
             String stationName,
+            TransportMode transportMode,
             Optional<UUID> ownerId,
             String ownerName,
             ResourceKey<Level> dimension,
@@ -325,6 +346,7 @@ public class IdentityDirectorySavedData extends SavedData {
     ) {
         public PersistedStationIdentity {
             stationName = IdentityNames.sanitize(stationName);
+            transportMode = transportMode == null ? TransportMode.DEFAULT : transportMode;
             ownerId = ownerId == null ? Optional.empty() : ownerId;
             ownerName = IdentityNames.sanitize(ownerName);
         }
@@ -333,6 +355,7 @@ public class IdentityDirectorySavedData extends SavedData {
             return new PersistedStationIdentity(
                     snapshot.stationId(),
                     snapshot.stationName(),
+                    snapshot.transportMode(),
                     snapshot.ownerId(),
                     snapshot.ownerName(),
                     snapshot.dimension(),

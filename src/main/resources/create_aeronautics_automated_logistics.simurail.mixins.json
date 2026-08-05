@@ -1,0 +1,11 @@
+{
+  "required": false,
+  "package": "net.sprocketgames.create_aeronautics_automated_logistics.mixin.client.simurail",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "PhysicsBogeyBlockEntityMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

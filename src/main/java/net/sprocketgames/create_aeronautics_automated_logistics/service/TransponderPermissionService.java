@@ -6,6 +6,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.sprocketgames.create_aeronautics_automated_logistics.AutomatedLogisticsConfig;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
+import net.sprocketgames.create_aeronautics_automated_logistics.compat.FtbTeamsCompat;
 import net.sprocketgames.create_aeronautics_automated_logistics.network.SetMenuActionBarMessagePayload;
 
 public final class TransponderPermissionService {
@@ -16,18 +17,29 @@ public final class TransponderPermissionService {
     }
 
     public static boolean isEnabled() {
-        return AutomatedLogisticsConfig.RESTRICT_TRANSPONDER_CONTROL_TO_OWNER.get();
+        return AutomatedLogisticsConfig.ownershipPermissionsEnabled();
     }
 
     public static boolean canControl(ServerPlayer player, ShipTransponderBlockEntity transponder) {
+        return canControl(player, transponder.ownerId());
+    }
+
+    public static boolean canControl(ServerPlayer player, Optional<UUID> ownerId) {
         if (!isEnabled()) {
             return true;
         }
         if (player.hasPermissions(2)) {
             return true;
         }
-        Optional<UUID> ownerId = transponder.ownerId();
-        return ownerId.isEmpty() || ownerId.get().equals(player.getUUID());
+        if (ownerId.isEmpty() || ownerId.get().equals(player.getUUID())) {
+            return true;
+        }
+        if (AutomatedLogisticsConfig.ALLOW_TEAM_TRANSPONDER_CONTROL.get()
+                && FtbTeamsCompat.areSameTeam(player.getUUID(), ownerId.get())) {
+            return true;
+        }
+        return AutomatedLogisticsConfig.ALLOW_ALLIED_TRANSPONDER_CONTROL.get()
+                && FtbTeamsCompat.areAllied(ownerId.get(), player.getUUID());
     }
 
     public static boolean ensureCanControl(ServerPlayer player, ShipTransponderBlockEntity transponder) {

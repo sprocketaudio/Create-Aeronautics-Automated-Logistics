@@ -88,6 +88,10 @@ public record StartTransponderRouteRecordingPayload(BlockPos transponderPos, UUI
             PacketDistributor.sendToPlayer(player, new SetTransponderRecordingStatePayload(false, Optional.empty()));
             return;
         }
+        if (originStation.transportMode() != destinationStation.transportMode()) {
+            fail(player, recordingFailureMessage(RecordingFailure.STATION_TYPE_MISMATCH));
+            return;
+        }
         if (originStation.isRecording()) {
             fail(player, Component.translatable("message.create_aeronautics_automated_logistics.recording.busy"));
             return;

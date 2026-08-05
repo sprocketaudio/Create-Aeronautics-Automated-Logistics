@@ -5,6 +5,13 @@ import dev.ryanhcode.sable.neoforge.event.ForgeSablePrePhysicsTickEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.sprocketgames.create_aeronautics_automated_logistics.map.ShipMapProjectionService;
+import net.sprocketgames.create_aeronautics_automated_logistics.network.SyncLogisticsTerminalPreviewMarkersPayload;
+import net.sprocketgames.create_aeronautics_automated_logistics.network.SyncLogisticsTerminalPreviewRoutesPayload;
+import net.sprocketgames.create_aeronautics_automated_logistics.network.SyncLogisticsTerminalRoutesPayload;
+import net.sprocketgames.create_aeronautics_automated_logistics.network.SyncShipMapMarkersPayload;
+import net.sprocketgames.create_aeronautics_automated_logistics.network.SyncVisibleLogisticsTerminalPreviewsPayload;
 
 public final class RecordingServerEvents {
     private RecordingServerEvents() {
@@ -15,6 +22,18 @@ public final class RecordingServerEvents {
         AutomatedLogisticsServices.RECORDING.tickAll(event.getServer());
         AutomatedLogisticsServices.SCHEDULES.tickAll(event.getServer());
         AutomatedLogisticsServices.PLAYBACK.tickAll(event.getServer());
+        if (event.getServer().getTickCount() % 10 == 0) {
+            event.getServer().getPlayerList().getPlayers().forEach(player -> {
+                PacketDistributor.sendToPlayer(
+                        player,
+                        new SyncShipMapMarkersPayload(ShipMapProjectionService.snapshotsFor(player))
+                );
+                SyncLogisticsTerminalRoutesPayload.sendTo(player);
+                SyncLogisticsTerminalPreviewMarkersPayload.sendTo(player);
+                SyncLogisticsTerminalPreviewRoutesPayload.sendTo(player);
+                SyncVisibleLogisticsTerminalPreviewsPayload.sendTo(player);
+            });
+        }
         if (event.getServer().getTickCount() % 20 == 0) {
             AutomationRuntimeSavedData.capture(event.getServer());
         }

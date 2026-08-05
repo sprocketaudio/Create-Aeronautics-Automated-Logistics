@@ -189,7 +189,6 @@ public final class SableStoredShipRepository {
 
     public static void auditStartupStorage(MinecraftServer server) {
         Objects.requireNonNull(server, "server");
-        int quarantined = quarantineVerifiedDuplicateIndexes(server, "startup_storage_audit");
         Map<StoredBodyKey, List<StoredBodyCandidate>> grouped = new HashMap<>();
         for (StoredBodyCandidate candidate : allCandidates(server, true)) {
             grouped.computeIfAbsent(
@@ -217,10 +216,9 @@ public final class SableStoredShipRepository {
         }
         if (duplicateEntries > 0 || corruptEntries > 0) {
             CreateAeronauticsAutomatedLogistics.LOGGER.warn(
-                    "Startup Sable storage audit found {} duplicate candidate entries and {} structurally corrupt entries. quarantinedIndexes={} no stored body payload was deleted.",
+                    "Startup Sable storage audit found {} duplicate candidate entries and {} structurally corrupt entries. automaticQuarantine=false action=retained_all",
                     duplicateEntries,
-                    corruptEntries,
-                    quarantined
+                    corruptEntries
             );
         }
     }
@@ -663,7 +661,13 @@ public final class SableStoredShipRepository {
             allHolding.remove(entry.getKey());
             removed = true;
         }
-        allHolding.remove(sableShipId);
+        HoldingSubLevel direct = allHolding.get(sableShipId);
+        if (direct != null
+                && direct.data().uuid().equals(sableShipId)
+                && Objects.equals(direct.pointer(), pointer.toSable())) {
+            allHolding.remove(sableShipId);
+            removed = true;
+        }
         return removed;
     }
 

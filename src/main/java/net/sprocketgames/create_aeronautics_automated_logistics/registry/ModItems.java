@@ -19,12 +19,30 @@ public final class ModItems {
             )
     );
 
+    public static final DeferredItem<BlockItem> TRAIN_STATION = ITEMS.register(
+            "train_station",
+            () -> new LogisticsBlockItem(
+                    ModBlocks.TRAIN_STATION.get(),
+                    new Item.Properties(),
+                    "block.create_aeronautics_automated_logistics.train_station.tooltip"
+            )
+    );
+
     public static final DeferredItem<BlockItem> SHIP_TRANSPONDER = ITEMS.register(
             "ship_transponder",
             () -> new LogisticsBlockItem(
                     ModBlocks.SHIP_TRANSPONDER.get(),
                     new Item.Properties(),
                     "block.create_aeronautics_automated_logistics.ship_transponder.tooltip"
+            )
+    );
+
+    public static final DeferredItem<BlockItem> LOGISTICS_TERMINAL = ITEMS.register(
+            "logistics_terminal",
+            () -> new LogisticsBlockItem(
+                    ModBlocks.LOGISTICS_TERMINAL.get(),
+                    new Item.Properties(),
+                    "block.create_aeronautics_automated_logistics.logistics_terminal.tooltip"
             )
     );
 
