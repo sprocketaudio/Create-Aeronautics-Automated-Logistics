@@ -3457,7 +3457,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
     }
 
     private boolean linkedShipDockChunkMissing(ServerLevel level, Route route) {
-        return liveTransponderForRoute(level, route)
+        return RouteControllerLookup.liveTransponder(level, route)
                 .flatMap(ShipTransponderBlockEntity::shipDockPos)
                 .map(pos -> !level.hasChunkAt(pos))
                 .orElse(false);
@@ -3469,38 +3469,15 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             Vec3 currentPosition,
             Vec3 guidancePosition
     ) {
-        liveTransponderForRoute(level, route)
-                .filter(AdvancedTransponderBlockEntity.class::isInstance)
-                .map(AdvancedTransponderBlockEntity.class::cast)
-                .ifPresent(transponder -> transponder.updateDriveOutputs(currentPosition, guidancePosition));
+        AdvancedTransponderPrototypeRuntimeSupport.updateDriveOutputs(level, route, currentPosition, guidancePosition);
     }
 
     private void clearAdvancedTransponderDriveOutputs(ServerLevel level, Route route) {
-        liveTransponderForRoute(level, route)
-                .filter(AdvancedTransponderBlockEntity.class::isInstance)
-                .map(AdvancedTransponderBlockEntity.class::cast)
-                .ifPresent(AdvancedTransponderBlockEntity::clearDriveOutputs);
+        AdvancedTransponderPrototypeRuntimeSupport.clearDriveOutputs(level, route);
     }
 
     private boolean isAdvancedTransponderRoute(ServerLevel level, Route route) {
-        return liveTransponderForRoute(level, route)
-                .filter(AdvancedTransponderBlockEntity.class::isInstance)
-                .isPresent();
-    }
-
-    private Optional<ShipTransponderBlockEntity> liveTransponderForRoute(ServerLevel level, Route route) {
-        Optional<BlockPos> routeControllerPos = route.linkedController().controllerPos();
-        if (routeControllerPos.isPresent()
-                && level.getBlockEntity(routeControllerPos.get()) instanceof ShipTransponderBlockEntity transponder) {
-            return Optional.of(transponder);
-        }
-
-        return ShipTransponderRegistry.knownShips(level.dimension()).stream()
-                .filter(snapshot -> snapshot.controllerRef().filter(route.linkedController()::matches).isPresent())
-                .map(snapshot -> level.getBlockEntity(snapshot.transponderPos()))
-                .filter(ShipTransponderBlockEntity.class::isInstance)
-                .map(ShipTransponderBlockEntity.class::cast)
-                .findFirst();
+        return AdvancedTransponderPrototypeRuntimeSupport.isAdvancedTransponderRoute(level, route);
     }
 
     private void setVisualsActive(ServerLevel level, ActivePlayback activePlayback, boolean active) {

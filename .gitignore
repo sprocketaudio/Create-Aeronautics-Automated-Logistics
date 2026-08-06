@@ -43,3 +43,6 @@ local-jars/*
 **/src/generated/**/.cache/
 repo/
 !**/src/**/repo/
+
+### Local Planning Docs ###
+/REFACTOR_0_7_PLAN.md

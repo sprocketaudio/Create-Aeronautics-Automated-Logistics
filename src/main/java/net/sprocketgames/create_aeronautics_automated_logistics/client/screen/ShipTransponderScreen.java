@@ -30,10 +30,8 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
-import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AdvancedTransponderBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
-import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.AdvancedTransponderOverlayClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.CargoLinkPromptClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.DockLinkPromptClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.LogisticsClientOverlays;
@@ -131,6 +129,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     private static final int DEST_DROPDOWN_Y_OFFSET = -1;
 
     private final List<ButtonTooltip> buttonTooltips = new ArrayList<>();
+    private final AdvancedTransponderUiSupport advancedUi;
     private EditBox nameBox;
     private String pendingSubmittedName;
     private IconButton playButton;
@@ -170,6 +169,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
 
     public ShipTransponderScreen(ShipTransponderMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
+        this.advancedUi = new AdvancedTransponderUiSupport(menu);
         this.imageWidth = PANEL_WIDTH;
         this.imageHeight = PANEL_HEIGHT + 108;
         this.inventoryLabelY = 10000;
@@ -186,6 +186,12 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             recordingMode = true;
         }
 
+        initNameBox();
+        initMainButtons();
+        initRouteSelectionWidgets();
+    }
+
+    private void initNameBox() {
         nameBox = new EditBox(new NoShadowFontWrapper(this.font), this.leftPos + 24, this.topPos + 4, PANEL_WIDTH - 48, 10, Component.empty());
         nameBox.setBordered(false);
         nameBox.setMaxLength(64);
@@ -197,7 +203,9 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         nameBox.setFocused(false);
         centerNameBox();
         addRenderableWidget(nameBox);
+    }
 
+    private void initMainButtons() {
         int buttonY = this.topPos + CONTROL_BUTTON_Y;
         playButton = addIconButton(
                 this.leftPos + 111,
@@ -249,7 +257,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                 this.leftPos + FOOTER_OVERLAY_BUTTON_X,
                 this.topPos + 154,
                 AllIcons.I_TARGET,
-                this::toggleAdvancedOverlay
+                advancedUi::toggleOverlay
         );
         addIconButton(
                 this.leftPos + 167,
@@ -300,7 +308,9 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                 this::cancelRecordingSession,
                 Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.record_cancel")
         );
+    }
 
+    private void initRouteSelectionWidgets() {
         originStationBox = createRouteStationBox(ROUTE_SELECTION_ORIGIN_Y, ORIGIN_SELECTOR_X_OFFSET, ORIGIN_SELECTOR_Y_OFFSET);
         destinationStationBox = createRouteStationBox(ROUTE_SELECTION_DESTINATION_Y, DEST_SELECTOR_X_OFFSET, DEST_SELECTOR_Y_OFFSET);
         originStationSuggestions = createStationSuggestions(originStationBox, ORIGIN_DROPDOWN_X_OFFSET, ORIGIN_DROPDOWN_Y_OFFSET);
@@ -368,89 +378,10 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                 && this.minecraft.player != null
                 && menu.isScheduleHeld(this.minecraft.player);
         boolean runControlsLockedByRecording = recordingSessionActive;
-        if (playButton != null) {
-            playButton.visible = showScheduleButtons;
-            playButton.active = showScheduleButtons && !runControlsLockedByRecording && (!scheduleRunning || scheduleHeld);
-            playButton.green = showScheduleButtons && scheduleRunning;
-        }
-        if (stopButton != null) {
-            stopButton.visible = showScheduleButtons;
-            stopButton.active = showScheduleButtons && !runControlsLockedByRecording && scheduleRunning;
-        }
-        if (previewButton != null) {
-            previewButton.visible = showScheduleButtons;
-            previewButton.active = showScheduleButtons
-                    && this.minecraft != null
-                    && this.minecraft.player != null
-                    && menu.canControlTransponderLocally(this.minecraft.player)
-                    && menu.canPreviewOwnedRoute(this.minecraft.player);
-        }
-        if (scheduleEditButton != null) {
-            scheduleEditButton.visible = true;
-            scheduleEditButton.active = this.minecraft != null
-                    && this.minecraft.player != null
-                    && menu.hasOwnedStops(this.minecraft.player);
-        }
-        if (recordButton != null) {
-            recordButton.visible = recordingMode;
-            recordButton.active = recordingMode;
-            recordButton.setIcon(recordingSessionActive ? AllIcons.I_CONFIG_SAVE : AllIcons.I_ADD);
-            recordButton.green = recordingSessionActive;
-        }
-        if (recordCancelButton != null) {
-            recordCancelButton.visible = recordingMode;
-            recordCancelButton.active = recordingMode && recordingSessionActive;
-        }
-        if (originStationBox != null) {
-            originStationBox.visible = routeSelectionOpen;
-            originStationBox.active = routeSelectionOpen;
-        }
-        if (destinationStationBox != null) {
-            destinationStationBox.visible = routeSelectionOpen;
-            destinationStationBox.active = routeSelectionOpen;
-        }
-        if (dockPreviewButton != null) {
-            dockPreviewButton.visible = !recordingMode;
-            dockPreviewButton.active = !recordingMode
-                    && this.minecraft != null
-                    && this.minecraft.player != null
-                    && menu.hasLinkedDock(this.minecraft.player);
-        }
-        if (cargoPreviewButton != null) {
-            cargoPreviewButton.visible = !recordingMode;
-            cargoPreviewButton.active = !recordingMode
-                    && this.minecraft != null
-                    && this.minecraft.player != null
-                    && menu.hasLinkedCargo(this.minecraft.player);
-        }
-        if (overlayToggleButton != null) {
-            boolean advancedTransponder = isAdvancedTransponderMenu();
-            overlayToggleButton.visible = advancedTransponder;
-            overlayToggleButton.active = advancedTransponder;
-            overlayToggleButton.green = advancedTransponder && advancedOverlayEnabled();
-        }
-        if (dockLinkButton != null) {
-            dockLinkButton.visible = !recordingMode;
-            dockLinkButton.active = !recordingMode;
-        }
-        if (dockClearButton != null) {
-            dockClearButton.visible = !recordingMode;
-            dockClearButton.active = !recordingMode
-                    && this.minecraft != null
-                    && this.minecraft.player != null
-                    && menu.hasLinkedDock(this.minecraft.player);
-        }
-        if (cargoLinkButton != null) {
-            cargoLinkButton.visible = !recordingMode;
-            cargoLinkButton.active = !recordingMode;
-        }
-        if (cargoClearButton != null) {
-            cargoClearButton.visible = !recordingMode;
-            cargoClearButton.active = !recordingMode
-                    && this.minecraft != null
-                    && this.minecraft.player != null
-                    && menu.hasLinkedCargo(this.minecraft.player);
-        }
+        syncPrimaryControlState(showScheduleButtons, scheduleRunning, scheduleHeld, runControlsLockedByRecording);
+        syncRecordingControlState();
+        syncRouteSelectionWidgetState();
+        syncLinkedPreviewAndLinkState();
         if (previewButton != null) {
             if (!previewButton.active) {
                 LogisticsClientOverlays.clearFlightPath();
@@ -684,30 +615,96 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         return button;
     }
 
-    private void toggleAdvancedOverlay() {
-        AdvancedTransponderOverlayClientState.toggle(menu.transponderPos());
+    private void syncPrimaryControlState(boolean showScheduleButtons, boolean scheduleRunning, boolean scheduleHeld, boolean runControlsLockedByRecording) {
+        if (playButton != null) {
+            playButton.visible = showScheduleButtons;
+            playButton.active = showScheduleButtons && !runControlsLockedByRecording && (!scheduleRunning || scheduleHeld);
+            playButton.green = showScheduleButtons && scheduleRunning;
+        }
+        if (stopButton != null) {
+            stopButton.visible = showScheduleButtons;
+            stopButton.active = showScheduleButtons && !runControlsLockedByRecording && scheduleRunning;
+        }
+        if (previewButton != null) {
+            previewButton.visible = showScheduleButtons;
+            previewButton.active = showScheduleButtons
+                    && this.minecraft != null
+                    && this.minecraft.player != null
+                    && menu.canControlTransponderLocally(this.minecraft.player)
+                    && menu.canPreviewOwnedRoute(this.minecraft.player);
+        }
+        if (scheduleEditButton != null) {
+            scheduleEditButton.visible = true;
+            scheduleEditButton.active = this.minecraft != null
+                    && this.minecraft.player != null
+                    && menu.hasOwnedStops(this.minecraft.player);
+        }
     }
 
-    private boolean advancedOverlayEnabled() {
-        return AdvancedTransponderOverlayClientState.isEnabled(menu.transponderPos());
+    private void syncRecordingControlState() {
+        if (recordButton != null) {
+            recordButton.visible = recordingMode;
+            recordButton.active = recordingMode;
+            recordButton.setIcon(recordingSessionActive ? AllIcons.I_CONFIG_SAVE : AllIcons.I_ADD);
+            recordButton.green = recordingSessionActive;
+        }
+        if (recordCancelButton != null) {
+            recordCancelButton.visible = recordingMode;
+            recordCancelButton.active = recordingMode && recordingSessionActive;
+        }
     }
 
-    private boolean isAdvancedTransponderMenu() {
-        return this.minecraft != null
-                && this.minecraft.level != null
-                && this.minecraft.level.getBlockEntity(menu.transponderPos()) instanceof AdvancedTransponderBlockEntity;
+    private void syncRouteSelectionWidgetState() {
+        if (originStationBox != null) {
+            originStationBox.visible = routeSelectionOpen;
+            originStationBox.active = routeSelectionOpen;
+        }
+        if (destinationStationBox != null) {
+            destinationStationBox.visible = routeSelectionOpen;
+            destinationStationBox.active = routeSelectionOpen;
+        }
     }
 
-    private List<Component> advancedOverlayTooltip() {
-        return List.of(
-                Component.translatable(
-                        advancedOverlayEnabled()
-                                ? "gui.create_aeronautics_automated_logistics.advanced_transponder.hide_overlay"
-                                : "gui.create_aeronautics_automated_logistics.advanced_transponder.show_overlay"
-                ),
-                Component.translatable("gui.create_aeronautics_automated_logistics.advanced_transponder.overlay.tooltip")
-                        .withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC)
-        );
+    private void syncLinkedPreviewAndLinkState() {
+        if (dockPreviewButton != null) {
+            dockPreviewButton.visible = !recordingMode;
+            dockPreviewButton.active = !recordingMode
+                    && this.minecraft != null
+                    && this.minecraft.player != null
+                    && menu.hasLinkedDock(this.minecraft.player);
+        }
+        if (cargoPreviewButton != null) {
+            cargoPreviewButton.visible = !recordingMode;
+            cargoPreviewButton.active = !recordingMode
+                    && this.minecraft != null
+                    && this.minecraft.player != null
+                    && menu.hasLinkedCargo(this.minecraft.player);
+        }
+        if (overlayToggleButton != null) {
+            advancedUi.syncOverlayButtonState(this.minecraft, overlayToggleButton);
+        }
+        if (dockLinkButton != null) {
+            dockLinkButton.visible = !recordingMode;
+            dockLinkButton.active = !recordingMode;
+        }
+        if (dockClearButton != null) {
+            dockClearButton.visible = !recordingMode;
+            dockClearButton.active = !recordingMode
+                    && this.minecraft != null
+                    && this.minecraft.player != null
+                    && menu.hasLinkedDock(this.minecraft.player);
+        }
+        if (cargoLinkButton != null) {
+            cargoLinkButton.visible = !recordingMode;
+            cargoLinkButton.active = !recordingMode;
+        }
+        if (cargoClearButton != null) {
+            cargoClearButton.visible = !recordingMode;
+            cargoClearButton.active = !recordingMode
+                    && this.minecraft != null
+                    && this.minecraft.player != null
+                    && menu.hasLinkedCargo(this.minecraft.player);
+        }
     }
 
     private void renderHeaderEditIcon(GuiGraphics guiGraphics) {
@@ -835,8 +832,8 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             );
             return;
         }
-        if (overlayToggleButton != null && overlayToggleButton.isHovered() && isAdvancedTransponderMenu()) {
-            guiGraphics.renderTooltip(this.font, advancedOverlayTooltip(), java.util.Optional.empty(), mouseX, mouseY);
+        if (advancedUi.shouldRenderOverlayTooltip(this.minecraft, overlayToggleButton)) {
+            guiGraphics.renderTooltip(this.font, advancedUi.overlayTooltip(), java.util.Optional.empty(), mouseX, mouseY);
             return;
         }
         for (ButtonTooltip tooltip : buttonTooltips) {

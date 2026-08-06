@@ -11,6 +11,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronautic
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.ShipTransponderMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.ShipTransponderRecordingState;
 
 public record ReopenShipTransponderPayload(BlockPos transponderPos, boolean recordingMode) implements CustomPacketPayload {
     public static final Type<ReopenShipTransponderPayload> TYPE = new Type<>(
@@ -43,8 +44,8 @@ public record ReopenShipTransponderPayload(BlockPos transponderPos, boolean reco
         net.sprocketgames.create_aeronautics_automated_logistics.route.RouteStatus projectedRuntimeStatus =
                 net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices.SCHEDULES
                         .projectRuntimeStatus(player.serverLevel(), transponder);
-        ShipTransponderMenu.InitialRecordingState recordingState =
-                ShipTransponderMenu.resolveInitialRecordingState(player, transponder, payload.recordingMode());
+        ShipTransponderRecordingState recordingState =
+                ShipTransponderRecordingState.resolve(player, transponder, payload.recordingMode());
         ShipTransponderMenu statusMenu = new ShipTransponderMenu(
                 0,
                 player.getInventory(),
