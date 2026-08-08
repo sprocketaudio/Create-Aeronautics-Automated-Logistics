@@ -113,22 +113,15 @@ public final class AutomatedLogisticsCommands {
 
     public static void onRegisterCommands(RegisterCommandsEvent event) {
         event.getDispatcher().register(Commands.literal("aal")
-                .then(debugTree().requires(source -> source.hasPermission(2)))
                 .then(tpTree().requires(source -> source.hasPermission(2)))
                 .then(recoverTree().requires(source -> source.hasPermission(2)))
                 .then(materializationTree().requires(source -> source.hasPermission(2)))
                 .then(runtimeTree()));
         event.getDispatcher().register(Commands.literal("automated_logistics")
-                .then(debugTree().requires(source -> source.hasPermission(2)))
                 .then(tpTree().requires(source -> source.hasPermission(2)))
                 .then(recoverTree().requires(source -> source.hasPermission(2)))
                 .then(materializationTree().requires(source -> source.hasPermission(2)))
                 .then(runtimeTree()));
-    }
-
-    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> debugTree() {
-        return Commands.literal("debug")
-                .then(AdvancedTransponderDebugCommands.tree());
     }
 
     private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> tpTree() {

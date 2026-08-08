@@ -35,7 +35,7 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.AutomatedLogisticsConfig;
 import net.sprocketgames.create_aeronautics_automated_logistics.compat.FtbTeamsCompat;
-import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AdvancedTransponderBlockEntity;
+import net.sprocketgames.create_aeronautics_automated_logistics.drive.DrivePlaybackMode;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.cargo.CargoLinkDiscovery;
 import net.sprocketgames.create_aeronautics_automated_logistics.cargo.LinkedCargoEntry;
@@ -147,7 +147,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
     private static final String VALIDATED_LEG_START_INDEX = "validatedLegStartIndex";
     private static final String VALIDATED_LEG_TARGET_INDEX = "validatedLegTargetIndex";
     private static final String DOCKING_SESSION = "dockingSession";
-    private static final String ADVANCED_OUTPUT_DRIVE = "advancedOutputDrive";
 
     private final Map<RouteId, ActivePlayback> activePlaybacks = new HashMap<>();
     private final Map<RouteId, CompoundTag> pendingRuntimePlaybacks = new HashMap<>();
@@ -332,7 +331,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 stationPos,
                 controller.get(),
                 dockRequestId,
-                isAdvancedTransponderRoute(level, route)
+                DrivePlaybackMode.resolve(level, route)
         );
         if (!validateCurrentLegForDeparture(level, activePlayback)) {
             return PlaybackOperationResult.failure(PlaybackFailure.COLLISION_OR_OBSTRUCTION);
@@ -384,7 +383,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             return;
         }
 
-        clearAdvancedTransponderDriveOutputs(level, activePlayback.route());
         activePlayback.dockingSession(AutomatedLogisticsServices.DOCKING.cancel(
                 activePlayback.dockingSession(),
                 "playback_stopped",
@@ -613,7 +611,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 stationPos,
                 controller.get(),
                 dockRequestId,
-                isAdvancedTransponderRoute(level, route)
+                DrivePlaybackMode.resolve(level, route)
         );
         activePlaybacks.put(route.id(), activePlayback);
         holdFault(level, activePlayback, failure);
@@ -1197,10 +1195,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         if (!controller.isLoaded(level)) {
             requestStationInteractionLoading(level, station, activePlayback, "stored_body_materialization");
             activePlayback.markStoredPointerCleanupNeeded();
-            if (activePlayback.advancedOutputDrive()) {
-                clearAdvancedTransponderDriveOutputs(level, activePlayback.route());
-                return PlaybackFailure.VEHICLE_UNLOADED;
-            }
             return tickUnloadedTransit(level, station, activePlayback);
         }
         if (!controller.isAssembled()) {
@@ -1387,12 +1381,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             }
         }
         if (activePlayback.shouldHoldAtTarget(distanceToTarget)) {
-            clearAdvancedTransponderDriveOutputs(level, activePlayback.route());
-            if (activePlayback.advancedOutputDrive()) {
-                activePlayback.tickSegment();
-                activePlayback.resetProgress(distanceToTarget);
-                return null;
-            }
             controller.moveToward(
                     level,
                     targetPosition,
@@ -1490,14 +1478,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             guidanceRotation = targetRotation;
         }
 
-        if (activePlayback.advancedOutputDrive()) {
-            updateAdvancedTransponderDriveOutputs(level, activePlayback.route(), controller.position(), guidancePosition);
-            clearDeferredDockOutputs(level, activePlayback.route().id());
-            activePlayback.tickSegment();
-            activePlayback.tickRouteStartStabilization();
-            return null;
-        }
-
         Vec3 collisionTargetPosition = guidancePosition;
         if (AutomatedLogisticsConfig.STOP_ON_COLLISION.get()
                 && controller.collisionEntity().map(entity -> willCollide(level, entity, collisionTargetPosition)).orElse(false)) {
@@ -1528,7 +1508,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 AutomatedLogisticsConfig.MAX_PLAYBACK_SPEED_BLOCKS_PER_SECOND.get(),
                 targetSpeed
         );
-        updateAdvancedTransponderDriveOutputs(level, activePlayback.route(), controller.position(), guidancePosition);
         clearDeferredDockOutputs(level, activePlayback.route().id());
         activePlayback.tickSegment();
         activePlayback.tickRouteStartStabilization();
@@ -1542,7 +1521,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             Optional<AirshipStationBlockEntity> station,
             ActivePlayback activePlayback
     ) {
-        clearAdvancedTransponderDriveOutputs(level, activePlayback.route());
         if (activePlayback.isWaiting()) {
             if (activePlayback.requiresStationContext()) {
                 DockQueueGateResult unloadedDockGate = unloadedDockWaitGate(level, station, activePlayback);
@@ -2359,7 +2337,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             );
             activePlayback.clearDockQueueHold();
         }
-        clearAdvancedTransponderDriveOutputs(level, activePlayback.route());
         station.waitPlayback(activePlayback.route());
         CreateAeronauticsAutomatedLogistics.debugPlayback(
                 "Playback {} waiting at stop {} for {} ticks",
@@ -2844,10 +2821,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         VehicleController controller = activePlayback.controller(level);
         activePlayback.ensurePrimedSegmentProgress();
         Vec3 guidancePosition = activePlayback.guidancePosition();
-        if (activePlayback.advancedOutputDrive()) {
-            updateAdvancedTransponderDriveOutputs(level, activePlayback.route(), controller.position(), guidancePosition);
-            return null;
-        }
         double targetSpeed = activePlayback.targetSpeedBlocksPerTick();
         CreateAeronauticsAutomatedLogistics.debugPlayback(
                 "Priming playback {} point={} stabilizing={} speed={} position={} guidance={} target={}",
@@ -3001,7 +2974,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 activePlayback.route().id().value(),
                 failure
         );
-        clearAdvancedTransponderDriveOutputs(level, activePlayback.route());
         setVisualsActive(level, activePlayback, false);
         activePlayback.pauseTransient(failure);
         activePlayback.dockingSession(AutomatedLogisticsServices.DOCKING.pause(
@@ -3023,7 +2995,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 activePlayback.targetIndex(),
                 activePlayback.playbackTicks()
         );
-        clearAdvancedTransponderDriveOutputs(level, activePlayback.route());
         setVisualsActive(level, activePlayback, false);
         activePlayback.pauseFault(failure);
         activePlayback.dockingSession(AutomatedLogisticsServices.DOCKING.fault(
@@ -3106,7 +3077,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 activePlayback.targetIndex(),
                 activePlayback.playbackTicks()
         );
-        clearAdvancedTransponderDriveOutputs(level, activePlayback.route());
         setVisualsActive(level, activePlayback, false);
         clearDeferredDockOutputs(level, activePlayback.route().id());
         stationAt(level, activePlayback.stationPos())
@@ -3119,13 +3089,11 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
     }
 
     private void complete(ServerLevel level, ActivePlayback activePlayback) {
-        clearAdvancedTransponderDriveOutputs(level, activePlayback.route());
         setVisualsActive(level, activePlayback, false);
         activePlayback.completed(true);
     }
 
     private void finishCompletedPlayback(ServerLevel level, ActivePlayback activePlayback, boolean stopStationPlayback) {
-        clearAdvancedTransponderDriveOutputs(level, activePlayback.route());
         clearDeferredDockOutputs(level, activePlayback.route().id());
         stationAt(level, activePlayback.stationPos())
                 .ifPresent(station -> clearDockOutputs(level, station, activePlayback));
@@ -3461,23 +3429,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 .flatMap(ShipTransponderBlockEntity::shipDockPos)
                 .map(pos -> !level.hasChunkAt(pos))
                 .orElse(false);
-    }
-
-    private void updateAdvancedTransponderDriveOutputs(
-            ServerLevel level,
-            Route route,
-            Vec3 currentPosition,
-            Vec3 guidancePosition
-    ) {
-        AdvancedTransponderPrototypeRuntimeSupport.updateDriveOutputs(level, route, currentPosition, guidancePosition);
-    }
-
-    private void clearAdvancedTransponderDriveOutputs(ServerLevel level, Route route) {
-        AdvancedTransponderPrototypeRuntimeSupport.clearDriveOutputs(level, route);
-    }
-
-    private boolean isAdvancedTransponderRoute(ServerLevel level, Route route) {
-        return AdvancedTransponderPrototypeRuntimeSupport.isAdvancedTransponderRoute(level, route);
     }
 
     private void setVisualsActive(ServerLevel level, ActivePlayback activePlayback, boolean active) {
@@ -4280,7 +4231,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         tag.putString(RUNTIME_MODE, activePlayback.runtimeMode().name());
         activePlayback.validatedLegStartIndex().ifPresent(index -> tag.putInt(VALIDATED_LEG_START_INDEX, index));
         activePlayback.validatedLegTargetIndex().ifPresent(index -> tag.putInt(VALIDATED_LEG_TARGET_INDEX, index));
-        tag.putBoolean(ADVANCED_OUTPUT_DRIVE, activePlayback.advancedOutputDrive());
         DockingSessionProjection.ProjectionResult dockingProjection = projectDockingSession(activePlayback);
         DockingSession savedDockingSession = activePlayback.dockingSession();
         tag.put(DOCKING_SESSION, DockingSessionCodec.write(savedDockingSession));
@@ -4350,9 +4300,6 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         RuntimeMode runtimeMode = readRuntimeMode(tag);
         OptionalInt validatedLegStartIndex = readLegIndex(tag, VALIDATED_LEG_START_INDEX, route.get());
         OptionalInt validatedLegTargetIndex = readLegIndex(tag, VALIDATED_LEG_TARGET_INDEX, route.get());
-        boolean advancedOutputDrive = tag.contains(ADVANCED_OUTPUT_DRIVE)
-                ? tag.getBoolean(ADVANCED_OUTPUT_DRIVE)
-                : isAdvancedTransponderRoute(level, route.get());
         DockingSessionReadResult typedDockingSession = tag.contains(DOCKING_SESSION, Tag.TAG_COMPOUND)
                 ? DockingSessionCodec.read(tag.getCompound(DOCKING_SESSION))
                 : DockingSessionCodec.read(new CompoundTag());
@@ -4422,7 +4369,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 runtimeMode,
                 validatedLegStartIndex,
                 validatedLegTargetIndex,
-                advancedOutputDrive
+                DrivePlaybackMode.resolve(level, route.get())
         );
         DockingSessionProjection.ProjectionResult restoredProjection =
                 projectDockingSession(restoredPlayback, tag.getBoolean(DOCK_LOCKED));
@@ -5018,7 +4965,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         private boolean dockReservationReleaseClampedToNextGate;
         private int unloadedMaterializeCooldownTicks;
         private boolean storedPointerCleanupNeeded = true;
-        private final boolean advancedOutputDrive;
+        private final DrivePlaybackMode drivePlaybackMode;
 
         private ActivePlayback(
                 Route route,
@@ -5029,7 +4976,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 Optional<RouteRotation> joinStartRotation,
                 int targetIndex,
                 int direction,
-                boolean advancedOutputDrive
+                DrivePlaybackMode drivePlaybackMode
         ) {
             this.route = route;
             this.dockRequestId = dockRequestId;
@@ -5039,7 +4986,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             this.joinStartRotation = joinStartRotation;
             this.targetIndex = targetIndex;
             this.direction = direction;
-            this.advancedOutputDrive = advancedOutputDrive;
+            this.drivePlaybackMode = drivePlaybackMode;
             this.dockingSession = AutomatedLogisticsServices.DOCKING.idleSession(
                     route,
                     dockRequestId,
@@ -5056,7 +5003,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 BlockPos stationPos,
                 VehicleController controller,
                 DockRequestId dockRequestId,
-                boolean advancedOutputDrive
+                DrivePlaybackMode drivePlaybackMode
         ) {
             Vec3 vehiclePosition = controller.position();
             Optional<RouteRotation> vehicleRotation = controller.routeRotation();
@@ -5072,7 +5019,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                         vehicleRotation,
                         1,
                         1,
-                        advancedOutputDrive
+                        drivePlaybackMode
                 );
                 playback.routeStartStabilizationTicksRemaining = ROUTE_START_STABILIZATION_TICKS;
                 return playback;
@@ -5087,7 +5034,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                     vehicleRotation,
                     lastIndex - 1,
                     -1,
-                    advancedOutputDrive
+                    drivePlaybackMode
             );
             playback.routeStartStabilizationTicksRemaining = ROUTE_START_STABILIZATION_TICKS;
             return playback;
@@ -5130,7 +5077,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 RuntimeMode runtimeMode,
                 OptionalInt validatedLegStartIndex,
                 OptionalInt validatedLegTargetIndex,
-                boolean advancedOutputDrive
+                DrivePlaybackMode drivePlaybackMode
         ) {
             ActivePlayback activePlayback = new ActivePlayback(
                     route,
@@ -5141,7 +5088,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                     joinStartRotation,
                     targetIndex,
                     direction,
-                    advancedOutputDrive
+                    drivePlaybackMode
             );
             activePlayback.segmentDurationTicks = Math.max(1L, segmentDurationTicks);
             activePlayback.segmentElapsedTicks = Math.max(0, segmentElapsedTicks);
@@ -5180,8 +5127,8 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             return activePlayback;
         }
 
-        private boolean advancedOutputDrive() {
-            return advancedOutputDrive;
+        private DrivePlaybackMode drivePlaybackMode() {
+            return drivePlaybackMode;
         }
 
         private static double nearestEndpointDistance(Route route, VehicleController controller) {

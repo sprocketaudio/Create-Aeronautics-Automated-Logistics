@@ -1,0 +1,113 @@
+{
+	"format_version": "1.21.11",
+	"credit": "Created for Create Aeronautics: Automated Logistics",
+	"parent": "block/block",
+	"ambientocclusion": false,
+	"textures": {
+		"particle": "create:block/andesite_casing",
+		"base": "create:block/andesite_casing",
+		"brass": "create:block/brass_casing",
+		"channel": "create:block/copper_redstone_plate",
+		"contact": "create:block/contact_side"
+	},
+	"elements": [
+		{
+			"name": "andesite_base",
+			"from": [1, 0, 1],
+			"to": [15, 2, 15],
+			"faces": {
+				"north": {"uv": [1, 14, 15, 16], "texture": "#base"},
+				"east": {"uv": [1, 14, 15, 16], "texture": "#base"},
+				"south": {"uv": [1, 14, 15, 16], "texture": "#base"},
+				"west": {"uv": [1, 14, 15, 16], "texture": "#base"},
+				"up": {"uv": [1, 1, 15, 15], "texture": "#base"},
+				"down": {"uv": [1, 1, 15, 15], "texture": "#base"}
+			}
+		},
+		{
+			"name": "brass_frame",
+			"from": [2, 2, 2],
+			"to": [14, 3, 14],
+			"faces": {
+				"north": {"uv": [2, 15, 14, 16], "texture": "#brass"},
+				"east": {"uv": [2, 15, 14, 16], "texture": "#brass"},
+				"south": {"uv": [2, 15, 14, 16], "texture": "#brass"},
+				"west": {"uv": [2, 15, 14, 16], "texture": "#brass"},
+				"up": {"uv": [2, 2, 14, 14], "texture": "#brass"},
+				"down": {"uv": [2, 2, 14, 14], "texture": "#brass"}
+			}
+		},
+		{
+			"name": "signal_channel",
+			"from": [6, 3, 3],
+			"to": [10, 4, 13],
+			"faces": {
+				"north": {"uv": [6, 12, 10, 13], "texture": "#channel"},
+				"east": {"uv": [3, 6, 13, 10], "texture": "#channel"},
+				"south": {"uv": [6, 12, 10, 13], "texture": "#channel"},
+				"west": {"uv": [3, 6, 13, 10], "texture": "#channel"},
+				"up": {"uv": [6, 3, 10, 13], "texture": "#channel"},
+				"down": {"uv": [6, 3, 10, 13], "texture": "#channel"}
+			}
+		},
+		{
+			"name": "output_contact",
+			"from": [4, 3, 2],
+			"to": [12, 5, 5],
+			"rotation": {"angle": 0, "axis": "y", "origin": [0, 0, 1]},
+			"faces": {
+				"north": {"uv": [4, 5, 12, 9], "texture": "#contact"},
+				"east": {"uv": [0, 12, 3, 16], "texture": "#brass"},
+				"south": {"uv": [4, 5, 12, 9], "texture": "#brass"},
+				"west": {"uv": [0, 12, 3, 16], "texture": "#brass"},
+				"up": {"uv": [4, 0, 12, 3], "texture": "#brass"},
+				"down": {"uv": [4, 0, 12, 3], "texture": "#brass"}
+			}
+		},
+		{
+			"name": "indicator",
+			"from": [6, 4, 8],
+			"to": [10, 5, 11],
+			"faces": {
+				"north": {"uv": [6, 12, 10, 13], "texture": "#brass"},
+				"east": {"uv": [8, 6, 11, 10], "texture": "#brass"},
+				"south": {"uv": [6, 12, 10, 13], "texture": "#brass"},
+				"west": {"uv": [8, 6, 11, 10], "texture": "#brass"},
+				"up": {"uv": [6, 8, 10, 11], "texture": "#channel"},
+				"down": {"uv": [6, 8, 10, 11], "texture": "#brass"}
+			}
+		}
+	],
+	"display": {
+		"thirdperson_righthand": {
+			"rotation": [75, 45, 0],
+			"translation": [0, 2.5, 0],
+			"scale": [0.5, 0.5, 0.5]
+		},
+		"thirdperson_lefthand": {
+			"rotation": [75, 45, 0],
+			"translation": [0, 2.5, 0],
+			"scale": [0.5, 0.5, 0.5]
+		},
+		"firstperson_righthand": {
+			"rotation": [0, 45, 0],
+			"scale": [0.5, 0.5, 0.5]
+		},
+		"firstperson_lefthand": {
+			"rotation": [0, -135, 0],
+			"scale": [0.5, 0.5, 0.5]
+		},
+		"ground": {
+			"translation": [0, 2, 0],
+			"scale": [0.35, 0.35, 0.35]
+		},
+		"gui": {
+			"rotation": [30, -135, 0],
+			"translation": [0, 1, 0],
+			"scale": [0.75, 0.75, 0.75]
+		},
+		"fixed": {
+			"scale": [0.65, 0.65, 0.65]
+		}
+	}
+}

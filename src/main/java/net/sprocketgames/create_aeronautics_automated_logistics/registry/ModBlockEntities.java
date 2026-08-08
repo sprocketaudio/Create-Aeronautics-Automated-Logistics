@@ -7,6 +7,7 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AdvancedTransponderBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity;
+import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.DriveModuleBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.LogisticsTerminalBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
 
@@ -34,6 +35,12 @@ public final class ModBlockEntities {
             BLOCK_ENTITY_TYPES.register(
                     "advanced_transponder",
                     () -> BlockEntityType.Builder.of(AdvancedTransponderBlockEntity::new, ModBlocks.ADVANCED_TRANSPONDER.get()).build(null)
+            );
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<DriveModuleBlockEntity>> DRIVE_MODULE =
+            BLOCK_ENTITY_TYPES.register(
+                    "drive_module",
+                    () -> BlockEntityType.Builder.of(DriveModuleBlockEntity::new, ModBlocks.DRIVE_MODULE.get()).build(null)
             );
 
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<LogisticsTerminalBlockEntity>> LOGISTICS_TERMINAL =

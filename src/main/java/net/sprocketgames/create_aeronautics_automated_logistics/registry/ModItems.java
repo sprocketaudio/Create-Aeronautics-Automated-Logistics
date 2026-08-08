@@ -46,6 +46,15 @@ public final class ModItems {
             )
     );
 
+    public static final DeferredItem<BlockItem> DRIVE_MODULE = ITEMS.register(
+            "drive_module",
+            () -> new LogisticsBlockItem(
+                    ModBlocks.DRIVE_MODULE.get(),
+                    new Item.Properties(),
+                    "block.create_aeronautics_automated_logistics.drive_module.tooltip"
+            )
+    );
+
     private ModItems() {
     }
 }

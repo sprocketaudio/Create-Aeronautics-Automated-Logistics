@@ -106,7 +106,6 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     private static final int FOOTER_ROUTE_BUTTON_X = 17;
     private static final int FOOTER_DOCK_BUTTON_X = 38;
     private static final int FOOTER_CARGO_BUTTON_X = 59;
-    private static final int FOOTER_OVERLAY_BUTTON_X = 80;
     private static final int ROUTE_SELECTION_WIDTH = 206;
     private static final int ROUTE_SELECTION_HEIGHT = 101;
     private static final int ROUTE_SELECTION_Y = 43;
@@ -129,7 +128,6 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     private static final int DEST_DROPDOWN_Y_OFFSET = -1;
 
     private final List<ButtonTooltip> buttonTooltips = new ArrayList<>();
-    private final AdvancedTransponderUiSupport advancedUi;
     private EditBox nameBox;
     private String pendingSubmittedName;
     private IconButton playButton;
@@ -139,7 +137,6 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     private IconButton previewButton;
     private IconButton dockPreviewButton;
     private IconButton cargoPreviewButton;
-    private IconButton overlayToggleButton;
     private IconButton scheduleEditButton;
     private MiniIconButton dockLinkButton;
     private MiniIconButton dockClearButton;
@@ -169,7 +166,6 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
 
     public ShipTransponderScreen(ShipTransponderMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
-        this.advancedUi = new AdvancedTransponderUiSupport(menu);
         this.imageWidth = PANEL_WIDTH;
         this.imageHeight = PANEL_HEIGHT + 108;
         this.inventoryLabelY = 10000;
@@ -252,12 +248,6 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                 SHOW_CARGO_ICON,
                 this::toggleCargoPreview,
                 cargoPreviewTooltip()
-        );
-        overlayToggleButton = addIconButton(
-                this.leftPos + FOOTER_OVERLAY_BUTTON_X,
-                this.topPos + 154,
-                AllIcons.I_TARGET,
-                advancedUi::toggleOverlay
         );
         addIconButton(
                 this.leftPos + 167,
@@ -680,9 +670,6 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                     && this.minecraft.player != null
                     && menu.hasLinkedCargo(this.minecraft.player);
         }
-        if (overlayToggleButton != null) {
-            advancedUi.syncOverlayButtonState(this.minecraft, overlayToggleButton);
-        }
         if (dockLinkButton != null) {
             dockLinkButton.visible = !recordingMode;
             dockLinkButton.active = !recordingMode;
@@ -832,16 +819,11 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             );
             return;
         }
-        if (advancedUi.shouldRenderOverlayTooltip(this.minecraft, overlayToggleButton)) {
-            guiGraphics.renderTooltip(this.font, advancedUi.overlayTooltip(), java.util.Optional.empty(), mouseX, mouseY);
-            return;
-        }
         for (ButtonTooltip tooltip : buttonTooltips) {
             if (tooltip.button() == recordButton
                     || tooltip.button() == previewButton
                     || tooltip.button() == dockPreviewButton
                     || tooltip.button() == cargoPreviewButton
-                    || tooltip.button() == overlayToggleButton
                     || tooltip.button() == dockClearButton
                     || tooltip.button() == cargoClearButton) {
                 continue;

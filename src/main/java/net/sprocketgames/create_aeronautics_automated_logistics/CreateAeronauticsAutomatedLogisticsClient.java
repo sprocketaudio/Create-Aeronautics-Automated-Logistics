@@ -21,8 +21,6 @@ import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.Ai
 import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.LogisticsTerminalClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.LogisticsTerminalScreen;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.ShipTransponderScreen;
-import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.AdvancedTransponderOverlayRenderer;
-import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.AdvancedTransponderOverlayClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.AutomatedShipVisualClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.DockLinkPromptClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.CargoLinkPromptClientState;
@@ -58,7 +56,6 @@ public class CreateAeronauticsAutomatedLogisticsClient {
     }
 
     public static void onClientTick(ClientTickEvent.Post event) {
-        AdvancedTransponderOverlayClientState.clearIfWorldMissing();
         AutomatedShipVisualClientState.clearIfWorldMissing();
         DockLinkPromptClientState.tick();
         CargoLinkPromptClientState.tick();
@@ -75,7 +72,6 @@ public class CreateAeronauticsAutomatedLogisticsClient {
     }
 
     public static void onRenderLevelStage(RenderLevelStageEvent event) {
-        AdvancedTransponderOverlayRenderer.render(event);
         LogisticsTerminalTopPreviewRenderer.render(event);
     }
 
