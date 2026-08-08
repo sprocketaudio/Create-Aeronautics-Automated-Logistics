@@ -56,5 +56,6 @@ public final class RecordingServerEvents {
 
     public static void onServerStopped(ServerStoppedEvent event) {
         AutomatedLogisticsServices.clearRuntime();
+        LogisticsTerminalRegistry.clear();
     }
 }
