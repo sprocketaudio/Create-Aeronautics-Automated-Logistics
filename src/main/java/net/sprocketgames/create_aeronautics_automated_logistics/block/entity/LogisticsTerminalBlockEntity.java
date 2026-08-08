@@ -21,6 +21,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.compat.FtbTeamsC
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityNames;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.LogisticsTerminalMenu;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.LogisticsTerminalRegistry;
 import org.jetbrains.annotations.Nullable;
 
 public class LogisticsTerminalBlockEntity extends BlockEntity implements MenuProvider {
@@ -41,7 +42,8 @@ public class LogisticsTerminalBlockEntity extends BlockEntity implements MenuPro
         super.onLoad();
         if (level != null && level.isClientSide) {
             LogisticsTerminalPreviewClientState.register(worldPosition);
-        } else {
+        } else if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            LogisticsTerminalRegistry.register(serverLevel, this);
             refreshOwnerTeamId();
         }
     }
@@ -50,6 +52,8 @@ public class LogisticsTerminalBlockEntity extends BlockEntity implements MenuPro
     public void setRemoved() {
         if (level != null && level.isClientSide) {
             LogisticsTerminalPreviewClientState.unregister(worldPosition);
+        } else if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            LogisticsTerminalRegistry.unregister(serverLevel, worldPosition);
         }
         super.setRemoved();
     }
@@ -59,6 +63,8 @@ public class LogisticsTerminalBlockEntity extends BlockEntity implements MenuPro
         super.clearRemoved();
         if (level != null && level.isClientSide) {
             LogisticsTerminalPreviewClientState.register(worldPosition);
+        } else if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            LogisticsTerminalRegistry.register(serverLevel, this);
         }
     }
 

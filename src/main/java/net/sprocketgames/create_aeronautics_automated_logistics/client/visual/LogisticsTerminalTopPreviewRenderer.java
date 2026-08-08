@@ -40,7 +40,8 @@ public final class LogisticsTerminalTopPreviewRenderer {
             0xFF7CC9FF, 0xFFF7BE6A, 0xFF89E0A8, 0xFFFF8F8F,
             0xFFC6A0FF, 0xFFFFD36E, 0xFF7DE1D8, 0xFFFFA5D8
     };
-    private static final double MAX_RENDER_DISTANCE = 96.0D;
+    // The world-space lines use Minecraft's fixed pixel-width line renderer, so distant detail becomes visual noise.
+    private static final double MAX_RENDER_DISTANCE = 24.0D;
     private static final float TOP_Y = 11.02F / 16.0F;
     private static final float MIN_X = 2.7F / 16.0F;
     private static final float MAX_X = 13.3F / 16.0F;

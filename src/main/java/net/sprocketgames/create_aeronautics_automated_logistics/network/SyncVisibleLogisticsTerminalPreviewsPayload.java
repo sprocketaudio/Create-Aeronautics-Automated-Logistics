@@ -9,14 +9,11 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
-import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.LogisticsTerminalBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.LogisticsTerminalPreviewClientState;
-import net.sprocketgames.create_aeronautics_automated_logistics.service.LogisticsTerminalPermissionService;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.LogisticsTerminalRegistry;
 
 public record SyncVisibleLogisticsTerminalPreviewsPayload(List<BlockPos> positions) implements CustomPacketPayload {
     public static final Type<SyncVisibleLogisticsTerminalPreviewsPayload> TYPE = new Type<>(
@@ -24,8 +21,6 @@ public record SyncVisibleLogisticsTerminalPreviewsPayload(List<BlockPos> positio
     );
     public static final StreamCodec<RegistryFriendlyByteBuf, SyncVisibleLogisticsTerminalPreviewsPayload> STREAM_CODEC =
             StreamCodec.ofMember(SyncVisibleLogisticsTerminalPreviewsPayload::write, SyncVisibleLogisticsTerminalPreviewsPayload::read);
-    private static final int MAX_PREVIEW_DISTANCE = 96;
-
     public SyncVisibleLogisticsTerminalPreviewsPayload {
         positions = positions == null ? List.of() : List.copyOf(positions);
     }
@@ -35,30 +30,7 @@ public record SyncVisibleLogisticsTerminalPreviewsPayload(List<BlockPos> positio
     }
 
     private static List<BlockPos> visibleTerminalPositions(ServerPlayer player) {
-        int chunkRadius = (MAX_PREVIEW_DISTANCE >> 4) + 1;
-        int centerChunkX = player.chunkPosition().x;
-        int centerChunkZ = player.chunkPosition().z;
-        List<BlockPos> positions = new ArrayList<>();
-        for (int chunkX = centerChunkX - chunkRadius; chunkX <= centerChunkX + chunkRadius; chunkX++) {
-            for (int chunkZ = centerChunkZ - chunkRadius; chunkZ <= centerChunkZ + chunkRadius; chunkZ++) {
-                var chunk = player.serverLevel().getChunk(chunkX, chunkZ, ChunkStatus.FULL, false);
-                if (!(chunk instanceof LevelChunk levelChunk)) {
-                    continue;
-                }
-                for (var blockEntity : levelChunk.getBlockEntities().values()) {
-                    if (!(blockEntity instanceof LogisticsTerminalBlockEntity terminal)) {
-                        continue;
-                    }
-                    if (blockEntity.getBlockPos().distToCenterSqr(player.position()) > (double) MAX_PREVIEW_DISTANCE * MAX_PREVIEW_DISTANCE) {
-                        continue;
-                    }
-                    if (LogisticsTerminalPermissionService.canSeePreview(player, terminal)) {
-                        positions.add(blockEntity.getBlockPos().immutable());
-                    }
-                }
-            }
-        }
-        return positions;
+        return LogisticsTerminalRegistry.visibleTerminalPositions(player);
     }
 
     private static SyncVisibleLogisticsTerminalPreviewsPayload read(RegistryFriendlyByteBuf buffer) {
