@@ -1,5 +1,6 @@
 ### Gradle ###
 .gradle
+/.gradle-user/
 build/
 gradle-local.properties
 !gradle/wrapper/gradle-wrapper.jar
@@ -43,3 +44,6 @@ local-jars/*
 **/src/generated/**/.cache/
 repo/
 !**/src/**/repo/
+
+### Local Planning Docs ###
+/REFACTOR_0_7_PLAN.md

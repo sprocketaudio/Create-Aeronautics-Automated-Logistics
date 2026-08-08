@@ -44,6 +44,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTra
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderSnapshot;
 import net.sprocketgames.create_aeronautics_automated_logistics.materialization.ShipBodyDirectorySavedData;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.ShipTransponderMenu;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.ShipTransponderRecordingState;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlocks;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipSchedule;
@@ -159,10 +160,10 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     public AbstractContainerMenu createMenu(int containerId, Inventory playerInventory, Player player) {
         if (level instanceof ServerLevel serverLevel) {
             RouteStatus projectedRuntimeStatus = AutomatedLogisticsServices.SCHEDULES.projectRuntimeStatus(serverLevel, this);
-            ShipTransponderMenu.InitialRecordingState recordingState =
+            ShipTransponderRecordingState recordingState =
                     player instanceof ServerPlayer serverPlayer
-                            ? ShipTransponderMenu.resolveInitialRecordingState(serverPlayer, this, false)
-                            : new ShipTransponderMenu.InitialRecordingState(false, false, appendToSchedule());
+                            ? ShipTransponderRecordingState.resolve(serverPlayer, this, false)
+                            : new ShipTransponderRecordingState(false, false, appendToSchedule());
             ShipTransponderMenu menu = new ShipTransponderMenu(
                     containerId,
                     playerInventory,

@@ -50,7 +50,6 @@ import net.sprocketgames.create_aeronautics_automated_logistics.service.Automate
 import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoFailureContext;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoLinkInteractionService;
-import net.sprocketgames.create_aeronautics_automated_logistics.service.RecordingSession;
 import java.util.Locale;
 import java.util.ArrayList;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.PlaybackFailure;
@@ -387,31 +386,6 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
             tooltip.add(new StatusTooltipLine(buffer.readUtf(512), buffer.readInt()));
         }
         return new ViewSnapshot(text, color, active, List.copyOf(tooltip));
-    }
-
-    public static InitialRecordingState resolveInitialRecordingState(ServerPlayer player, ShipTransponderBlockEntity transponder, boolean preferredMode) {
-        boolean sessionActive = isActiveRecordingForTransponder(player, transponder);
-        return new InitialRecordingState(preferredMode || sessionActive, sessionActive, transponder.appendToSchedule());
-    }
-
-    private static boolean isActiveRecordingForTransponder(ServerPlayer player, ShipTransponderBlockEntity transponder) {
-        Optional<RecordingSession> session = AutomatedLogisticsServices.RECORDING.activeRecordingForPlayer(player.getUUID());
-        if (session.isEmpty()) {
-            return false;
-        }
-        RecordingSession active = session.get();
-        Optional<UUID> activeVehicleId = active.controllerRef().vehicleId();
-        Optional<UUID> runtimeVehicleId = transponder.runtimeShipId();
-        if (activeVehicleId.isPresent() && runtimeVehicleId.isPresent() && activeVehicleId.get().equals(runtimeVehicleId.get())) {
-            return true;
-        }
-        if (player.serverLevel().getBlockEntity(active.stationPos()) instanceof AirshipStationBlockEntity station) {
-            return station.selectedTransponderId().filter(transponder.transponderId()::equals).isPresent();
-        }
-        return false;
-    }
-
-    public record InitialRecordingState(boolean recordingMode, boolean recordingSessionActive, boolean appendToSchedule) {
     }
 
     public String shipName(Player player) {

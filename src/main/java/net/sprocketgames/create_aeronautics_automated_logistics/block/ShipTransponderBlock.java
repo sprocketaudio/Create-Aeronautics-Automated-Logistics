@@ -37,6 +37,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.Lo
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.IdentityDirectorySavedData;
 import net.sprocketgames.create_aeronautics_automated_logistics.identity.ShipTransponderRegistry;
 import net.sprocketgames.create_aeronautics_automated_logistics.menu.ShipTransponderMenu;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.ShipTransponderRecordingState;
 import net.sprocketgames.create_aeronautics_automated_logistics.materialization.ShipBodyDirectorySavedData;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.AirshipScheduleNbtSerializer;
@@ -154,8 +155,8 @@ public class ShipTransponderBlock extends BaseEntityBlock implements EntityBlock
                 return InteractionResult.CONSUME;
             }
             RouteStatus projectedRuntimeStatus = AutomatedLogisticsServices.SCHEDULES.projectRuntimeStatus((ServerLevel) level, transponder);
-            ShipTransponderMenu.InitialRecordingState recordingState =
-                    ShipTransponderMenu.resolveInitialRecordingState(serverPlayer, transponder, false);
+            ShipTransponderRecordingState recordingState =
+                    ShipTransponderRecordingState.resolve(serverPlayer, transponder, false);
             ShipTransponderMenu statusMenu = new ShipTransponderMenu(
                     0,
                     serverPlayer.getInventory(),
