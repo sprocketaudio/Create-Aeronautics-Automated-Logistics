@@ -12,5 +12,6 @@ public enum RouteStatus {
     FAILED,
     BLOCKED,
     MISSING_VEHICLE,
-    INVALID_ROUTE
+    INVALID_ROUTE,
+    RESTORING
 }

@@ -36,6 +36,7 @@ public class AutomatedLogisticsConfig {
     public static final ModConfigSpec.DoubleValue DOCK_RESERVATION_CLEARANCE_DISTANCE;
     public static final ModConfigSpec.BooleanValue FORCE_LOAD_STATION_CHUNKS;
     public static final ModConfigSpec.IntValue STATION_INTERACTION_CHUNK_RADIUS;
+    public static final ModConfigSpec.BooleanValue FORCE_LOAD_SIMURAIL_VEHICLES;
 
     public static final ModConfigSpec.IntValue MAX_ACTIVE_VEHICLES_PER_PLAYER;
     public static final ModConfigSpec.EnumValue<ActiveVehicleLimitMode> ACTIVE_VEHICLE_LIMIT_MODE;
@@ -122,6 +123,14 @@ public class AutomatedLogisticsConfig {
                 .comment("Extra station-centered chunk radius to temporarily force-load while a ship is docking.")
                 .comment("0 loads only the station chunk, 1 loads a 3x3 chunk square, and 2 loads a 5x5 chunk square.")
                 .defineInRange("stationInteractionChunkRadius", 1, 0, 2);
+        BUILDER.pop();
+
+        BUILDER.push("simurail");
+        FORCE_LOAD_SIMURAIL_VEHICLES = BUILDER
+                .comment("Keep active automated Simurail vehicles force-loaded through Sable for their full recorded route.")
+                .comment("The Sable loading ticket is acquired when playback starts while the vehicle is live, then released when playback stops, faults, or completes.")
+                .comment("Disable this to use normal unloaded-travel behavior instead.")
+                .define("forceLoadSimurailVehicles", true);
         BUILDER.pop();
 
         BUILDER.push("limits");
@@ -249,6 +258,10 @@ public class AutomatedLogisticsConfig {
 
     public static int stationInteractionChunkRadius() {
         return STATION_INTERACTION_CHUNK_RADIUS.get();
+    }
+
+    public static boolean forceLoadSimurailVehicles() {
+        return safeBoolean(FORCE_LOAD_SIMURAIL_VEHICLES, true);
     }
 
     public static TerminalAudience logisticsTerminalPreviewVisibility() {

@@ -131,6 +131,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
     private static final String CONDITION_FAILURE = "conditionFailure";
     private static final String DOCK_WAIT_FAILURE = "dockWaitFailure";
     private static final String RESTORE_CATCH_TICKS_REMAINING = "restoreCatchTicksRemaining";
+    private static final String AWAITING_MATERIALIZATION = "awaitingMaterialization";
     private static final String PAUSE_STATE = "pauseState";
     private static final String HELD_FAILURE = "heldFailure";
     private static final String HOLD_POSITION = "holdPosition";
@@ -333,7 +334,13 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 dockRequestId,
                 DrivePlaybackMode.resolve(level, route)
         );
+        if (route.transportMode() == TransportMode.TRAIN
+                && AutomatedLogisticsConfig.forceLoadSimurailVehicles()
+                && !SableSubLevelForceLoadService.holdForTrainPlayback(level, route, "playback_started")) {
+            return PlaybackOperationResult.failure(PlaybackFailure.VEHICLE_UNLOADED);
+        }
         if (!validateCurrentLegForDeparture(level, activePlayback)) {
+            SableSubLevelForceLoadService.releaseTrainPlayback(level, route, "departure_validation_failed");
             return PlaybackOperationResult.failure(PlaybackFailure.COLLISION_OR_OBSTRUCTION);
         }
         CreateAeronauticsAutomatedLogistics.debugPlayback(
@@ -351,6 +358,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         if (queueGate.failure().isPresent()) {
             activePlaybacks.remove(route.id());
             setVisualsActive(level, activePlayback, false);
+            SableSubLevelForceLoadService.releaseTrainPlayback(level, route, "dock_queue_refused");
             station.get().failPlayback(queueGate.failure().get().failureReason());
             return PlaybackOperationResult.failure(queueGate.failure().get());
         }
@@ -361,6 +369,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         if (primingFailure != null) {
             activePlaybacks.remove(route.id());
             setVisualsActive(level, activePlayback, false);
+            SableSubLevelForceLoadService.releaseTrainPlayback(level, route, "motion_priming_failed");
             DockingRuntime.releaseReservation(activePlayback.dockRequestId());
             station.get().failPlayback(primingFailure.failureReason());
             return PlaybackOperationResult.failure(primingFailure);
@@ -383,6 +392,8 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             return;
         }
 
+        clearAdvancedTransponderDriveOutputs(level, activePlayback.route());
+        SableSubLevelForceLoadService.releaseTrainPlayback(level, activePlayback.route(), "playback_stopped");
         activePlayback.dockingSession(AutomatedLogisticsServices.DOCKING.cancel(
                 activePlayback.dockingSession(),
                 "playback_stopped",
@@ -429,6 +440,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 if (!activePlaybacks.remove(routeId, activePlayback)) {
                     continue;
                 }
+                SableSubLevelForceLoadService.releaseTrainPlayback(level, activePlayback.route(), "route_completed");
                 AirshipScheduleExecutionService.CompletionAdvanceResult advanceResult =
                         AutomatedLogisticsServices.SCHEDULES.advanceCompletedRoute(
                                 level,
@@ -691,6 +703,65 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
     public boolean canSkipCurrentStop(RouteId routeId) {
         ActivePlayback activePlayback = activePlaybacks.get(routeId);
         return activePlayback != null && activePlayback.isWaiting();
+    }
+
+    public boolean isRestoring(RouteId routeId) {
+        ActivePlayback activePlayback = activePlaybacks.get(routeId);
+        return activePlayback != null && activePlayback.isRestoringVehicle();
+    }
+
+    public boolean skipCurrentStop(ServerLevel level, RouteId routeId) {
+        Objects.requireNonNull(level, "level");
+        Objects.requireNonNull(routeId, "routeId");
+
+        ActivePlayback activePlayback = activePlaybacks.get(routeId);
+        if (activePlayback == null || !activePlayback.isWaiting()) {
+            return false;
+        }
+        boolean terminalScheduleStop = activePlayback.waitingStop()
+                .filter(stop -> activePlayback.route().playbackMode()
+                        == net.sprocketgames.create_aeronautics_automated_logistics.route.PlaybackMode.ONE_WAY)
+                .filter(stop -> stop.pointIndex() == activePlayback.route().points().size() - 1)
+                .filter(stop -> activePlayback.targetIndex() == stop.pointIndex())
+                .isPresent();
+        if (!terminalScheduleStop) {
+            CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                    "Refused schedule stop skip for playback {} because the current wait is not a terminal schedule stop",
+                    routeId.value()
+            );
+            return false;
+        }
+        Optional<AirshipStationBlockEntity> station = stationAt(level, activePlayback.stationPos());
+        if (station.isEmpty()) {
+            CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                    "Refused schedule stop skip for playback {} because its station context is unavailable",
+                    routeId.value()
+            );
+            return false;
+        }
+        VehicleController controller = activePlayback.controller(level);
+        if (!controller.isLoaded(level) || !controller.isAssembled()) {
+            CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                    "Refused schedule stop skip for playback {} because its live vehicle is unavailable",
+                    routeId.value()
+            );
+            return false;
+        }
+
+        PlaybackFailure failure = finishWaiting(level, station.get(), activePlayback, controller);
+        if (failure != null || !activePlayback.completed()) {
+            CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
+                    "Refused schedule stop skip for playback {} because the current wait is not a terminal schedule stop; failure={}",
+                    routeId.value(),
+                    failure
+            );
+            return false;
+        }
+        CreateAeronauticsAutomatedLogistics.debugPlayback(
+                "Completed terminal schedule wait through normal playback handoff after explicit skip: route={}",
+                routeId.value()
+        );
+        return true;
     }
 
     public boolean holdPlayback(ServerLevel level, RouteId routeId, PlaybackFailure failure) {
@@ -1664,22 +1735,26 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             if (unloadedDockGate.held()) {
                 return null;
             }
-            UnloadedMaterializationAttempt materialization = tryMaterializeUnloadedShip(level, activePlayback, true);
-            if (materialization == UnloadedMaterializationAttempt.MATERIALIZED
-                    || materialization == UnloadedMaterializationAttempt.PENDING) {
-                if (materialization == UnloadedMaterializationAttempt.PENDING) {
-                    CreateAeronauticsAutomatedLogistics.debugPlayback(
-                            "Playback {} reached unloaded hold point {} and is keeping runtime active while Sable materialization is pending. {} {}",
-                            activePlayback.route().id().value(),
-                            activePlayback.targetIndex(),
-                            playbackPositionSummary(activePlayback),
-                            stationContextDiagnostic(level, activePlayback)
-                    );
+            boolean nonPhysicalTimedWait = activePlayback.isWaiting() && !activePlayback.requiresStationContext();
+            if (!nonPhysicalTimedWait) {
+                UnloadedMaterializationAttempt materialization = tryMaterializeUnloadedShip(level, activePlayback, true);
+                if (materialization == UnloadedMaterializationAttempt.MATERIALIZED
+                        || materialization == UnloadedMaterializationAttempt.PENDING) {
+                    if (materialization == UnloadedMaterializationAttempt.PENDING) {
+                        CreateAeronauticsAutomatedLogistics.debugPlayback(
+                                "Playback {} reached unloaded hold point {} and is keeping runtime active while Sable materialization is pending. {} {}",
+                                activePlayback.route().id().value(),
+                                activePlayback.targetIndex(),
+                                playbackPositionSummary(activePlayback),
+                                stationContextDiagnostic(level, activePlayback)
+                        );
+                    }
+                    return null;
                 }
-                return null;
+                logUnloadedHoldAwaitingLoadedShip(level, activePlayback);
+                return PlaybackFailure.VEHICLE_UNLOADED;
             }
-            logUnloadedHoldAwaitingLoadedShip(level, activePlayback);
-            return PlaybackFailure.VEHICLE_UNLOADED;
+            return null;
         }
 
         activePlayback.advanceTarget();
@@ -1840,6 +1915,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                         stationContextDiagnostic(level, activePlayback)
                 );
             }
+            activePlayback.awaitingMaterialization(true);
             return UnloadedMaterializationAttempt.PENDING;
         }
         Optional<UUID> subLevelId = activePlayback.route().linkedController().vehicleId();
@@ -1854,6 +1930,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                         localControllerPos.map(BlockPos::toShortString).orElse("missing")
                 );
             }
+            activePlayback.awaitingMaterialization(false);
             return UnloadedMaterializationAttempt.FAILED;
         }
 
@@ -1871,6 +1948,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                         stationContextDiagnostic(level, activePlayback)
                 );
             }
+            activePlayback.awaitingMaterialization(true);
             return UnloadedMaterializationAttempt.PENDING;
         }
 
@@ -1885,20 +1963,24 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                         forceAtHoldPoint
                 );
             }
+            activePlayback.awaitingMaterialization(true);
             return UnloadedMaterializationAttempt.PENDING;
         }
 
         if (!activePlayback.canAttemptUnloadedMaterialize(forceAtHoldPoint)) {
+            activePlayback.awaitingMaterialization(true);
             return UnloadedMaterializationAttempt.PENDING;
         }
 
+        int materializationAttempt = activePlayback.recordUnloadedMaterializationAttempt();
         String description = (forceAtHoldPoint ? "route hold point " : "loaded route pose ")
                 + activePlayback.targetIndex()
                 + " for playback "
                 + activePlayback.route().id().value();
         CreateAeronauticsAutomatedLogistics.debugPlayback(
-                "Playback {} attempting to materialize unloaded ship {} at simulated {} pose position={} localController={} {}",
+                "Playback {} attempting unloaded vehicle restoration: attempt={} vehicle={} pose={} position={} localController={} routeActive=true {}",
                 activePlayback.route().id().value(),
+                materializationAttempt,
                 subLevelId.get(),
                 activePlayback.restoreCatchMode(),
                 materializePosition,
@@ -1931,9 +2013,10 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             );
             activePlayback.beginRestoreCatch();
             CreateAeronauticsAutomatedLogistics.debugPlayback(
-                    "Playback {} materialized unloaded ship {} at simulated route pose: {}",
+                    "Playback {} restored unloaded vehicle {} on attempt {}: routeActive=true message={}",
                     activePlayback.route().id().value(),
                     subLevelId.get(),
+                    materializationAttempt,
                     result.message()
             );
             return UnloadedMaterializationAttempt.MATERIALIZED;
@@ -1949,22 +2032,26 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             }
             if (forceAtHoldPoint || activePlayback.shouldLogProgress()) {
                 CreateAeronauticsAutomatedLogistics.debugPlayback(
-                        "Playback {} is waiting for unloaded ship {} materialization at simulated route pose: type={} reason={} message={}",
+                        "Playback {} is still restoring vehicle {}: attempt={} routeActive=true type={} reason={} message={}",
                         activePlayback.route().id().value(),
                         subLevelId.get(),
+                        materializationAttempt,
                         result.type(),
                         result.reasonCode(),
                         result.message()
                 );
             }
+            activePlayback.awaitingMaterialization(true);
             return UnloadedMaterializationAttempt.PENDING;
         }
         CreateAeronauticsAutomatedLogistics.debugPlaybackWarn(
-                "Playback {} failed to materialize unloaded ship {} at simulated route pose: {}",
+                "Playback {} failed to restore unloaded vehicle {} on attempt {}: routeActive=true message={}",
                 activePlayback.route().id().value(),
                 subLevelId.get(),
+                materializationAttempt,
                 result.message()
         );
+        activePlayback.awaitingMaterialization(false);
         return UnloadedMaterializationAttempt.FAILED;
     }
 
@@ -1985,6 +2072,28 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
     ) {
         String stopName = activePlayback.waitingStop().map(RouteStop::name).orElse("unknown");
         int previousTargetIndex = activePlayback.targetIndex();
+        boolean terminalOneWayStop = activePlayback.route().playbackMode()
+                == net.sprocketgames.create_aeronautics_automated_logistics.route.PlaybackMode.ONE_WAY
+                && activePlayback.targetIndex() == activePlayback.route().points().size() - 1
+                && activePlayback.direction() > 0;
+        if (terminalOneWayStop) {
+            UnloadedMaterializationAttempt materialization = tryMaterializeUnloadedShip(level, activePlayback, false);
+            if (materialization == UnloadedMaterializationAttempt.MATERIALIZED
+                    || materialization == UnloadedMaterializationAttempt.PENDING) {
+                if (materialization == UnloadedMaterializationAttempt.PENDING) {
+                    CreateAeronauticsAutomatedLogistics.debugPlayback(
+                            "Playback {} completed its unloaded terminal wait at stop {} but is keeping the route active until Sable restores the vehicle. {} {}",
+                            activePlayback.route().id().value(),
+                            stopName,
+                            playbackPositionSummary(activePlayback),
+                            stationContextDiagnostic(level, activePlayback)
+                    );
+                }
+                return null;
+            }
+            logUnloadedHoldAwaitingLoadedShip(level, activePlayback);
+            return PlaybackFailure.VEHICLE_UNLOADED;
+        }
         activePlayback.clearWait();
         station.ifPresent(value -> clearDockOutputs(level, value, activePlayback));
         SableSubLevelForceLoadService.releaseDockStop(level, activePlayback.route(), "unloaded_wait_finished");
@@ -3082,6 +3191,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         stationAt(level, activePlayback.stationPos())
                 .ifPresent(station -> clearDockOutputs(level, station, activePlayback));
         SableSubLevelForceLoadService.releaseDockStop(level, activePlayback.route(), "playback_failed");
+        SableSubLevelForceLoadService.releaseTrainPlayback(level, activePlayback.route(), "playback_failed");
         DockingRuntime.releaseReservation(activePlayback.dockRequestId());
         activePlayback.controller(level).stop(level);
         stationAt(level, activePlayback.stationPos())
@@ -3098,6 +3208,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         stationAt(level, activePlayback.stationPos())
                 .ifPresent(station -> clearDockOutputs(level, station, activePlayback));
         SableSubLevelForceLoadService.releaseDockStop(level, activePlayback.route(), "playback_completed");
+        SableSubLevelForceLoadService.releaseTrainPlayback(level, activePlayback.route(), "playback_completed");
         DockingRuntime.releaseReservation(activePlayback.dockRequestId());
         activePlayback.controller(level).stop(level);
         stationAt(level, activePlayback.stationPos()).ifPresent(station -> {
@@ -4212,6 +4323,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         }
         activePlayback.dockWaitFailure().ifPresent(failure -> tag.putString(DOCK_WAIT_FAILURE, failure.name()));
         tag.putInt(RESTORE_CATCH_TICKS_REMAINING, activePlayback.restoreCatchTicksRemaining());
+        tag.putBoolean(AWAITING_MATERIALIZATION, activePlayback.awaitingMaterialization());
         tag.putString(PAUSE_STATE, activePlayback.pauseState().name());
         activePlayback.heldFailure().ifPresent(failure -> tag.putString(HELD_FAILURE, failure.name()));
         tag.put(HOLD_POSITION, writeVec3(activePlayback.holdPosition()));
@@ -4359,6 +4471,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 conditionStates,
                 dockWaitFailure,
                 Math.max(0, tag.getInt(RESTORE_CATCH_TICKS_REMAINING)),
+                tag.getBoolean(AWAITING_MATERIALIZATION),
                 pauseState,
                 heldFailure,
                 holdPosition,
@@ -4787,6 +4900,9 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         }
 
         private static String activePlaybackState(ActivePlayback activePlayback) {
+            if (activePlayback.isRestoringVehicle()) {
+                return "RESTORING";
+            }
             if (activePlayback.isDockQueueHeld()) {
                 return "DOCK_QUEUED";
             }
@@ -4809,6 +4925,10 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         }
 
         private static String pendingState(CompoundTag runtimeTag) {
+            if (runtimeTag.getBoolean(AWAITING_MATERIALIZATION)
+                    || runtimeTag.getInt(RESTORE_CATCH_TICKS_REMAINING) > 0) {
+                return "RESTORING";
+            }
             PauseState pauseState = readStaticPauseState(runtimeTag);
             RuntimeMode runtimeMode = readStaticRuntimeMode(runtimeTag);
             if (runtimeTag.hasUUID(DOCK_QUEUE_STOP_ID)) {
@@ -4942,6 +5062,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         private final Map<ConditionKey, ConditionRuntimeState> conditionStates = new HashMap<>();
         private Optional<PlaybackFailure> dockWaitFailure = Optional.empty();
         private int restoreCatchTicksRemaining;
+        private boolean awaitingMaterialization;
         private int routeStartStabilizationTicksRemaining;
         private Optional<DockTransferSnapshot> dockTransferSnapshot = Optional.empty();
         private boolean cargoSatisfiedThisTick;
@@ -4964,6 +5085,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         private int dockReservationReleaseDirection;
         private boolean dockReservationReleaseClampedToNextGate;
         private int unloadedMaterializeCooldownTicks;
+        private int unloadedMaterializationAttempts;
         private boolean storedPointerCleanupNeeded = true;
         private final DrivePlaybackMode drivePlaybackMode;
 
@@ -5067,6 +5189,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
                 Map<ConditionKey, ConditionRuntimeState> conditionStates,
                 Optional<PlaybackFailure> dockWaitFailure,
                 int restoreCatchTicksRemaining,
+                boolean awaitingMaterialization,
                 PauseState pauseState,
                 Optional<PlaybackFailure> heldFailure,
                 Vec3 holdPosition,
@@ -5109,6 +5232,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             activePlayback.dockWaitFailure = dockWaitFailure;
             activePlayback.cargoSatisfiedThisTick = false;
             activePlayback.restoreCatchTicksRemaining = Math.max(0, restoreCatchTicksRemaining);
+            activePlayback.awaitingMaterialization = awaitingMaterialization;
             activePlayback.routeStartStabilizationTicksRemaining = 0;
             activePlayback.pauseState = pauseState;
             activePlayback.heldFailure = heldFailure;
@@ -5769,12 +5893,16 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
         private void enterUnloadedTransit() {
             runtimeMode = RuntimeMode.UNLOADED_TRANSIT;
             restoreCatchTicksRemaining = 0;
+            awaitingMaterialization = false;
+            unloadedMaterializationAttempts = 0;
             unloadedMaterializeCooldownTicks = Math.min(unloadedMaterializeCooldownTicks, UNLOADED_MATERIALIZE_RETRY_TICKS);
         }
 
         private void leaveUnloadedTransit() {
             runtimeMode = RuntimeMode.LOADED;
             unloadedMaterializeCooldownTicks = 0;
+            awaitingMaterialization = false;
+            unloadedMaterializationAttempts = 0;
         }
 
         private boolean canAttemptUnloadedMaterialize(boolean force) {
@@ -5788,6 +5916,10 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
             }
             unloadedMaterializeCooldownTicks = UNLOADED_MATERIALIZE_RETRY_TICKS;
             return true;
+        }
+
+        private int recordUnloadedMaterializationAttempt() {
+            return ++unloadedMaterializationAttempts;
         }
 
         private OptionalInt validatedLegStartIndex() {
@@ -6017,6 +6149,7 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
 
         private void beginRestoreCatch() {
             restoreCatchTicksRemaining = Math.max(restoreCatchTicksRemaining, RESTORE_CATCH_TICKS);
+            awaitingMaterialization = false;
         }
 
         private void cancelRestoreCatch() {
@@ -6025,6 +6158,18 @@ public class VehicleRoutePlaybackService implements RoutePlaybackService {
 
         private boolean isRestoring() {
             return restoreCatchTicksRemaining > 0;
+        }
+
+        private boolean isRestoringVehicle() {
+            return awaitingMaterialization || isRestoring();
+        }
+
+        private boolean awaitingMaterialization() {
+            return awaitingMaterialization;
+        }
+
+        private void awaitingMaterialization(boolean awaitingMaterialization) {
+            this.awaitingMaterialization = awaitingMaterialization;
         }
 
         private boolean tickRestoreGrace() {

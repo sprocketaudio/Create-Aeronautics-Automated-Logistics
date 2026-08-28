@@ -722,6 +722,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         return initialRuntimeStatus == RouteStatus.RUNNING
                 || initialRuntimeStatus == RouteStatus.WAITING
                 || initialRuntimeStatus == RouteStatus.DOCK_QUEUED
+                || initialRuntimeStatus == RouteStatus.RESTORING
                 || initialRuntimeStatus == RouteStatus.HELD
                 || initialRuntimeStatus == RouteStatus.HELD_FAULTED;
     }
@@ -1091,6 +1092,9 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         }
         RouteStatus runtimeStatus = fallbackRuntimeStatus(player);
         if (fallbackScheduleActive(player)) {
+            if (runtimeStatus == RouteStatus.RESTORING) {
+                return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.restoring");
+            }
             if (runtimeStatus == RouteStatus.HELD) {
                 return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.paused");
             }
@@ -1127,6 +1131,9 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         }
         RouteStatus runtimeStatus = fallbackRuntimeStatus(player);
         if (fallbackScheduleActive(player)) {
+            if (runtimeStatus == RouteStatus.RESTORING) {
+                return 0xFFE7C46E;
+            }
             if (runtimeStatus == RouteStatus.HELD) {
                 return 0xFFE7C46E;
             }
@@ -1236,6 +1243,12 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         }
         RouteStatus runtimeStatus = fallbackRuntimeStatus(player);
         if (fallbackScheduleActive(player)) {
+            if (runtimeStatus == RouteStatus.RESTORING) {
+                return List.of(
+                        Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.restoring.1").withStyle(ChatFormatting.YELLOW),
+                        Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.restoring.2").withStyle(ChatFormatting.GRAY)
+                );
+            }
             if (runtimeStatus == RouteStatus.HELD) {
                 return List.of(
                         Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.paused.1").withStyle(ChatFormatting.YELLOW),

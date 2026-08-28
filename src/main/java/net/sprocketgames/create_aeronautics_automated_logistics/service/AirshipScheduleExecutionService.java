@@ -1402,6 +1402,9 @@ public class AirshipScheduleExecutionService {
         if (active == null) {
             return RouteStatus.IDLE;
         }
+        if (active.activeRouteId().isPresent() && AutomatedLogisticsServices.PLAYBACK.isRestoring(active.activeRouteId().get())) {
+            return RouteStatus.RESTORING;
+        }
         if (active.activeRouteId().isPresent() && AutomatedLogisticsServices.PLAYBACK.isHeld(active.activeRouteId().get())) {
             return AutomatedLogisticsServices.PLAYBACK.heldFailure(active.activeRouteId().get()).isPresent()
                     ? RouteStatus.HELD_FAULTED

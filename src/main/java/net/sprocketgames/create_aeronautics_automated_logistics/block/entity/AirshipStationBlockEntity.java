@@ -599,6 +599,7 @@ public class AirshipStationBlockEntity extends BlockEntity implements MenuProvid
         return status == RouteStatus.RUNNING
                 || status == RouteStatus.WAITING
                 || status == RouteStatus.DOCK_QUEUED
+                || status == RouteStatus.RESTORING
                 || status == RouteStatus.HELD
                 || status == RouteStatus.HELD_FAULTED;
     }

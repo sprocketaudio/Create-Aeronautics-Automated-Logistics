@@ -312,6 +312,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         return runtimeStatus == RouteStatus.RUNNING
                 || runtimeStatus == RouteStatus.WAITING
                 || runtimeStatus == RouteStatus.DOCK_QUEUED
+                || runtimeStatus == RouteStatus.RESTORING
                 || runtimeStatus == RouteStatus.HELD
                 || runtimeStatus == RouteStatus.HELD_FAULTED;
     }
