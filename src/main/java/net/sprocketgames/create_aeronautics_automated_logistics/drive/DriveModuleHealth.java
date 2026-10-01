@@ -6,6 +6,9 @@ package net.sprocketgames.create_aeronautics_automated_logistics.drive;
  */
 public enum DriveModuleHealth {
     UNLINKED,
+    NO_ASSEMBLED_VEHICLE,
+    NO_ADVANCED_CONTROLLER,
+    MULTIPLE_CONTROLLERS,
     LINKED,
     CONTROLLER_UNAVAILABLE,
     WRONG_VEHICLE,

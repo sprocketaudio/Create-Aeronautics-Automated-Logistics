@@ -6,7 +6,5 @@ package net.sprocketgames.create_aeronautics_automated_logistics.drive;
  */
 public enum DriveEncodingType {
     STRENGTH_0_TO_15,
-    ON_OFF,
-    SPLIT_ANALOG,
-    PULSE_NUDGE
+    ON_OFF
 }

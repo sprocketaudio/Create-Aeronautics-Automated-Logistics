@@ -445,6 +445,14 @@ tasks.register('syncDevCompatModsToRunDirs') {
         def sourceDir = devCompatModsDir.get().asFile
         devCompatRunDirs.each { targetDirProvider ->
             def targetDir = targetDirProvider.asFile
+            def managedFilesManifest = new File(targetDir, '.automated-logistics-dev-compat-mods.txt')
+            def previouslyManagedNames = managedFilesManifest.exists()
+                    ? managedFilesManifest.readLines()
+                    .collect { it.trim() }
+                    .findAll { it.endsWith('.jar') }
+                    .toSet()
+                    : [] as Set
+
             copy {
                 from(sourceDir)
                 include '*.jar'
@@ -452,9 +460,11 @@ tasks.register('syncDevCompatModsToRunDirs') {
             }
 
             def expectedNames = sourceDir.listFiles()?.findAll { it.isFile() }?.collect { it.name }?.toSet() ?: [] as Set
-            targetDir.listFiles()?.findAll { it.isFile() && !expectedNames.contains(it.name) }?.each { stale ->
+            previouslyManagedNames.findAll { !expectedNames.contains(it) }.each { staleName ->
+                def stale = new File(targetDir, staleName)
                 stale.delete()
             }
+            managedFilesManifest.text = expectedNames.sort().join(System.lineSeparator()) + System.lineSeparator()
         }
     }
 }

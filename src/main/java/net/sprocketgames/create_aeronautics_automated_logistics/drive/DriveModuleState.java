@@ -19,11 +19,11 @@ public record DriveModuleState(
         link = Objects.requireNonNull(link, "link");
         config = Objects.requireNonNull(config, "config");
         Objects.requireNonNull(health, "health");
-        if (link.isEmpty() != config.isEmpty()) {
-            throw new IllegalArgumentException("Drive Module link and config must be present together");
-        }
         if (link.isPresent() && !link.get().moduleId().equals(moduleId)) {
             throw new IllegalArgumentException("Drive Module link does not belong to this module");
+        }
+        if (link.isPresent() && config.isEmpty()) {
+            throw new IllegalArgumentException("Linked Drive Modules require a control configuration");
         }
     }
 

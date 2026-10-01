@@ -30,6 +30,7 @@ public class CreateAeronauticsAutomatedLogistics {
 
     private enum DebugChannel {
         PLAYBACK("playback"),
+        DRIVE_MODULES("driveModules"),
         VEHICLE("vehicle"),
         DOCKING("docking"),
         CARGO("cargo"),
@@ -60,6 +61,10 @@ public class CreateAeronauticsAutomatedLogistics {
 
     public static void debugPlaybackWarn(String message, Object... args) {
         log(DebugChannel.PLAYBACK, true, message, args);
+    }
+
+    public static void debugDriveModules(String message, Object... args) {
+        log(DebugChannel.DRIVE_MODULES, false, message, args);
     }
 
     public static void debugVehicle(String message, Object... args) {
@@ -109,6 +114,7 @@ public class CreateAeronauticsAutomatedLogistics {
     private static boolean channelEnabled(DebugChannel channel) {
         return switch (channel) {
             case PLAYBACK -> AutomatedLogisticsConfig.debugPlayback();
+            case DRIVE_MODULES -> AutomatedLogisticsConfig.debugDriveModules();
             case VEHICLE -> AutomatedLogisticsConfig.debugVehicle();
             case DOCKING -> AutomatedLogisticsConfig.debugDocking();
             case CARGO -> AutomatedLogisticsConfig.debugCargo();

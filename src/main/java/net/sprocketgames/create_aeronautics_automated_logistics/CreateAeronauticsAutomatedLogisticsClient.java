@@ -18,6 +18,7 @@ import net.createmod.ponder.foundation.PonderIndex;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.ponder.AutomatedLogisticsPonderPlugin;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.AirshipScheduleScreen;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.AirshipStationScreen;
+import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.DriveModuleScreen;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.LogisticsTerminalClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.LogisticsTerminalScreen;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.ShipTransponderScreen;
@@ -52,6 +53,7 @@ public class CreateAeronauticsAutomatedLogisticsClient {
         event.register(ModMenus.AIRSHIP_STATION.get(), AirshipStationScreen::new);
         event.register(ModMenus.AIRSHIP_SCHEDULE.get(), AirshipScheduleScreen::new);
         event.register(ModMenus.SHIP_TRANSPONDER.get(), ShipTransponderScreen::new);
+        event.register(ModMenus.DRIVE_MODULE.get(), DriveModuleScreen::new);
         event.register(ModMenus.LOGISTICS_TERMINAL.get(), LogisticsTerminalScreen::new);
     }
 

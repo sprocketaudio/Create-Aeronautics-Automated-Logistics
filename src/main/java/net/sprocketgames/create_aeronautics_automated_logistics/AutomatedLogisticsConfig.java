@@ -52,6 +52,7 @@ public class AutomatedLogisticsConfig {
     public static final ModConfigSpec.BooleanValue REQUIRE_CROUCH_TO_BREAK_ROUTE_BLOCKS;
     public static final ModConfigSpec.BooleanValue DEBUG_LOGGING;
     public static final ModConfigSpec.BooleanValue DEBUG_PLAYBACK;
+    public static final ModConfigSpec.BooleanValue DEBUG_DRIVE_MODULES;
     public static final ModConfigSpec.BooleanValue DEBUG_VEHICLE;
     public static final ModConfigSpec.BooleanValue DEBUG_DOCKING;
     public static final ModConfigSpec.BooleanValue DEBUG_CARGO;
@@ -195,6 +196,11 @@ public class AutomatedLogisticsConfig {
                 .comment("Enable playback/runtime debug logs, including unloaded-transit progress and restore.")
                 .comment("Only used when debugLogging is true.")
                 .define("playback", true);
+        DEBUG_DRIVE_MODULES = BUILDER
+                .comment("Enable Advanced Transponder and Drive Module command diagnostics.")
+                .comment("Logs module links, output changes, vehicle position, route target, and drive error values.")
+                .comment("Only used when debugLogging is true.")
+                .define("driveModules", false);
         DEBUG_VEHICLE = BUILDER
                 .comment("Enable low-level vehicle/Sable controller debug logs.")
                 .comment("Only used when debugLogging is true.")
@@ -222,6 +228,10 @@ public class AutomatedLogisticsConfig {
 
     public static boolean debugPlayback() {
         return debugLogging() && safeBoolean(DEBUG_PLAYBACK, true);
+    }
+
+    public static boolean debugDriveModules() {
+        return debugLogging() && safeBoolean(DEBUG_DRIVE_MODULES, false);
     }
 
     public static boolean debugVehicle() {

@@ -46,6 +46,17 @@ public final class TransponderPermissionService {
         if (canControl(player, transponder)) {
             return true;
         }
+        return deny(player);
+    }
+
+    public static boolean ensureCanControl(ServerPlayer player, Optional<UUID> ownerId) {
+        if (canControl(player, ownerId)) {
+            return true;
+        }
+        return deny(player);
+    }
+
+    private static boolean deny(ServerPlayer player) {
         SetMenuActionBarMessagePayload.send(player, DENIED_MESSAGE);
         return false;
     }

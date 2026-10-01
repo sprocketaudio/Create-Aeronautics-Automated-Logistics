@@ -37,6 +37,15 @@ public final class ModItems {
             )
     );
 
+    public static final DeferredItem<BlockItem> ADVANCED_TRANSPONDER = ITEMS.register(
+            "advanced_transponder",
+            () -> new LogisticsBlockItem(
+                    ModBlocks.ADVANCED_TRANSPONDER.get(),
+                    new Item.Properties(),
+                    "block.create_aeronautics_automated_logistics.advanced_transponder.tooltip"
+            )
+    );
+
     public static final DeferredItem<BlockItem> LOGISTICS_TERMINAL = ITEMS.register(
             "logistics_terminal",
             () -> new LogisticsBlockItem(

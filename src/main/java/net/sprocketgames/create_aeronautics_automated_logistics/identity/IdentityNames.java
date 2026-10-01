@@ -16,6 +16,10 @@ public final class IdentityNames {
         return "Vehicle " + shortId(id);
     }
 
+    public static String defaultDriveModuleName(UUID id) {
+        return "Drive Module " + shortId(id);
+    }
+
     public static String shortId(UUID id) {
         return id.toString().substring(0, 8);
     }

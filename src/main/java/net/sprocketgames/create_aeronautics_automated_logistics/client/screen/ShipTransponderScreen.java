@@ -1438,6 +1438,9 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         }
     }
 
+    private record ButtonTooltip(IconButton button, List<Component> lines) {
+    }
+
     private final class PopupSuggestions {
         private static final int ROW_HEIGHT = 12;
         private static final int MAX_ROWS = 4;
@@ -1682,21 +1685,5 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             int maxOffset = Math.max(0, this.visibleSuggestions.size() - Math.min(MAX_ROWS, this.visibleSuggestions.size()));
             this.scrollOffset = Mth.clamp(this.scrollOffset, 0, maxOffset);
         }
-    }
-
-    private static final class ClippedEditBox extends EditBox {
-        private ClippedEditBox(net.minecraft.client.gui.Font font, int x, int y, int width, int height, Component message) {
-            super(font, x, y, width, height, message);
-        }
-
-        @Override
-        public void renderWidget(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-            guiGraphics.enableScissor(getX() - 2, getY(), getX() + width + 2, getY() + height);
-            super.renderWidget(guiGraphics, mouseX, mouseY, partialTick);
-            guiGraphics.disableScissor();
-        }
-    }
-
-    private record ButtonTooltip(IconButton button, List<Component> lines) {
     }
 }
