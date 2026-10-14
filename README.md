@@ -161,9 +161,6 @@ Compatibility notes:
 - **Simurail:** experimental train-only station compatibility using recorded-route playback
 - **Create: Connected, Create: Iron Vaults, and Create Propulsion: Simulated:** additional Cargo Link storage targets
 
-## Updating
-
-Existing worlds from version 0.4.5 are supported. Back up important worlds before updating, particularly when vehicles have active schedules.
 
 ## About
 
