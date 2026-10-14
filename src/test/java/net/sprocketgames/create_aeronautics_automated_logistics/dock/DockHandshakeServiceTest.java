@@ -1,6 +1,7 @@
 package net.sprocketgames.create_aeronautics_automated_logistics.dock;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -42,5 +43,27 @@ class DockHandshakeServiceTest {
                 IllegalArgumentException.class,
                 () -> new DockPoseProof(true, false, 0.0D, -1.0D)
         );
+    }
+
+    @Test
+    void asymmetricRestoredOutputsArePowerCycledEvenWhenPairLooksLocked() {
+        assertTrue(DockHandshakeService.requiresOutputPowerCycle(true, false, false, true, true, false));
+        assertTrue(DockHandshakeService.requiresOutputPowerCycle(true, true, true, false, false, false));
+    }
+
+    @Test
+    void establishedHandshakeIsNotPowerCycled() {
+        assertFalse(DockHandshakeService.requiresOutputPowerCycle(true, true, true, true, true, false));
+        assertFalse(DockHandshakeService.requiresOutputPowerCycle(false, true, true, true, true, true));
+    }
+
+    @Test
+    void restoredPoweredPairWithoutPhysicalLockIsPowerCycled() {
+        assertTrue(DockHandshakeService.requiresOutputPowerCycle(false, true, true, true, true, false));
+    }
+
+    @Test
+    void outputOwnedByAnotherRouteIsNotReset() {
+        assertFalse(DockHandshakeService.requiresOutputPowerCycle(false, true, false, true, true, false));
     }
 }

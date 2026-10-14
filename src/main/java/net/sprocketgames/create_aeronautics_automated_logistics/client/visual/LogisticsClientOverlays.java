@@ -5,8 +5,10 @@ import com.simibubi.create.AllSpecialTextures;
 import java.util.ArrayDeque;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.ArrayList;
@@ -21,6 +23,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegment;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteSegmentRegistry;
+import net.sprocketgames.create_aeronautics_automated_logistics.network.SyncDriveTargetDebugPayload;
 
 public final class LogisticsClientOverlays {
     private static final int LANDING_COLOR = 0x95E06C;
@@ -94,6 +97,7 @@ public final class LogisticsClientOverlays {
     private static final int DOCK_COLOR = 0x7AD7FF;
     private static final int CARGO_COLOR = 0x9BEA8B;
     private static final int TRANSPONDER_COLOR = 0xBFEFFF;
+    private static final int DRIVE_TARGET_DEBUG_COLOR = 0xFFE45C;
     private static final int[] LINK_CANDIDATE_COLORS = new int[]{0xFFE37A, 0xFFC84D};
     private static final int LANDING_SEGMENTS = 48;
     private static final int LATITUDE_RINGS = 5;
@@ -115,6 +119,7 @@ public final class LogisticsClientOverlays {
     private static Set<UUID> previewedRouteIds = Set.of();
     private static Optional<BlockPos> previewedTransponderPos = Optional.empty();
     private static Optional<StationRoutePreview> previewedStationRoute = Optional.empty();
+    private static Map<UUID, SyncDriveTargetDebugPayload.Target> driveTargetDebugNodes = Map.of();
 
     private LogisticsClientOverlays() {
     }
@@ -299,6 +304,7 @@ public final class LogisticsClientOverlays {
             UUID stationFilterTransponderId
     ) {
         removeFlightPath(flightPath, flightPathLegEnds);
+        removeDriveTargetDebugNodes();
         flightPath = List.copyOf(points);
         flightPathLegEnds = List.copyOf(legEndIndices);
         flightPathLegPaletteKeys = List.copyOf(legPaletteKeys);
@@ -342,6 +348,7 @@ public final class LogisticsClientOverlays {
 
     public static void clearFlightPath() {
         removeFlightPath(flightPath, flightPathLegEnds);
+        removeDriveTargetDebugNodes();
         flightPath = List.of();
         flightPathLegEnds = List.of();
         flightPathLegPaletteKeys = List.of();
@@ -416,6 +423,17 @@ public final class LogisticsClientOverlays {
         return flightPath.size() >= 2;
     }
 
+    public static void replaceDriveTargetDebugNodes(List<SyncDriveTargetDebugPayload.Target> targets) {
+        Map<UUID, SyncDriveTargetDebugPayload.Target> next = new HashMap<>();
+        for (SyncDriveTargetDebugPayload.Target target : targets) {
+            next.put(target.routeId(), target);
+        }
+        driveTargetDebugNodes.keySet().stream()
+                .filter(routeId -> !next.containsKey(routeId))
+                .forEach(LogisticsClientOverlays::removeDriveTargetDebugNode);
+        driveTargetDebugNodes = Map.copyOf(next);
+    }
+
     public static void refresh() {
         landingAreaOverlay.ifPresent(LogisticsClientOverlays::showLandingArea);
         stationChunkOverlay.ifPresent(LogisticsClientOverlays::showStationChunks);
@@ -432,6 +450,7 @@ public final class LogisticsClientOverlays {
         }
         if (flightPath.size() >= 2) {
             showFlightPath(flightPath, flightPathLegEnds, flightPathLegPaletteKeys, flightPathLegColorSlots, flightPathBreakStarts);
+            showDriveTargetDebugNodes();
         }
     }
 
@@ -775,6 +794,38 @@ public final class LogisticsClientOverlays {
             Outliner.getInstance().remove(Pair.of("flight_path_start", Integer.valueOf(legIndex)));
             Outliner.getInstance().remove(Pair.of("flight_path_end", Integer.valueOf(legIndex)));
         }
+    }
+
+    private static void showDriveTargetDebugNodes() {
+        for (SyncDriveTargetDebugPayload.Target target : driveTargetDebugNodes.values()) {
+            boolean matchesRoute = previewedRouteIds.contains(target.routeId());
+            boolean matchesTransponder = previewedTransponderPos.isPresent()
+                    && target.transponderPos().filter(previewedTransponderPos.get()::equals).isPresent();
+            if (!matchesRoute && !matchesTransponder) {
+                continue;
+            }
+            Outliner.getInstance()
+                    .showAABB(
+                            driveTargetDebugKey(target.routeId()),
+                            AABB.ofSize(target.position(), .8D, .8D, .8D)
+                    )
+                    .colored(DRIVE_TARGET_DEBUG_COLOR)
+                    .lineWidth(1 / 10f)
+                    .disableLineNormals()
+                    .withFaceTexture(AllSpecialTextures.SELECTION);
+        }
+    }
+
+    private static void removeDriveTargetDebugNodes() {
+        driveTargetDebugNodes.keySet().forEach(LogisticsClientOverlays::removeDriveTargetDebugNode);
+    }
+
+    private static void removeDriveTargetDebugNode(UUID routeId) {
+        Outliner.getInstance().remove(driveTargetDebugKey(routeId));
+    }
+
+    private static Pair<String, UUID> driveTargetDebugKey(UUID routeId) {
+        return Pair.of("drive_target_debug", routeId);
     }
 
     private static int legIndexForSegment(int segmentPointIndex, List<Integer> legEndIndices) {

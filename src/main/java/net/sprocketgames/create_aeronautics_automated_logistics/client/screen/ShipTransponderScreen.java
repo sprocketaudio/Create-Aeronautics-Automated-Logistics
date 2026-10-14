@@ -103,9 +103,12 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     private static final int RECORD_LABEL_X = 36;
     private static final int RECORD_LABEL_Y = 66;
     private static final int RECORD_BUTTON_Y = 56;
-    private static final int FOOTER_ROUTE_BUTTON_X = 17;
-    private static final int FOOTER_DOCK_BUTTON_X = 38;
-    private static final int FOOTER_CARGO_BUTTON_X = 59;
+    // Keep the footer controls left of the status field rather than letting the
+    // final button cover its left edge.
+    private static final int FOOTER_ROUTE_BUTTON_X = 5;
+    private static final int FOOTER_DOCK_BUTTON_X = 24;
+    private static final int FOOTER_CARGO_BUTTON_X = 43;
+    private static final int FOOTER_LIFT_CALIBRATION_BUTTON_X = 62;
     private static final int ROUTE_SELECTION_WIDTH = 206;
     private static final int ROUTE_SELECTION_HEIGHT = 101;
     private static final int ROUTE_SELECTION_Y = 43;
@@ -138,6 +141,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     private IconButton dockPreviewButton;
     private IconButton cargoPreviewButton;
     private IconButton scheduleEditButton;
+    private IconButton liftCalibrationButton;
     private MiniIconButton dockLinkButton;
     private MiniIconButton dockClearButton;
     private MiniIconButton cargoLinkButton;
@@ -248,6 +252,13 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                 SHOW_CARGO_ICON,
                 this::toggleCargoPreview,
                 cargoPreviewTooltip()
+        );
+        liftCalibrationButton = addIconButton(
+                this.leftPos + FOOTER_LIFT_CALIBRATION_BUTTON_X,
+                this.topPos + 154,
+                AllIcons.I_REFRESH,
+                () -> pressAction(ShipTransponderMenu.ACTION_CALIBRATE_LIFT),
+                Component.translatable("gui.create_aeronautics_automated_logistics.lift_calibration.start")
         );
         addIconButton(
                 this.leftPos + 167,
@@ -372,6 +383,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         syncRecordingControlState();
         syncRouteSelectionWidgetState();
         syncLinkedPreviewAndLinkState();
+        syncLiftCalibrationState(scheduleRunning);
         if (previewButton != null) {
             if (!previewButton.active) {
                 LogisticsClientOverlays.clearFlightPath();
@@ -694,6 +706,19 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         }
     }
 
+    private void syncLiftCalibrationState(boolean scheduleRunning) {
+        if (liftCalibrationButton == null || this.minecraft == null || this.minecraft.player == null) {
+            return;
+        }
+        boolean advanced = menu.isAdvancedTransponder(this.minecraft.player);
+        liftCalibrationButton.visible = advanced && !recordingMode;
+        liftCalibrationButton.active = advanced
+                && !recordingMode
+                && (!scheduleRunning || menu.isLiftCalibrationActive(this.minecraft.player));
+        liftCalibrationButton.green = menu.isLiftCalibrationActive(this.minecraft.player)
+                || menu.hasLiftCalibration(this.minecraft.player);
+    }
+
     private void renderHeaderEditIcon(GuiGraphics guiGraphics) {
         if (nameBox == null || nameBox.isFocused()) {
             return;
@@ -793,6 +818,16 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             );
             return;
         }
+        if (playButton != null && playButton.isHovered()) {
+            guiGraphics.renderTooltip(
+                    this.font,
+                    List.of(Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.start_schedule")),
+                    java.util.Optional.empty(),
+                    mouseX,
+                    mouseY
+            );
+            return;
+        }
         if (previewButton != null && previewButton.isHovered()) {
             guiGraphics.renderTooltip(this.font, List.of(routePreviewButtonText()), java.util.Optional.empty(), mouseX, mouseY);
             return;
@@ -819,13 +854,29 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             );
             return;
         }
+        if (liftCalibrationButton != null
+                && liftCalibrationButton.visible
+                && liftCalibrationButton.isHovered()
+                && this.minecraft != null
+                && this.minecraft.player != null) {
+            guiGraphics.renderTooltip(
+                    this.font,
+                    menu.liftCalibrationTooltip(this.minecraft.player),
+                    java.util.Optional.empty(),
+                    mouseX,
+                    mouseY
+            );
+            return;
+        }
         for (ButtonTooltip tooltip : buttonTooltips) {
             if (tooltip.button() == recordButton
+                    || tooltip.button() == playButton
                     || tooltip.button() == previewButton
                     || tooltip.button() == dockPreviewButton
                     || tooltip.button() == cargoPreviewButton
                     || tooltip.button() == dockClearButton
-                    || tooltip.button() == cargoClearButton) {
+                    || tooltip.button() == cargoClearButton
+                    || tooltip.button() == liftCalibrationButton) {
                 continue;
             }
             if (tooltip.button().isHovered() && !tooltip.lines().isEmpty()) {

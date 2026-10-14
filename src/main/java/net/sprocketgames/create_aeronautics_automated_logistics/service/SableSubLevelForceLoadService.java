@@ -18,6 +18,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronautic
 import net.sprocketgames.create_aeronautics_automated_logistics.route.Route;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteId;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 
 public final class SableSubLevelForceLoadService {
     private static final SubLevelLoadingTicketType<String> RUNTIME_DOCK_STOP =
@@ -43,25 +44,47 @@ public final class SableSubLevelForceLoadService {
         // ship-body ownership, so AAL must not use them for dock runtime liveness.
     }
 
+    public static synchronized void onServerStopping(ServerStoppingEvent event) {
+        releaseAll(event.getServer(), "server_stopping");
+    }
+
     public static synchronized void onServerStopped(ServerStoppedEvent event) {
-        Map<RouteId, Lease> leases = ACTIVE_LEASES.remove(event.getServer());
+        // Normally emptied during ServerStopping, while Sable's levels are still available.
+        // Keep this fallback so aborted startup/shutdown paths cannot retain server keys.
+        releaseAll(event.getServer(), "server_stopped_fallback");
+    }
+
+    private static void releaseAll(MinecraftServer server, String reason) {
+        int removedDockTickets = 0;
+        Map<RouteId, Lease> leases = ACTIVE_LEASES.remove(server);
         if (leases != null) {
             for (Lease lease : leases.values()) {
-                ServerLevel level = event.getServer().getLevel(lease.dimension());
+                ServerLevel level = server.getLevel(lease.dimension());
                 if (level != null) {
-                    removeRuntimeTicket(level, lease.shipId(), lease.routeId(), "server_stopped");
+                    if (removeRuntimeTicket(level, lease.shipId(), lease.routeId(), reason)) {
+                        removedDockTickets++;
+                    }
                 }
             }
         }
-        Map<RouteId, Lease> trainLeases = ACTIVE_TRAIN_LEASES.remove(event.getServer());
-        if (trainLeases == null || trainLeases.isEmpty()) {
-            return;
-        }
-        for (Lease lease : trainLeases.values()) {
-            ServerLevel level = event.getServer().getLevel(lease.dimension());
-            if (level != null) {
-                removeTrainRuntimeTicket(level, lease.shipId(), lease.routeId());
+
+        int removedTrainTickets = 0;
+        Map<RouteId, Lease> trainLeases = ACTIVE_TRAIN_LEASES.remove(server);
+        if (trainLeases != null) {
+            for (Lease lease : trainLeases.values()) {
+                ServerLevel level = server.getLevel(lease.dimension());
+                if (level != null && removeTrainRuntimeTicket(level, lease.shipId(), lease.routeId())) {
+                    removedTrainTickets++;
+                }
             }
+        }
+        if (removedDockTickets > 0 || removedTrainTickets > 0) {
+            CreateAeronauticsAutomatedLogistics.debugVehicle(
+                    "Released Sable runtime tickets before shutdown: dock={} playback={} reason={}",
+                    removedDockTickets,
+                    removedTrainTickets,
+                    reason
+            );
         }
     }
 

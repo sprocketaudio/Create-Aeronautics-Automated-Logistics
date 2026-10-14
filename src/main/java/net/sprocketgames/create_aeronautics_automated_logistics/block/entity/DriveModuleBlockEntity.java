@@ -47,6 +47,7 @@ public class DriveModuleBlockEntity extends BlockEntity implements MenuProvider 
     private static final String ENCODING = "encoding";
     private static final String INVERTED = "inverted";
     private static final String HEALTH = "health";
+    private static final String OUTPUT_SIGNAL = "outputSignal";
 
     private UUID moduleId = UUID.randomUUID();
     private String moduleName = IdentityNames.defaultDriveModuleName(moduleId);
@@ -112,9 +113,14 @@ public class DriveModuleBlockEntity extends BlockEntity implements MenuProvider 
         if (this.outputSignal == clampedSignal) {
             return;
         }
+        boolean poweredChanged = (this.outputSignal > 0) != (clampedSignal > 0);
         this.outputSignal = clampedSignal;
         setChanged();
         updatePoweredState();
+        if (poweredChanged) {
+            // Keep the client-side block model aligned with the live output edge.
+            syncClientState();
+        }
         notifyRedstoneNeighbors();
     }
 
@@ -178,26 +184,8 @@ public class DriveModuleBlockEntity extends BlockEntity implements MenuProvider 
     }
 
     public boolean tryLink(ServerLevel level) {
-        if (config.isEmpty()) {
-            health = DriveModuleHealth.CONFLICTING_CONFIGURATION;
-            setChanged();
-            syncClientState();
-            return false;
-        }
-        DriveModuleLinkService.Resolution resolution = DriveModuleLinkService.resolve(level, worldPosition, Optional.empty());
-        if (resolution.health() != DriveModuleHealth.LINKED || resolution.resolvedController().isEmpty()) {
-            link = Optional.empty();
-            health = resolution.health();
-            setChanged();
-            syncClientState();
-            return false;
-        }
-        link = Optional.of(new DriveModuleLink(moduleId, resolution.resolvedController().get().transponderId()));
-        health = DriveModuleHealth.LINKED;
-        DriveModuleLinkService.track(this);
-        setChanged();
-        syncClientState();
-        return true;
+        refreshLinkState(level);
+        return health == DriveModuleHealth.LINKED && link.isPresent();
     }
 
     public void refreshLinkState(ServerLevel level) {
@@ -215,27 +203,17 @@ public class DriveModuleBlockEntity extends BlockEntity implements MenuProvider 
             }
             return;
         }
-        DriveModuleLinkService.Resolution resolution = DriveModuleLinkService.resolve(
-                level,
-                worldPosition,
-                link.map(DriveModuleLink::controllerTransponderId)
-        );
-
-        if (link.isPresent()) {
-            DriveModuleHealth resolvedHealth = resolution.health();
-            if (resolvedHealth == DriveModuleHealth.LINKED && resolution.resolvedController().isPresent()) {
-                DriveModuleLink currentLink = link.get();
-                UUID resolvedId = resolution.resolvedController().get().transponderId();
-                if (!currentLink.controllerTransponderId().equals(resolvedId)) {
-                    link = Optional.of(new DriveModuleLink(moduleId, resolvedId));
-                }
+        DriveModuleLinkService.Resolution resolution = DriveModuleLinkService.resolve(level, worldPosition, Optional.empty());
+        if (resolution.health() == DriveModuleHealth.LINKED && resolution.resolvedController().isPresent()) {
+            UUID resolvedId = resolution.resolvedController().get().transponderId();
+            if (link.map(DriveModuleLink::controllerTransponderId).filter(resolvedId::equals).isEmpty()) {
+                DriveModuleLinkService.untrack(this);
+                link = Optional.of(new DriveModuleLink(moduleId, resolvedId));
             }
-            health = resolvedHealth;
+            health = DriveModuleHealth.LINKED;
         } else {
-            health = switch (resolution.health()) {
-                case LINKED -> DriveModuleHealth.UNLINKED;
-                default -> resolution.health();
-            };
+            link = Optional.empty();
+            health = resolution.health();
         }
 
         updatePoweredState();
@@ -267,13 +245,14 @@ public class DriveModuleBlockEntity extends BlockEntity implements MenuProvider 
         super.onLoad();
         if (level instanceof ServerLevel serverLevel) {
             refreshOwnerTeamId();
+            DriveModuleLinkService.register(this);
             refreshLinkState(serverLevel);
         }
     }
 
     @Override
     public void setRemoved() {
-        DriveModuleLinkService.untrack(this);
+        DriveModuleLinkService.unregister(this);
         super.setRemoved();
     }
 
@@ -309,6 +288,7 @@ public class DriveModuleBlockEntity extends BlockEntity implements MenuProvider 
             tag.put(CONFIG, configTag);
         });
         tag.putString(HEALTH, health.name());
+        tag.putInt(OUTPUT_SIGNAL, outputSignal);
     }
 
     @Override
@@ -330,8 +310,22 @@ public class DriveModuleBlockEntity extends BlockEntity implements MenuProvider 
         } else {
             health = readHealth(tag).orElse(link.isPresent() ? DriveModuleHealth.CONTROLLER_UNAVAILABLE : DriveModuleHealth.UNLINKED);
         }
+        if (level != null && level.isClientSide) {
+            // Update packets carry the live signal so the powered model follows the
+            // actual module output. Previously this was always reset to zero here,
+            // which could immediately undo a powered blockstate update client-side.
+            outputSignal = Math.clamp(tag.getInt(OUTPUT_SIGNAL), 0, 15);
+        } else {
+            // A saved burner signal can become a large heat impulse while Sable and the
+            // controller are still restoring. Playback explicitly warms the controls once
+            // the complete module set is ready, while the ship is physically held.
+            outputSignal = config
+                    .filter(DriveModuleConfig::inverted)
+                    .filter(value -> value.supportsInversion())
+                    .map(value -> 15)
+                    .orElse(0);
+        }
         updatePoweredState();
-        outputSignal = 0;
     }
 
     @Override
@@ -415,7 +409,13 @@ public class DriveModuleBlockEntity extends BlockEntity implements MenuProvider 
         if (level == null || level.isClientSide) {
             return;
         }
-        level.updateNeighborsAt(worldPosition, getBlockState().getBlock());
-        level.updateNeighbourForOutputSignal(worldPosition, getBlockState().getBlock());
+        BlockState state = getBlockState();
+        level.updateNeighborsAt(worldPosition, state.getBlock());
+        level.updateNeighbourForOutputSignal(worldPosition, state.getBlock());
+
+        // The front face is a strong source. Refresh the neighbours around its
+        // direct target as well, so a solid redstone-conducting block can pass
+        // the module's signal on to components beyond it just like a repeater.
+        level.updateNeighborsAt(worldPosition.relative(state.getValue(DriveModuleBlock.FACING)), state.getBlock());
     }
 }

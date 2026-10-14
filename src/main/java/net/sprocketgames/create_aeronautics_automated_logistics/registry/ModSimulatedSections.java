@@ -21,9 +21,7 @@ public final class ModSimulatedSections {
         register(ModItems.AIRSHIP_STATION);
         register(ModItems.TRAIN_STATION);
         register(ModItems.SHIP_TRANSPONDER);
-        register(ModItems.ADVANCED_TRANSPONDER);
         register(ModItems.LOGISTICS_TERMINAL);
-        register(ModItems.DRIVE_MODULE);
     }
 
     private static void register(DeferredItem<? extends Item> item) {

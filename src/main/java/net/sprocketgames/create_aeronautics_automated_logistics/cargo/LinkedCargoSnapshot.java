@@ -11,6 +11,7 @@ import net.minecraft.world.level.Level;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.capability.IFluidHandler;
 import net.neoforged.neoforge.items.IItemHandler;
+import net.sprocketgames.create_aeronautics_automated_logistics.dock.DockTransferSnapshot;
 
 public record LinkedCargoSnapshot(
         boolean hasItemStorage,
@@ -106,6 +107,38 @@ public record LinkedCargoSnapshot(
 
     public static LinkedCargoSnapshot empty() {
         return new LinkedCargoSnapshot(false, false, List.of(), List.of(), 0, 0L);
+    }
+
+    /**
+     * Includes cargo held by either connector while a dock is locked. Automation
+     * can move an entire linked store into the far connector before that connector
+     * has delivered it to its destination, so neither side is safe to treat as
+     * empty until both transit buffers have drained. Connector capacity is not
+     * included: only its current contents count as in-flight cargo.
+     */
+    public LinkedCargoSnapshot includingDockTransferBuffer(DockTransferSnapshot transfer) {
+        List<ItemStack> transferItems = transfer.itemStacks();
+        List<FluidStack> transferFluids = transfer.fluidStacks();
+        if (transfer.itemCount() <= 0 && transfer.fluidAmount() <= 0L) {
+            return this;
+        }
+
+        List<ItemStack> combinedItems = new ArrayList<>(itemStacks.size() + transferItems.size());
+        itemStacks.forEach(stack -> combinedItems.add(stack.copy()));
+        transferItems.forEach(stack -> combinedItems.add(stack.copy()));
+
+        List<FluidStack> combinedFluids = new ArrayList<>(fluidStacks.size() + transferFluids.size());
+        fluidStacks.forEach(stack -> combinedFluids.add(stack.copy()));
+        transferFluids.forEach(stack -> combinedFluids.add(stack.copy()));
+
+        return new LinkedCargoSnapshot(
+                hasItemStorage,
+                hasFluidStorage,
+                List.copyOf(combinedItems),
+                List.copyOf(combinedFluids),
+                remainingItemCapacity,
+                remainingFluidCapacity
+        );
     }
 
     public int totalItemCount() {

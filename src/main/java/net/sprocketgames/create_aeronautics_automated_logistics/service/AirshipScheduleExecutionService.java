@@ -752,6 +752,14 @@ public class AirshipScheduleExecutionService {
         return Optional.ofNullable(activeSchedules.get(transponderId)).map(ActiveAirshipSchedule::currentStationId);
     }
 
+    public Optional<UUID> targetStationId(UUID transponderId) {
+        ActiveAirshipSchedule active = activeSchedules.get(transponderId);
+        if (active == null || active.isFinished()) {
+            return Optional.empty();
+        }
+        return active.currentEntry().targetStationId();
+    }
+
     public Optional<Integer> currentEntryIndex(UUID transponderId) {
         return Optional.ofNullable(activeSchedules.get(transponderId)).map(ActiveAirshipSchedule::entryIndex);
     }

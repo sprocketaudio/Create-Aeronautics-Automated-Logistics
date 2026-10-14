@@ -73,6 +73,7 @@ public record DriveModuleMenuActionPayload(BlockPos pos, int action, String valu
             case ACTION_SET_INTENT -> {
                 try {
                     module.setIntent(DriveIntentType.valueOf(payload.value()));
+                    module.refreshLinkState(player.serverLevel());
                 } catch (IllegalArgumentException ignored) {
                 }
             }
@@ -92,4 +93,5 @@ public record DriveModuleMenuActionPayload(BlockPos pos, int action, String valu
             default -> Component.translatable("message.create_aeronautics_automated_logistics.playback.failed", "Link failed");
         };
     }
+
 }

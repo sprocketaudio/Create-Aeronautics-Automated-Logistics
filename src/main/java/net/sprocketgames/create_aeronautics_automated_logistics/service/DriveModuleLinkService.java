@@ -10,7 +10,9 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AdvancedTransponderBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.DriveModuleBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
@@ -22,6 +24,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.vehicle.SableSub
 
 public final class DriveModuleLinkService {
     private static final Map<UUID, Set<BlockPos>> MODULES_BY_CONTROLLER = new HashMap<>();
+    private static final Map<ResourceKey<Level>, Set<BlockPos>> KNOWN_MODULES_BY_DIMENSION = new HashMap<>();
 
     private DriveModuleLinkService() {
     }
@@ -94,14 +97,64 @@ public final class DriveModuleLinkService {
         if (module.getLevel() == null || module.getLevel().isClientSide) {
             return;
         }
+        register(module);
         module.link().ifPresent(link -> MODULES_BY_CONTROLLER
                 .computeIfAbsent(link.controllerTransponderId(), ignored -> new HashSet<>())
                 .add(module.getBlockPos().immutable()));
     }
 
+    public static void register(DriveModuleBlockEntity module) {
+        if (!(module.getLevel() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        KNOWN_MODULES_BY_DIMENSION
+                .computeIfAbsent(serverLevel.dimension(), ignored -> new HashSet<>())
+                .add(module.getBlockPos().immutable());
+    }
+
+    public static void unregister(DriveModuleBlockEntity module) {
+        if (module.getLevel() instanceof ServerLevel serverLevel) {
+            Set<BlockPos> positions = KNOWN_MODULES_BY_DIMENSION.get(serverLevel.dimension());
+            if (positions != null) {
+                positions.remove(module.getBlockPos());
+                if (positions.isEmpty()) {
+                    KNOWN_MODULES_BY_DIMENSION.remove(serverLevel.dimension());
+                }
+            }
+        }
+        untrack(module);
+    }
+
     public static void untrack(DriveModuleBlockEntity module) {
         MODULES_BY_CONTROLLER.values().forEach(positions -> positions.remove(module.getBlockPos()));
         MODULES_BY_CONTROLLER.entrySet().removeIf(entry -> entry.getValue().isEmpty());
+    }
+
+    /**
+     * Route start must use the modules that still exist on the assembled vehicle,
+     * rather than an earlier controller index entry left behind while it changed.
+     */
+    public static void reconcileKnownModules(ServerLevel level, UUID controllerTransponderId) {
+        // The controller index is an optimisation for per-tick output. Discard it
+        // at route start so a module removed from an assembled vehicle cannot
+        // satisfy the hardware check from a stale entry.
+        MODULES_BY_CONTROLLER.remove(controllerTransponderId);
+        Set<BlockPos> positions = KNOWN_MODULES_BY_DIMENSION.get(level.dimension());
+        if (positions == null || positions.isEmpty()) {
+            return;
+        }
+        Set<BlockPos> stalePositions = new HashSet<>();
+        for (BlockPos position : List.copyOf(positions)) {
+            if (level.getBlockEntity(position) instanceof DriveModuleBlockEntity module) {
+                module.refreshLinkState(level);
+            } else {
+                stalePositions.add(position);
+            }
+        }
+        positions.removeAll(stalePositions);
+        if (positions.isEmpty()) {
+            KNOWN_MODULES_BY_DIMENSION.remove(level.dimension());
+        }
     }
 
     public static List<DriveModuleBlockEntity> linkedModules(ServerLevel level, UUID controllerTransponderId) {

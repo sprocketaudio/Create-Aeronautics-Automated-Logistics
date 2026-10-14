@@ -20,6 +20,18 @@ public interface VehicleController {
 
     Vec3 position();
 
+    default Optional<Vec3> linearVelocity() {
+        return Optional.empty();
+    }
+
+    default Optional<Vec3> angularVelocity() {
+        return Optional.empty();
+    }
+
+    default Optional<LiftRotorState> liftRotorState() {
+        return Optional.empty();
+    }
+
     default Vec3 recordingPosition(ServerPlayer player) {
         return position();
     }
@@ -74,4 +86,24 @@ public interface VehicleController {
     }
 
     void stop(ServerLevel level);
+
+    record LiftRotorState(int rotorCount, int activeRotorCount, double averageAirflow) {
+        public LiftRotorState(int rotorCount, int activeRotorCount) {
+            this(rotorCount, activeRotorCount, 0.0D);
+        }
+
+        public LiftRotorState {
+            rotorCount = Math.max(0, rotorCount);
+            activeRotorCount = Math.clamp(activeRotorCount, 0, rotorCount);
+            averageAirflow = Math.max(0.0D, Math.abs(averageAirflow));
+        }
+
+        public boolean hasRotors() {
+            return rotorCount > 0;
+        }
+
+        public boolean isAnyActive() {
+            return activeRotorCount > 0;
+        }
+    }
 }

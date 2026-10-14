@@ -65,8 +65,8 @@ public class LogisticsTerminalScreen extends AbstractContainerScreen<LogisticsTe
     private static final int NODE_RADIUS = 3;
     private static final int HOVER_RADIUS = 12;
     private static final int[] ROUTE_COLORS = {
-            0xFF7CC9FF, 0xFFF7BE6A, 0xFF89E0A8, 0xFFFF8F8F,
-            0xFFC6A0FF, 0xFFFFD36E, 0xFF7DE1D8, 0xFFFFA5D8
+            0xFF7CC9FF, 0xFFF29B45, 0xFF89E0A8, 0xFFFF8F8F,
+            0xFFC6A0FF, 0xFFFFE06A, 0xFF7DE1D8, 0xFFFFA5D8
     };
     private static final int MAP_BACKGROUND = 0x11000000;
     private static final int GRID_COLOR = 0x1AFFFFFF;

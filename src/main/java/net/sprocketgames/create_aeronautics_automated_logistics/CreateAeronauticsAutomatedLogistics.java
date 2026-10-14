@@ -12,11 +12,13 @@ import net.sprocketgames.create_aeronautics_automated_logistics.compat.CreateAer
 import net.sprocketgames.create_aeronautics_automated_logistics.network.ModNetworking;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlockEntities;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlocks;
+import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModDisplaySources;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModItems;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModMenus;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModSimulatedSections;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomationVisualServerEvents;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.CargoLinkInteractionService;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkLifecycleService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.DockLinkInteractionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.RecordingServerEvents;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.SableSubLevelForceLoadService;
@@ -134,6 +136,7 @@ public class CreateAeronauticsAutomatedLogistics {
         modEventBus.addListener(ModNetworking::register);
         ModBlocks.BLOCKS.register(modEventBus);
         ModItems.ITEMS.register(modEventBus);
+        ModDisplaySources.register(modEventBus);
         ModSimulatedSections.bootstrap();
         ModMenus.MENUS.register(modEventBus);
         ModBlockEntities.BLOCK_ENTITY_TYPES.register(modEventBus);
@@ -148,9 +151,11 @@ public class CreateAeronauticsAutomatedLogistics {
         NeoForge.EVENT_BUS.addListener(StationChunkLoadingService::onServerStarted);
         NeoForge.EVENT_BUS.addListener(StationChunkLoadingService::onServerTickPre);
         NeoForge.EVENT_BUS.addListener(StationChunkLoadingService::onServerTick);
+        NeoForge.EVENT_BUS.addListener(SableSubLevelForceLoadService::onServerStopping);
         NeoForge.EVENT_BUS.addListener(SableSubLevelForceLoadService::onServerStopped);
         NeoForge.EVENT_BUS.addListener(AutomationVisualServerEvents::onPlayerLogin);
         NeoForge.EVENT_BUS.addListener(DockLinkInteractionService::onRightClickBlock);
+        NeoForge.EVENT_BUS.addListener(DockLinkLifecycleService::onBlockBreak);
         NeoForge.EVENT_BUS.addListener(CargoLinkInteractionService::onRightClickBlock);
         LOGGER.info("Create Aeronautics dependency state: {}", CreateAeronauticsCompat.describeLoadedState());
     }

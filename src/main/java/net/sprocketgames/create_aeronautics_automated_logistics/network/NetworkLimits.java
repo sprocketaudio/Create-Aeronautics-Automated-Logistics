@@ -10,6 +10,7 @@ final class NetworkLimits {
     static final int MAX_LINK_PROMPT_GROUPS = 1_024;
     static final int MAX_LINK_PROMPT_POSITIONS = 4_096;
     static final int MAX_ACTIVE_VISUAL_SHIPS = 4_096;
+    static final int MAX_DRIVE_TARGET_DEBUG_NODES = 4_096;
     static final int MAX_IDENTITY_SNAPSHOTS = 8_192;
     static final int MAX_TERMINAL_ROUTE_SEGMENTS = 8_192;
     static final int MAX_SCHEDULE_ENTRIES = 512;

@@ -4,6 +4,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.sprocketgames.create_aeronautics_automated_logistics.AutomatedLogisticsClientConfig;
 import net.sprocketgames.create_aeronautics_automated_logistics.map.ShipMapMarker;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.TransportMode;
 
@@ -28,9 +29,11 @@ final class MapMarkerRenderUtil {
     }
 
     static void drawMarker(GuiGraphics graphics, ShipMapMarker marker, int centerX, int centerY) {
-        int iconX = centerX - ICON_WIDTH / 2;
-        int iconY = centerY - ICON_HEIGHT / 2;
-        float iconScale = ICON_WIDTH / (float) ICON_TEXTURE_SIZE;
+        int iconWidth = Math.round(ICON_WIDTH * AutomatedLogisticsClientConfig.mapMarkerIconScale());
+        int iconHeight = Math.round(ICON_HEIGHT * AutomatedLogisticsClientConfig.mapMarkerIconScale());
+        int iconX = centerX - iconWidth / 2;
+        int iconY = centerY - iconHeight / 2;
+        float iconScale = iconWidth / (float) ICON_TEXTURE_SIZE;
         graphics.pose().pushPose();
         graphics.pose().translate(iconX, iconY, ICON_BLIT_OFFSET);
         graphics.pose().scale(iconScale, iconScale, 1.0F);
@@ -57,13 +60,14 @@ final class MapMarkerRenderUtil {
             return;
         }
 
+        float labelScale = AutomatedLogisticsClientConfig.mapMarkerLabelScale();
         int labelWidth = minecraft.font.width(label);
-        int labelX = centerX - labelWidth / 2;
-        int labelY = iconY - minecraft.font.lineHeight - 2;
         graphics.pose().pushPose();
-        graphics.pose().translate(0, 0, LABEL_Z_OFFSET);
-        graphics.fill(labelX - 2, labelY - 1, labelX + labelWidth + 2, labelY + minecraft.font.lineHeight - 1, LABEL_BACKGROUND);
-        graphics.drawString(minecraft.font, Component.literal(label), labelX, labelY, LABEL_COLOR, false);
+        graphics.pose().translate(centerX, iconY - 2.0F - minecraft.font.lineHeight * labelScale, LABEL_Z_OFFSET);
+        graphics.pose().scale(labelScale, labelScale, 1.0F);
+        int labelX = -labelWidth / 2;
+        graphics.fill(labelX - 2, -1, labelX + labelWidth + 2, minecraft.font.lineHeight - 1, LABEL_BACKGROUND);
+        graphics.drawString(minecraft.font, Component.literal(label), labelX, 0, LABEL_COLOR, false);
         graphics.pose().popPose();
     }
 

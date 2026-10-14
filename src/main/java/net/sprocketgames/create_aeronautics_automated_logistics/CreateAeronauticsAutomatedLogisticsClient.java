@@ -3,6 +3,7 @@ package net.sprocketgames.create_aeronautics_automated_logistics;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
@@ -65,6 +66,9 @@ public class CreateAeronauticsAutomatedLogisticsClient {
         MenuActionBarClientState.tick();
         LogisticsClientOverlays.refresh();
         ShipMapClientState.clearIfWorldMissing();
+        invokeOptionalXaeroIntegration("xaerominimap",
+                "net.sprocketgames.create_aeronautics_automated_logistics.client.map.XaeroMinimapShipMapCompat",
+                "registerIfAvailable");
         LogisticsTerminalClientState.clearIfWorldMissing();
         LogisticsTerminalPreviewClientState.clearIfWorldMissing();
     }
@@ -79,7 +83,38 @@ public class CreateAeronauticsAutomatedLogisticsClient {
 
     public static void onScreenRenderPost(ScreenEvent.Render.Post event) {
         FtbChunksShipMapCompat.renderLargeMapOverlay(event);
+        invokeOptionalXaeroIntegration("xaeroworldmap",
+                "net.sprocketgames.create_aeronautics_automated_logistics.client.map.XaeroWorldMapShipMapCompat",
+                "renderLargeMapOverlay", ScreenEvent.Render.Post.class, event);
         renderOverlayMessages(event.getGuiGraphics(), true);
+    }
+
+    /**
+     * Never directly reference a Xaero compatibility class here: the JVM would resolve its
+     * Xaero types while loading this client entrypoint, even when Xaero is not installed.
+     */
+    private static void invokeOptionalXaeroIntegration(String modId, String className, String methodName,
+                                                        Class<?>... parameterTypes) {
+        invokeOptionalXaeroIntegration(modId, className, methodName, parameterTypes, new Object[0]);
+    }
+
+    private static void invokeOptionalXaeroIntegration(String modId, String className, String methodName,
+                                                        Class<?> parameterType, Object argument) {
+        invokeOptionalXaeroIntegration(modId, className, methodName, new Class<?>[] { parameterType },
+                new Object[] { argument });
+    }
+
+    private static void invokeOptionalXaeroIntegration(String modId, String className, String methodName,
+                                                        Class<?>[] parameterTypes, Object[] arguments) {
+        if (!ModList.get().isLoaded(modId)) {
+            return;
+        }
+        try {
+            Class.forName(className).getMethod(methodName, parameterTypes).invoke(null, arguments);
+        } catch (ReflectiveOperationException exception) {
+            CreateAeronauticsAutomatedLogistics.LOGGER.warn("Could not initialise optional {} integration", modId,
+                    exception);
+        }
     }
 
     private static void renderOverlayMessages(net.minecraft.client.gui.GuiGraphics guiGraphics, boolean screenOpen) {

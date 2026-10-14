@@ -90,6 +90,11 @@ public final class ModNetworking {
                 SetFlightPathPreviewPayload::handle
         );
         registrar.playToClient(
+                SyncDriveTargetDebugPayload.TYPE,
+                SyncDriveTargetDebugPayload.STREAM_CODEC,
+                SyncDriveTargetDebugPayload::handle
+        );
+        registrar.playToClient(
                 SyncIdentityDirectoryPayload.TYPE,
                 SyncIdentityDirectoryPayload.STREAM_CODEC,
                 SyncIdentityDirectoryPayload::handle

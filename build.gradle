@@ -74,9 +74,53 @@ def localFtbTeamsJarPath = resolveLocalJarPath('ftb_teams_jar', 'FTB_TEAMS_JAR')
 def localFtbChunksJarPath = resolveLocalJarPath('ftb_chunks_jar', 'FTB_CHUNKS_JAR')
 def localCommonNetworkingJarPath = resolveLocalJarPath('common_networking_jar', 'COMMON_NETWORKING_JAR')
 def localJourneyMapJarPath = resolveLocalJarPath('journeymap_jar', 'JOURNEYMAP_JAR')
+def localSimurailJarPath = resolveLocalJarPath('simurail_jar', 'SIMURAIL_JAR')
+def localCreateConnectedJarPath = resolveLocalJarPath('create_connected_jar', 'CREATE_CONNECTED_JAR')
+def localCreateIronVaultsJarPath = resolveLocalJarPath('create_iron_vaults_jar', 'CREATE_IRON_VAULTS_JAR')
+def localCreatePropulsionJarPath = resolveLocalJarPath('create_propulsion_jar', 'CREATE_PROPULSION_JAR')
+def localPipezJarPath = resolveLocalJarPath('pipez_jar', 'PIPEZ_JAR')
+def localJadeJarPath = resolveLocalJarPath('jade_jar', 'JADE_JAR')
+def localXaeroWorldMapJarPath = resolveLocalJarPath('xaero_world_map_jar', 'XAERO_WORLD_MAP_JAR')
+def localXaeroMinimapJarPath = resolveLocalJarPath('xaero_minimap_jar', 'XAERO_MINIMAP_JAR')
 def localDownloadDevStorageMods = resolveLocalBoolean('download_dev_storage_mods', 'DOWNLOAD_DEV_STORAGE_MODS')
+def configuredDevCompatMods = resolveLocalJarPath('dev_compat_mods', 'DEV_COMPAT_MODS')
+        .split(',')
+        .collect { it.trim().toLowerCase(Locale.ROOT).replace('_', '-') }
+        .findAll { !it.isEmpty() }
+        .toSet()
+if (configuredDevCompatMods.isEmpty()) {
+    configuredDevCompatMods = ['all'] as Set
+}
+def devCompatModEnabled = { String modId ->
+    (configuredDevCompatMods.contains('all') || configuredDevCompatMods.contains(modId))
+            && !configuredDevCompatMods.contains('-' + modId)
+}
 def localModJarPaths = [localAeronauticsJarPath, localSableJarPath, localJourneyMapJarPath].findAll { !it.isBlank() }
-def devCompatProjects = [
+def localDevCompatJarPathsByMod = [
+        'ftb-chunks': [
+                localArchitecturyJarPath,
+                localFtbLibraryJarPath,
+                localFtbTeamsJarPath,
+                localFtbChunksJarPath,
+                localCommonNetworkingJarPath
+        ],
+        'journeymap': [localJourneyMapJarPath],
+        'simurail'  : [localSimurailJarPath],
+        'create-connected': [localCreateConnectedJarPath],
+        'create-iron-vaults': [localCreateIronVaultsJarPath],
+        'create-propulsion': [localCreatePropulsionJarPath],
+        'pipez': [localPipezJarPath],
+        'jade': [localJadeJarPath],
+        'xaero-world-map': [localXaeroWorldMapJarPath],
+        'xaero-minimap': [localXaeroMinimapJarPath]
+].collectEntries { modId, paths ->
+    [(modId): paths.findAll { !it.isBlank() }]
+}
+def localDevCompatJarPaths = localDevCompatJarPathsByMod
+        .findAll { modId, ignored -> devCompatModEnabled(modId) }
+        .values()
+        .flatten()
+def allDevCompatProjects = [
         'refined-storage',
         'ae2',
         'iron-chests',
@@ -87,22 +131,41 @@ def devCompatProjects = [
         'functional-storage',
         'sophisticated-backpacks'
 ]
+def devCompatProjects = allDevCompatProjects.findAll { projectId -> devCompatModEnabled(projectId) }
+def shouldSyncDevCompatMods = (localDownloadDevStorageMods && !devCompatProjects.isEmpty()) || !localDevCompatJarPaths.isEmpty()
+def devCompatModIds = allDevCompatProjects + localDevCompatJarPathsByMod.keySet().sort()
 
 def modrinthApiBase = 'https://api.modrinth.com/v2'
 def devCompatModsDir = layout.buildDirectory.dir('dev-compat-mods')
-def devCompatRunDirs = ['client', 'clientTwo', 'server', 'gameTestServer'].collect { runName ->
+def devCompatRunDirs = ['client', 'clientTwo', 'clientNoAl', 'server', 'gameTestServer'].collect { runName ->
     layout.projectDirectory.dir("run/${runName}/mods")
+}
+
+tasks.register('listDevCompatMods') {
+    group = 'dev'
+    description = 'Lists the identifiers accepted by dev_compat_mods in gradle-local.properties.'
+
+    doLast {
+        println 'Managed dev mod identifiers:'
+        devCompatModIds.each { println " - ${it}" }
+        println "Configured selection: ${configuredDevCompatMods.sort().join(', ')}"
+        println 'Enabled:'
+        devCompatModIds.findAll { devCompatModEnabled(it) }.each { println " - ${it}" }
+    }
 }
 
 tasks.register('downloadDevCompatMods') {
     group = 'dev'
     description = 'Downloads optional storage-mod jars for local 1.21.1 NeoForge compatibility testing.'
     outputs.dir(devCompatModsDir)
-    onlyIf { localDownloadDevStorageMods }
 
     doLast {
         def outputDir = devCompatModsDir.get().asFile
         outputDir.mkdirs()
+        if (!localDownloadDevStorageMods || devCompatProjects.isEmpty()) {
+            outputDir.listFiles()?.findAll { it.isFile() }?.each { stale -> stale.delete() }
+            return
+        }
 
         def slurper = new JsonSlurper()
         def expectedFiles = [] as Set<String>
@@ -238,7 +301,9 @@ runs {
 
         workingDirectory project.layout.projectDirectory.dir('run').dir(name)
 
-        modSource project.sourceSets.main
+        if (name != 'clientNoAl') {
+            modSource project.sourceSets.main
+        }
     }
 
     client {
@@ -250,6 +315,12 @@ runs {
         runType 'client'
         systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         arguments.addAll '--username', 'TeamMate'
+    }
+
+    // Comparison environment: the same runtime mods, without Automated Logistics itself.
+    clientNoAl {
+        runType 'client'
+        arguments.addAll '--username', 'NoALTest'
     }
 
     server {
@@ -320,10 +391,11 @@ dependencies {
             localFtbTeamsJarPath,
             localFtbChunksJarPath,
             localCommonNetworkingJarPath,
-            localJourneyMapJarPath
+            localJourneyMapJarPath,
+            localJadeJarPath,
+            localXaeroMinimapJarPath
     ].findAll { !it.isBlank() }.each { jarPath ->
         compileOnly files(jarPath)
-        localRuntime files(jarPath)
     }
     compileOnly fileTree(dir: layout.buildDirectory.dir('local-mod-deps'), include: '*.jar')
     testImplementation platform('org.junit:junit-bom:5.10.2')
@@ -420,13 +492,13 @@ tasks.register('ideBeforeRun') {
     description = 'Prepares local IDE run outputs expected by generated NeoGradle run configurations.'
     dependsOn tasks.named('classes')
     dependsOn tasks.named('syncIdeaResources')
-    if (localDownloadDevStorageMods) {
+    if (shouldSyncDevCompatMods) {
         dependsOn tasks.named('downloadDevCompatMods')
         dependsOn tasks.named('syncDevCompatModsToRunDirs')
     }
 }
 
-if (localDownloadDevStorageMods) {
+if (shouldSyncDevCompatMods) {
     tasks.named('build').configure {
         dependsOn tasks.named('downloadDevCompatMods')
         dependsOn tasks.named('syncDevCompatModsToRunDirs')
@@ -435,14 +507,15 @@ if (localDownloadDevStorageMods) {
 
 tasks.register('syncDevCompatModsToRunDirs') {
     group = 'dev'
-    description = 'Copies downloaded local compatibility-test mods into the NeoForge run mods folders.'
+    description = 'Copies managed compatibility-test mods into the NeoForge run mods folders.'
     dependsOn tasks.named('downloadDevCompatMods')
     inputs.dir(devCompatModsDir)
+    inputs.files(localDevCompatJarPaths)
     outputs.dirs(devCompatRunDirs)
-    onlyIf { localDownloadDevStorageMods }
 
     doLast {
         def sourceDir = devCompatModsDir.get().asFile
+        def localSourceFiles = localDevCompatJarPaths.collect { file(it) }.findAll { it.isFile() }
         devCompatRunDirs.each { targetDirProvider ->
             def targetDir = targetDirProvider.asFile
             def managedFilesManifest = new File(targetDir, '.automated-logistics-dev-compat-mods.txt')
@@ -456,13 +529,21 @@ tasks.register('syncDevCompatModsToRunDirs') {
             copy {
                 from(sourceDir)
                 include '*.jar'
+                from(localSourceFiles)
                 into(targetDir)
             }
 
-            def expectedNames = sourceDir.listFiles()?.findAll { it.isFile() }?.collect { it.name }?.toSet() ?: [] as Set
+            def expectedNames = (sourceDir.listFiles()?.findAll { it.isFile() }?.collect { it.name } ?: []) as Set
+            expectedNames.addAll(localSourceFiles.collect { it.name })
             previouslyManagedNames.findAll { !expectedNames.contains(it) }.each { staleName ->
                 def stale = new File(targetDir, staleName)
                 stale.delete()
+            }
+            if (!localSimurailJarPath.isBlank()) {
+                def legacySimurail = new File(targetDir, 'simurail-1.21.1-0.0.0-a.jar')
+                if (!expectedNames.contains(legacySimurail.name)) {
+                    legacySimurail.delete()
+                }
             }
             managedFilesManifest.text = expectedNames.sort().join(System.lineSeparator()) + System.lineSeparator()
         }

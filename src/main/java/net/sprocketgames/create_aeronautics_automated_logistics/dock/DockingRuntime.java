@@ -5,6 +5,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.session.DockRequestId;
+import net.sprocketgames.create_aeronautics_automated_logistics.dock.session.DockTargetId;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.Route;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteId;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.AutomatedLogisticsServices;
@@ -56,6 +57,19 @@ public final class DockingRuntime {
         AutomatedLogisticsServices.DOCK_RESERVATIONS.release(requestId);
     }
 
+    public static boolean retainReservation(DockTargetId target, DockRequestId requestId) {
+        Optional<DockTargetId> existingTarget = AutomatedLogisticsServices.DOCK_RESERVATIONS.targetFor(requestId);
+        if (existingTarget.filter(target::equals).isEmpty() && existingTarget.isPresent()) {
+            releaseReservation(requestId);
+        }
+        DockReservationService.ReservationResult result = AutomatedLogisticsServices.DOCK_RESERVATIONS.request(
+                target,
+                requestId,
+                DockingRuntime::isActiveRequest
+        );
+        return result.granted();
+    }
+
     public static void resetRuntimeState(String reason) {
         AutomatedLogisticsServices.DOCK_RESERVATIONS.reset(reason);
         AutomatedLogisticsServices.DOCK_HANDSHAKE.resetRuntime(reason);
@@ -74,6 +88,9 @@ public final class DockingRuntime {
     }
 
     static boolean isActiveRequest(DockRequestId requestId) {
+        if (AutomatedLogisticsServices.PLAYBACK.isRetainingDock(requestId)) {
+            return true;
+        }
         if (AutomatedLogisticsServices.SCHEDULES.isDockRequestActive(requestId)) {
             return true;
         }

@@ -16,7 +16,6 @@ import net.minecraft.world.entity.player.Inventory;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.DriveModuleBlockEntity;
-import net.sprocketgames.create_aeronautics_automated_logistics.drive.DriveEncodingType;
 import net.sprocketgames.create_aeronautics_automated_logistics.drive.DriveIntentType;
 import net.sprocketgames.create_aeronautics_automated_logistics.drive.DriveModuleConfig;
 import net.sprocketgames.create_aeronautics_automated_logistics.drive.DriveModuleHealth;
@@ -33,12 +32,13 @@ public class DriveModuleScreen extends AbstractContainerScreen<DriveModuleMenu> 
     private static final ResourceLocation BACKGROUND =
             ResourceLocation.fromNamespaceAndPath(CreateAeronauticsAutomatedLogistics.MOD_ID, "textures/gui/drive_module.png");
     private static final ScreenElement EDIT_NAME_ICON =
-            new AtlasIcon(BACKGROUND, 16, 240, 16, 16, 256, 1.0F, 16);
+            new AtlasIcon(BACKGROUND, 0, 239, 13, 13, 256);
     private static final int BOX_FILL = 0xCC4A3F3D;
     private static final int BOX_OUTLINE = 0xFF8C7964;
     private static final int BOX_SELECTED = 0xFF6B5B53;
     private static final int TEXT_COLOR = 0xFFE7D6B4;
     private static final int SUBTEXT_COLOR = 0xFFBEB3A2;
+    private static final int DESCRIPTION_COLOR = 0xFFE6E6E6;
     private static final int INVALID_COLOR = 0xFFFF9B7D;
     private static final int LABEL_COLOR = 0xFFE7D6B4;
     private static final int STATUS_FOOTER_X = 60;
@@ -46,12 +46,11 @@ public class DriveModuleScreen extends AbstractContainerScreen<DriveModuleMenu> 
     private static final int STATUS_FOOTER_WIDTH = 118;
     private static final int DROPDOWN_VISIBLE_ROWS = 6;
     private static final int DROPDOWN_WIDTH = 88;
+    private static final int DESCRIPTION_WIDTH = 134;
+    private static final int DESCRIPTION_LINE_SPACING = 10;
 
     private EditBox nameBox;
     private String pendingSubmittedName;
-    private IconButton focusNameButton;
-    private IconButton linkButton;
-    private IconButton unlinkButton;
     private IconButton closeButton;
     private boolean categoryDropdownOpen;
     private boolean intentDropdownOpen;
@@ -107,27 +106,6 @@ public class DriveModuleScreen extends AbstractContainerScreen<DriveModuleMenu> 
     }
 
     private void initButtons() {
-        focusNameButton = addIconButton(
-                this.leftPos + 167,
-                this.topPos + 3,
-                EDIT_NAME_ICON,
-                () -> nameBox.setFocused(true),
-                Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.rename")
-        );
-        linkButton = addIconButton(
-                this.leftPos + 17,
-                this.topPos + 154,
-                AllIcons.I_ADD,
-                () -> PacketDistributor.sendToServer(new DriveModuleMenuActionPayload(menu.modulePos(), DriveModuleMenuActionPayload.ACTION_LINK, "")),
-                Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.link")
-        );
-        unlinkButton = addIconButton(
-                this.leftPos + 17,
-                this.topPos + 154,
-                AllIcons.I_MTD_CLOSE,
-                () -> PacketDistributor.sendToServer(new DriveModuleMenuActionPayload(menu.modulePos(), DriveModuleMenuActionPayload.ACTION_UNLINK, "")),
-                Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.unlink")
-        );
         closeButton = addIconButton(
                 this.leftPos + 167,
                 this.topPos + 154,
@@ -165,11 +143,6 @@ public class DriveModuleScreen extends AbstractContainerScreen<DriveModuleMenu> 
             nameBox.setHighlightPos(nameBox.getCursorPosition());
         }
         centerNameBox();
-        boolean linked = module.link().isPresent();
-        linkButton.visible = !linked;
-        linkButton.active = !linked && module.config().isPresent();
-        unlinkButton.visible = linked;
-        unlinkButton.active = linked;
     }
 
     @Override
@@ -200,35 +173,37 @@ public class DriveModuleScreen extends AbstractContainerScreen<DriveModuleMenu> 
         dynamicTooltips.clear();
         renderBackground(guiGraphics, mouseX, mouseY, partialTick);
         super.render(guiGraphics, mouseX, mouseY, partialTick);
+        renderHeaderEditIcon(guiGraphics);
         renderTooltip(guiGraphics, mouseX, mouseY);
         renderCustomTooltips(guiGraphics, mouseX, mouseY);
     }
 
     private void drawSubtitle(GuiGraphics guiGraphics) {
-        guiGraphics.drawString(font,
+        guiGraphics.drawCenteredString(font,
                 Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.subtitle"),
-                this.leftPos + 36,
+                this.leftPos + PANEL_WIDTH / 2,
                 this.topPos + 21,
-                SUBTEXT_COLOR,
-                false);
+                SUBTEXT_COLOR);
         guiGraphics.drawString(font,
                 Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.category"),
-                this.leftPos + 36,
+                this.leftPos + 29,
                 this.topPos + 54,
                 LABEL_COLOR,
                 false);
         guiGraphics.drawString(font,
                 Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent"),
-                this.leftPos + 36,
+                this.leftPos + 29,
                 this.topPos + 70,
                 LABEL_COLOR,
                 false);
-        guiGraphics.drawString(font,
-                Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.settings"),
-                this.leftPos + 36,
-                this.topPos + 86,
-                LABEL_COLOR,
-                false);
+    }
+
+    private void renderHeaderEditIcon(GuiGraphics guiGraphics) {
+        if (nameBox == null || nameBox.isFocused()) {
+            return;
+        }
+        int iconX = Math.min(nameBox.getX() + font.width(nameBox.getValue()) + 5, this.leftPos + PANEL_WIDTH - 24);
+        EDIT_NAME_ICON.render(guiGraphics, iconX, this.topPos + 1);
     }
 
     private void drawSelectionBox(GuiGraphics guiGraphics, Rect rect, Component value, boolean open, boolean selectable) {
@@ -241,7 +216,7 @@ public class DriveModuleScreen extends AbstractContainerScreen<DriveModuleMenu> 
     }
 
     private void drawSettings(GuiGraphics guiGraphics, Optional<DriveModuleConfig> config, int mouseX, int mouseY) {
-        int x = this.leftPos + 36;
+        int x = this.leftPos + 29;
         int y = this.topPos + 99;
         if (config.isEmpty()) {
             guiGraphics.drawString(font,
@@ -264,25 +239,29 @@ public class DriveModuleScreen extends AbstractContainerScreen<DriveModuleMenu> 
                     false);
             return;
         }
-        guiGraphics.drawString(font, selectedIntentLabel(config), x, y, TEXT_COLOR, false);
-        guiGraphics.drawString(font, describeIntent(selectedConfig.intent()), x, y + 13, 0xFFCBC1B1, false);
-        guiGraphics.drawString(font, describeEncoding(selectedConfig.encoding()), x, y + 24, 0xFFCBC1B1, false);
+        int descriptionY = this.topPos + (selectedConfig.supportsInversion() ? 106 : 86);
+        List<net.minecraft.util.FormattedCharSequence> descriptionLines = font.split(
+                describeIntent(selectedConfig.intent()),
+                DESCRIPTION_WIDTH
+        );
+        for (int lineIndex = 0; lineIndex < descriptionLines.size(); lineIndex++) {
+            guiGraphics.drawString(
+                    font,
+                    descriptionLines.get(lineIndex),
+                    x,
+                    descriptionY + lineIndex * DESCRIPTION_LINE_SPACING,
+                    DESCRIPTION_COLOR,
+                    false
+            );
+        }
         if (selectedConfig.supportsInversion()) {
             guiGraphics.drawString(font,
                     Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.invert"),
                     x,
-                    y + 37,
+                    this.topPos + 86,
                     LABEL_COLOR,
                     false);
-            drawSelectionBox(
-                    guiGraphics,
-                    invertSignalRect(),
-                    Component.translatable(selectedConfig.inverted()
-                            ? "gui.create_aeronautics_automated_logistics.drive_module.invert.reversed"
-                            : "gui.create_aeronautics_automated_logistics.drive_module.invert.normal"),
-                    false,
-                    true
-            );
+            drawInvertCheckbox(guiGraphics, invertSignalRect(), selectedConfig.inverted());
             dynamicTooltips.add(new TooltipArea(
                     invertSignalRect().x,
                     invertSignalRect().y,
@@ -299,8 +278,24 @@ public class DriveModuleScreen extends AbstractContainerScreen<DriveModuleMenu> 
             case UNLINKED, NO_ASSEMBLED_VEHICLE, NO_ADVANCED_CONTROLLER -> SUBTEXT_COLOR;
             default -> INVALID_COLOR;
         };
-        guiGraphics.drawCenteredString(font, statusLabel(health), statusValueX + statusValueWidth / 2, statusValueY + 2, color);
+        guiGraphics.drawCenteredString(font, statusLabel(health), statusValueX + statusValueWidth / 2, statusValueY, color);
         dynamicTooltips.add(new TooltipArea(statusValueX, statusValueY, statusValueWidth, statusValueHeight, statusTooltip(health)));
+    }
+
+    private void drawInvertCheckbox(GuiGraphics guiGraphics, Rect rect, boolean checked) {
+        guiGraphics.fill(rect.x, rect.y, rect.right(), rect.bottom(), BOX_FILL);
+        guiGraphics.renderOutline(rect.x, rect.y, rect.width, rect.height, BOX_OUTLINE);
+        if (!checked) {
+            return;
+        }
+        int checkColor = 0xFFDAE7B3;
+        guiGraphics.fill(rect.x + 2, rect.y + 6, rect.x + 4, rect.y + 8, checkColor);
+        guiGraphics.fill(rect.x + 3, rect.y + 7, rect.x + 5, rect.y + 9, checkColor);
+        guiGraphics.fill(rect.x + 4, rect.y + 8, rect.x + 6, rect.y + 10, checkColor);
+        guiGraphics.fill(rect.x + 5, rect.y + 7, rect.x + 7, rect.y + 9, checkColor);
+        guiGraphics.fill(rect.x + 6, rect.y + 6, rect.x + 8, rect.y + 8, checkColor);
+        guiGraphics.fill(rect.x + 7, rect.y + 5, rect.x + 9, rect.y + 7, checkColor);
+        guiGraphics.fill(rect.x + 8, rect.y + 4, rect.x + 10, rect.y + 6, checkColor);
     }
 
     private void renderDropdown(GuiGraphics guiGraphics, int mouseX, int mouseY, Rect anchor, List<String> options, int scroll, int selectedIndex) {
@@ -313,6 +308,14 @@ public class DriveModuleScreen extends AbstractContainerScreen<DriveModuleMenu> 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+            if (nameBox != null && !nameBox.isFocused()
+                    && mouseY > this.topPos && mouseY < this.topPos + 18
+                    && mouseX > this.leftPos && mouseX < this.leftPos + PANEL_WIDTH) {
+                nameBox.setFocused(true);
+                nameBox.setHighlightPos(0);
+                setFocused(nameBox);
+                return true;
+            }
             Rect categoryRect = categoryDropdownRect();
             Rect intentRect = intentDropdownRect();
             DriveModuleBlockEntity module = moduleEntity();
@@ -477,7 +480,10 @@ public class DriveModuleScreen extends AbstractContainerScreen<DriveModuleMenu> 
     }
 
     private List<DriveIntentType> intentOptions() {
-        return DriveIntentType.forCategory(selectedCategory);
+        return DriveIntentType.forCategory(selectedCategory).stream()
+                .filter(intent -> intent != DriveIntentType.LIFT_INCREASE
+                        && intent != DriveIntentType.LIFT_DECREASE)
+                .toList();
     }
 
     private List<String> intentOptionLabels() {
@@ -499,15 +505,15 @@ public class DriveModuleScreen extends AbstractContainerScreen<DriveModuleMenu> 
     }
 
     private Rect categoryDropdownRect() {
-        return new Rect(this.leftPos + 84, this.topPos + 51, 88, 12);
+        return new Rect(this.leftPos + 77, this.topPos + 51, DROPDOWN_WIDTH, 12);
     }
 
     private Rect intentDropdownRect() {
-        return new Rect(this.leftPos + 84, this.topPos + 67, 88, 12);
+        return new Rect(this.leftPos + 77, this.topPos + 67, DROPDOWN_WIDTH, 12);
     }
 
     private Rect invertSignalRect() {
-        return new Rect(this.leftPos + 84, this.topPos + 133, 88, 12);
+        return new Rect(this.leftPos + 77, this.topPos + 83, 12, 12);
     }
 
     private Component selectedCategoryLabel() {
@@ -579,23 +585,22 @@ public class DriveModuleScreen extends AbstractContainerScreen<DriveModuleMenu> 
             case FORWARD_BACK_TARGET_STRENGTH -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.forward_back_target_strength");
             case FORWARD_BACK_INCREASE -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.forward_back_increase");
             case FORWARD_BACK_DECREASE -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.forward_back_decrease");
+            case FORWARD_BACK_FORWARD -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.forward_back_forward");
+            case FORWARD_BACK_BACKWARD -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.forward_back_backward");
             case LEFT_RIGHT_DIRECTION -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.left_right_direction");
             case LEFT_RIGHT_TARGET_STRENGTH -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.left_right_target_strength");
             case LEFT_RIGHT_INCREASE -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.left_right_increase");
             case LEFT_RIGHT_DECREASE -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.left_right_decrease");
+            case LEFT_RIGHT_LEFT -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.left_right_left");
+            case LEFT_RIGHT_RIGHT -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.left_right_right");
             case TURN_DIRECTION -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.turn_direction");
             case TURN_TARGET_STRENGTH -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.turn_target_strength");
             case TURN_INCREASE -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.turn_increase");
             case TURN_DECREASE -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.turn_decrease");
+            case TURN_CLOCKWISE -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.turn_clockwise");
+            case TURN_ANTICLOCKWISE -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.turn_anticlockwise");
             case ROTATIONAL_FORCE_ENABLED -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.rotational_force_enabled");
             case DOCKED -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.intent_desc.docked");
-        };
-    }
-
-    private Component describeEncoding(DriveEncodingType encoding) {
-        return switch (encoding) {
-            case STRENGTH_0_TO_15 -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.encoding_desc.strength");
-            case ON_OFF -> Component.translatable("gui.create_aeronautics_automated_logistics.drive_module.encoding_desc.on_off");
         };
     }
 
@@ -604,17 +609,26 @@ public class DriveModuleScreen extends AbstractContainerScreen<DriveModuleMenu> 
             case LIFT -> "Lift";
             case FORWARD_BACK -> "Forward/Back";
             case LEFT_RIGHT -> "Left/Right";
-            case TURN -> "Turn";
-            case ROTATIONAL_FORCE -> "Rotational Force";
+            case TURN -> "Turning";
+            case ROTATIONAL_FORCE -> "Rot. Force";
             case DOCKING -> "Docking";
         };
     }
 
     private String outputRoleLabel(DriveIntentType intent) {
         return switch (intent) {
-            case LIFT_TARGET_STRENGTH, FORWARD_BACK_TARGET_STRENGTH, LEFT_RIGHT_TARGET_STRENGTH, TURN_TARGET_STRENGTH -> "Target Strength";
-            case LIFT_INCREASE, FORWARD_BACK_INCREASE, LEFT_RIGHT_INCREASE, TURN_INCREASE -> "Increase";
-            case LIFT_DECREASE, FORWARD_BACK_DECREASE, LEFT_RIGHT_DECREASE, TURN_DECREASE -> "Decrease";
+            case LIFT_TARGET_STRENGTH -> "Burn Strength";
+            case LIFT_INCREASE -> "Rotor Faster";
+            case LIFT_DECREASE -> "Rotor Slower";
+            case FORWARD_BACK_TARGET_STRENGTH, LEFT_RIGHT_TARGET_STRENGTH, TURN_TARGET_STRENGTH -> "Strength";
+            case FORWARD_BACK_INCREASE, LEFT_RIGHT_INCREASE, TURN_INCREASE -> "Increase";
+            case FORWARD_BACK_DECREASE, LEFT_RIGHT_DECREASE, TURN_DECREASE -> "Decrease";
+            case FORWARD_BACK_FORWARD -> "Forward";
+            case FORWARD_BACK_BACKWARD -> "Backward";
+            case LEFT_RIGHT_LEFT -> "Left";
+            case LEFT_RIGHT_RIGHT -> "Right";
+            case TURN_CLOCKWISE -> "Clockwise";
+            case TURN_ANTICLOCKWISE -> "Anticlockwise";
             case FORWARD_BACK_DIRECTION, LEFT_RIGHT_DIRECTION, TURN_DIRECTION -> "Direction";
             case ROTATIONAL_FORCE_ENABLED -> "Enabled";
             case DOCKED -> "Docked";

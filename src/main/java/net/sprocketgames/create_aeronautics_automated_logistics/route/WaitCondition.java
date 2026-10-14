@@ -22,13 +22,14 @@ public record WaitCondition(
         int timeOfDayRotation
 ) {
     public static final int DEFAULT_TIMED_WAIT_TICKS = 20 * 5;
+    public static final int DEFAULT_CARGO_STABILITY_TICKS = 20 * 2;
 
     public WaitCondition {
         Objects.requireNonNull(type, "type");
         durationTicks = Math.max(0, durationTicks);
         idleTicks = Math.max(0, idleTicks);
         maxTicks = Math.max(0, maxTicks);
-        cargoStabilityTicks = Math.max(0, cargoStabilityTicks);
+        cargoStabilityTicks = sanitizeCargoStabilityTicks(cargoStabilityTicks);
         cargoOperator = Math.max(0, cargoOperator);
         cargoMeasure = Math.max(0, cargoMeasure);
         cargoFilter = safeCopy(cargoFilter);
@@ -78,7 +79,7 @@ public record WaitCondition(
     }
 
     public static WaitCondition itemThreshold(int itemCount, int maxTicks, int operator, int measure, ItemStack filter, CargoWaitTarget target) {
-        return itemThreshold(itemCount, maxTicks, 0, operator, measure, filter, target);
+        return itemThreshold(itemCount, maxTicks, DEFAULT_CARGO_STABILITY_TICKS, operator, measure, filter, target);
     }
 
     public static WaitCondition itemThreshold(int itemCount, int maxTicks, int cargoStabilityTicks, int operator, int measure, ItemStack filter, CargoWaitTarget target) {
@@ -95,7 +96,7 @@ public record WaitCondition(
     }
 
     public static WaitCondition fluidThreshold(int fluidAmount, int maxTicks, int operator, int measure, ItemStack filter, CargoWaitTarget target) {
-        return fluidThreshold(fluidAmount, maxTicks, 0, operator, measure, filter, target);
+        return fluidThreshold(fluidAmount, maxTicks, DEFAULT_CARGO_STABILITY_TICKS, operator, measure, filter, target);
     }
 
     public static WaitCondition fluidThreshold(int fluidAmount, int maxTicks, int cargoStabilityTicks, int operator, int measure, ItemStack filter, CargoWaitTarget target) {
@@ -104,7 +105,7 @@ public record WaitCondition(
     }
 
     public static WaitCondition itemEmpty(int maxTicks, CargoWaitTarget target) {
-        return itemEmpty(0, maxTicks, target);
+        return itemEmpty(DEFAULT_CARGO_STABILITY_TICKS, maxTicks, target);
     }
 
     public static WaitCondition itemEmpty(int cargoStabilityTicks, int maxTicks, CargoWaitTarget target) {
@@ -113,7 +114,7 @@ public record WaitCondition(
     }
 
     public static WaitCondition itemFull(int maxTicks, CargoWaitTarget target) {
-        return itemFull(0, maxTicks, target);
+        return itemFull(DEFAULT_CARGO_STABILITY_TICKS, maxTicks, target);
     }
 
     public static WaitCondition itemFull(int cargoStabilityTicks, int maxTicks, CargoWaitTarget target) {
@@ -122,7 +123,7 @@ public record WaitCondition(
     }
 
     public static WaitCondition fluidEmpty(int maxTicks, CargoWaitTarget target) {
-        return fluidEmpty(0, maxTicks, target);
+        return fluidEmpty(DEFAULT_CARGO_STABILITY_TICKS, maxTicks, target);
     }
 
     public static WaitCondition fluidEmpty(int cargoStabilityTicks, int maxTicks, CargoWaitTarget target) {
@@ -131,7 +132,7 @@ public record WaitCondition(
     }
 
     public static WaitCondition fluidFull(int maxTicks, CargoWaitTarget target) {
-        return fluidFull(0, maxTicks, target);
+        return fluidFull(DEFAULT_CARGO_STABILITY_TICKS, maxTicks, target);
     }
 
     public static WaitCondition fluidFull(int cargoStabilityTicks, int maxTicks, CargoWaitTarget target) {
@@ -165,6 +166,20 @@ public record WaitCondition(
             case 1 -> 12000;
             default -> 24000;
         };
+    }
+
+    public static int defaultCargoStabilityTicks(WaitConditionType type) {
+        return switch (type) {
+            case UNTIL_ITEM_THRESHOLD, UNTIL_FLUID_THRESHOLD,
+                    UNTIL_ITEM_EMPTY, UNTIL_ITEM_FULL,
+                    UNTIL_FLUID_EMPTY, UNTIL_FLUID_FULL,
+                    UNTIL_EMPTY, UNTIL_FULL -> DEFAULT_CARGO_STABILITY_TICKS;
+            default -> 0;
+        };
+    }
+
+    static int sanitizeCargoStabilityTicks(int ticks) {
+        return Math.max(0, ticks);
     }
 
     private static WaitCondition base(WaitConditionType type) {

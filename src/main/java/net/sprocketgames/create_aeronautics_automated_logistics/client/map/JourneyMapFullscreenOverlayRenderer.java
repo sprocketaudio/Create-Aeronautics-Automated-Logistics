@@ -8,12 +8,16 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.map.ShipMapClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.map.ShipMapMarker;
+import net.sprocketgames.create_aeronautics_automated_logistics.AutomatedLogisticsClientConfig;
 
 final class JourneyMapFullscreenOverlayRenderer {
     private JourneyMapFullscreenOverlayRenderer() {
     }
 
     static void render(FullscreenRenderEvent event) {
+        if (!AutomatedLogisticsClientConfig.journeyMapIntegrationEnabled()) {
+            return;
+        }
         IFullscreen fullscreen = event.getFullscreen();
         UIState state = fullscreen.getUiState();
         if (state == null || state.ui != Context.UI.Fullscreen || !state.active) {

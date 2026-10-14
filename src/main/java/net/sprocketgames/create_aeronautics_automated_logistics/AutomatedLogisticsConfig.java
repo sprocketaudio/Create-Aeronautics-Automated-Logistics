@@ -128,7 +128,7 @@ public class AutomatedLogisticsConfig {
 
         BUILDER.push("simurail");
         FORCE_LOAD_SIMURAIL_VEHICLES = BUILDER
-                .comment("Keep active automated Simurail vehicles force-loaded through Sable for their full recorded route.")
+                .comment("Keep active automated Sable vehicles, including Drive Mode ships, force-loaded for their full recorded route.")
                 .comment("The Sable loading ticket is acquired when playback starts while the vehicle is live, then released when playback stops, faults, or completes.")
                 .comment("Disable this to use normal unloaded-travel behavior instead.")
                 .define("forceLoadSimurailVehicles", true);
