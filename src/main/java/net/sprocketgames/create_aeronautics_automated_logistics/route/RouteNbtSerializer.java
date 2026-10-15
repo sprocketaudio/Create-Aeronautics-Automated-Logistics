@@ -205,13 +205,16 @@ public final class RouteNbtSerializer {
         if (!tag.contains("type", Tag.TAG_STRING)) {
             return WaitCondition.timed(WaitCondition.DEFAULT_TIMED_WAIT_TICKS);
         }
+        WaitConditionType type = WaitConditionType.valueOf(tag.getString("type"));
         return new WaitCondition(
-                WaitConditionType.valueOf(tag.getString("type")),
+                type,
                 tag.getInt("durationTicks"),
                 tag.getInt("idleTicks"),
                 tag.getInt("maxTicks"),
                 tag.getBoolean("failOnTimeout"),
-                tag.contains("cargoStabilityTicks", Tag.TAG_ANY_NUMERIC) ? tag.getInt("cargoStabilityTicks") : 0,
+                tag.contains("cargoStabilityTicks", Tag.TAG_ANY_NUMERIC)
+                        ? tag.getInt("cargoStabilityTicks")
+                        : WaitCondition.defaultCargoStabilityTicks(type),
                 tag.contains("cargoOperator", Tag.TAG_ANY_NUMERIC) ? tag.getInt("cargoOperator") : 0,
                 tag.contains("cargoMeasure", Tag.TAG_ANY_NUMERIC) ? tag.getInt("cargoMeasure") : 0,
                 readCargoFilter(tag),
@@ -246,7 +249,9 @@ public final class RouteNbtSerializer {
                     measure,
                     filter,
                     readConditionCargoTarget(tag),
-                    tag.contains(CONDITION_CARGO_STABLE_TICKS, Tag.TAG_ANY_NUMERIC) ? tag.getInt(CONDITION_CARGO_STABLE_TICKS) : 0,
+                    tag.contains(CONDITION_CARGO_STABLE_TICKS, Tag.TAG_ANY_NUMERIC)
+                            ? tag.getInt(CONDITION_CARGO_STABLE_TICKS)
+                            : WaitCondition.defaultCargoStabilityTicks(waitType),
                     readItem(tag, CONDITION_REDSTONE_FIRST),
                     readItem(tag, CONDITION_REDSTONE_SECOND),
                     !tag.contains(CONDITION_REDSTONE_POWERED, Tag.TAG_BYTE) || tag.getBoolean(CONDITION_REDSTONE_POWERED),

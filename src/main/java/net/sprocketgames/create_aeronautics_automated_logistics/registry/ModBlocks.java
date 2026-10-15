@@ -9,6 +9,7 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.AdvancedTransponderBlock;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.AirshipStationBlock;
+import net.sprocketgames.create_aeronautics_automated_logistics.block.DriveModuleBlock;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.LogisticsTerminalBlock;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.ShipTransponderBlock;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.TrainStationBlock;
@@ -55,6 +56,17 @@ public final class ModBlocks {
                     BlockBehaviour.Properties.of()
                             .mapColor(MapColor.METAL)
                             .strength(3.0F)
+                            .sound(SoundType.METAL)
+                            .noOcclusion()
+            )
+    );
+
+    public static final DeferredBlock<DriveModuleBlock> DRIVE_MODULE = BLOCKS.register(
+            "drive_module",
+            () -> new DriveModuleBlock(
+                    BlockBehaviour.Properties.of()
+                            .mapColor(MapColor.METAL)
+                            .strength(1.5F)
                             .sound(SoundType.METAL)
                             .noOcclusion()
             )

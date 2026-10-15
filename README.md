@@ -6,7 +6,21 @@ Create Aeronautics: Automated Logistics adds recorded route automation for Creat
 
 Vehicles can travel while unloaded, return for physical docking and cargo transfer, wait for conditions, and queue safely when another vehicle is using the same dock.
 
+Airship Stations can report live traffic, dock, queue, and per-vehicle journey information through Create Display Links. Automated vehicles can also appear on FTB Chunks, JourneyMap, Xaero's Minimap, and Xaero's World Map, while the in-world Logistics Terminal provides a dedicated overview without requiring a map mod.
+
 Current builds also include experimental transport-gated **Simurail Station** compatibility for recorded train routes, using the same schedule and route-recording model without mixing airship and train station networks. That transport split is also part of the longer-term groundwork for future non-airship vehicle support.
+
+## Basic Workflow
+
+1. Build and assemble a Create Aeronautics airship.
+2. Place and name Airship Stations at each destination.
+3. Place and name a Ship Transponder on the airship.
+4. Fly the ship between stations and record each route leg.
+5. Build the ship's stop schedule through the Transponder.
+6. Link any required docks and cargo storage.
+7. Start the schedule from a valid station on its route.
+
+For Simurail routes, use the dedicated **Simurail Station** block instead of an Airship Station. The transponder detects Simurail trains automatically, but airship and train stations remain separate networks.
 
 ## Main Features
 
@@ -15,16 +29,9 @@ Current builds also include experimental transport-gated **Simurail Station** co
 - Record real station-to-station flight paths by flying them manually.
 - Build a separate route plan for each ship directly through its Transponder.
 - Preview individual routes, every route connected to a station, or routes filtered by ship.
-- Use distinct per-ship route colours to make larger networks easier to read.
+- Distinct per-ship route colours to make larger networks easier to read.
 - Airship stations only see and control airship routes and airship-capable transponders.
 - The same transport-aware route/station split is intended to scale later to other supported vehicle types instead of staying airship-only forever.
-
-### Experimental Simurail Compatibility
-
-- Record and run train-only routes through **Simurail Stations**.
-- Train stations only see and control train routes and train-capable transponders.
-- Airship stations and Simurail stations stay separated by transport mode and cannot be linked interchangeably.
-- This is a compatibility layer built on recorded route playback; it is not rail-aware pathfinding, native dispatch logic, or a replacement for future Simurail-native automation.
 
 ### Unloaded Ship Travel
 
@@ -37,8 +44,19 @@ Current builds also include experimental transport-gated **Simurail Station** co
 
 - Link a Create Simulated dock to each station and vehicle.
 - Transfer items and fluids through the physical vehicle and dock setup.
+- Cargo waits include items and fluids buffered inside linked Docking Connectors, preventing vehicles from departing before transfer has really finished.
 - Shared docks use arrival-order reservations so approaching vehicles do not all converge on the same dock.
 - Waiting vehicles hold at a configurable clearance distance until the previous vehicle has departed safely.
+- Stopped, paused, or faulted vehicles inside the dock area continue to reserve it, including after a world reload.
+- Broken docking connections are restored automatically after reloading a world so cargo transfer can resume.
+
+### Station Displays
+
+- Connect a Create Display Link to an Airship Station for a live station-wide traffic summary.
+- View inbound and outbound vehicle counts, vehicles at the station, dock state, and queue length.
+- Filter the display to a known vehicle for its route, next station, and current status.
+- Vehicle choices respect ownership, permissions, and optional FTB Teams access rules.
+- With Jade installed, tooltips show station names and the names of ships carrying Vehicle Transponders.
 
 ### Schedules And Conditions
 
@@ -67,7 +85,8 @@ Docking stops require the station, dock, and any station-side cargo blocks to be
 ### Map Integration
 
 - Named automated vehicles can appear on supported live maps.
-- FTB Chunks and JourneyMap integrations refresh markers on minimaps and fullscreen map views.
+- FTB Chunks, JourneyMap, Xaero's Minimap, and Xaero's World Map integrations refresh markers on minimaps and fullscreen map views.
+- Each map integration can be enabled independently, with a shared setting for marker and label size.
 - Marker state is synchronized from the server so long-running routes remain visible while automation is active.
 - Airships use a blimp icon and Simurail trains use a train icon across supported map integrations.
 - A placed **Logistics Terminal** provides an in-mod network view with stations, active vehicles, and recorded routes on a dark abstract logistics map.
@@ -85,17 +104,12 @@ Docking stops require the station, dock, and any station-side cargo blocks to be
 - Runtime, recovery, route, and materialization commands help administrators inspect and recover problem setups.
 - Separate debug categories are available for playback, vehicles, docking, cargo, and UI synchronization.
 
-## Basic Workflow
+### Experimental Simurail Compatibility
 
-1. Build and assemble a Create Aeronautics airship.
-2. Place and name Airship Stations at each destination.
-3. Place and name a Ship Transponder on the airship.
-4. Fly the ship between stations and record each route leg.
-5. Build the ship's stop schedule through the Transponder.
-6. Link any required docks and cargo storage.
-7. Start the schedule from a valid station on its route.
-
-If you are using the current Simurail compatibility layer, use Simurail Stations instead of Airship Stations and keep the recorded network entirely within train-mode stations.
+- Record and run train-only routes through **Simurail Stations**.
+- Train stations only see and control train routes and train-capable transponders.
+- Airship stations and Simurail stations stay separated by transport mode and cannot be linked interchangeably.
+- This is a compatibility layer built on recorded route playback; it is not rail-aware pathfinding, native dispatch logic, or a replacement for future Simurail-native automation.
 
 ## Supported Cargo Storage
 
@@ -103,6 +117,9 @@ Cargo linking supports item and fluid storage from:
 
 - **Minecraft:** Chests, Trapped Chests, Barrels, and Shulker Boxes
 - **Create:** Item Vaults and Fluid Tanks
+- **Create: Connected:** Item Silos, including vertical multiblock sizes
+- **Create: Iron Vaults:** storage variants
+- **Create Propulsion: Simulated:** Platinum Tanks
 - **Storage Drawers:** Drawers, Drawer Controllers, and Controller Slaves
 - **Functional Storage:** Drawers, framed drawers, and Storage Controllers
 - **Sophisticated Storage / Backpacks:** Storage blocks, controller-linked storage, and placed backpacks
@@ -139,11 +156,11 @@ Compatibility notes:
 - **FTB Teams:** team and ally use/control rules, plus team-scoped active vehicle limits
 - **FTB Chunks:** live automated vehicle markers on minimap and fullscreen map
 - **JourneyMap:** live automated vehicle markers on minimap and fullscreen map
+- **Xaero's Minimap / Xaero's World Map:** live automated vehicle markers
+- **Jade:** station and vehicle names in block tooltips
 - **Simurail:** experimental train-only station compatibility using recorded-route playback
+- **Create: Connected, Create: Iron Vaults, and Create Propulsion: Simulated:** additional Cargo Link storage targets
 
-## Updating
-
-Existing worlds from version 0.4.5 are supported. Back up important worlds before updating, particularly when vehicles have active schedules.
 
 ## About
 

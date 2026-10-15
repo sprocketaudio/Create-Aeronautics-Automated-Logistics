@@ -208,14 +208,30 @@ public final class StationWaitRuntime {
                     state.markFailure(PlaybackFailure.CARGO_STORAGE_MISSING);
                     return ConditionTickResult.failedResult(PlaybackFailure.CARGO_STORAGE_MISSING);
                 }
-                if (context.cargoConditionSatisfied(level, snapshot.get(), waitCondition)) {
+                LinkedCargoSnapshot cargoSnapshot = snapshot.get();
+                Optional<DockTransferSnapshot> dockTransfer = dockingStation
+                        .flatMap(station -> context.dockTransferSnapshot(level, station, evaluation.route()));
+                if (dockTransfer.isPresent() && waitsForItemsToEmpty(waitCondition.type())) {
+                    dockingStation.ifPresent(station -> context.handoffDockItemBuffer(
+                            level,
+                            station,
+                            evaluation.route(),
+                            waitCondition.cargoTarget()
+                    ));
+                    dockTransfer = dockingStation
+                            .flatMap(station -> context.dockTransferSnapshot(level, station, evaluation.route()));
+                }
+                if (dockTransfer.isPresent()) {
+                    cargoSnapshot = cargoSnapshot.includingDockTransferBuffer(dockTransfer.get());
+                }
+                if (context.cargoConditionSatisfied(level, cargoSnapshot, waitCondition)) {
                     if (state.tickWait()) {
                         state.markSatisfied();
                         return ConditionTickResult.completedResult();
                     }
                     return ConditionTickResult.pendingResult();
                 }
-                context.logCargoConditionPending(evaluation, waitCondition, snapshot.get(), state, targetEntries.get());
+                context.logCargoConditionPending(evaluation, waitCondition, cargoSnapshot, state, targetEntries.get());
                 state.resetIdleWait();
                 if (state.tickCargoTimeout()) {
                     state.markFailure(PlaybackFailure.CARGO_CONDITION_TIMEOUT);
@@ -253,6 +269,13 @@ public final class StationWaitRuntime {
     }
 
     public interface Context {
+        int handoffDockItemBuffer(
+                ServerLevel level,
+                AirshipStationBlockEntity station,
+                Route route,
+                CargoWaitTarget sourceTarget
+        );
+
         Optional<DockTransferSnapshot> dockTransferSnapshot(
                 ServerLevel level,
                 AirshipStationBlockEntity station,
@@ -290,5 +313,9 @@ public final class StationWaitRuntime {
         boolean redstoneLinkSatisfied(WaitCondition waitCondition);
 
         boolean timeOfDaySatisfied(ServerLevel level, WaitCondition waitCondition);
+    }
+
+    private static boolean waitsForItemsToEmpty(WaitConditionType type) {
+        return type == WaitConditionType.UNTIL_ITEM_EMPTY || type == WaitConditionType.UNTIL_EMPTY;
     }
 }

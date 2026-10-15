@@ -795,6 +795,9 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         ShipTransponderBlockEntity transponder = selectedTransponder.get();
         if (transponder.scheduleActive()) {
             RouteStatus runtimeStatus = transponder.runtimeStatus();
+            if (runtimeStatus == RouteStatus.RESTORING) {
+                return 0xFFE7C46E;
+            }
             if (runtimeStatus == RouteStatus.HELD) {
                 return 0xFFE7C46E;
             }
@@ -1138,7 +1141,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
             case MISSING_AUTOPILOT_CONTROLLER, MISSING_STATION, INVALID_ROUTE_DATA, DIMENSION_MISMATCH,
                     MISSING_DOCK, AMBIGUOUS_DOCK -> RouteStatus.INVALID_ROUTE;
             case NONE -> RouteStatus.IDLE;
-            case START_TOO_FAR_FROM_ROUTE, DOCK_LOCK_FAILED, REDSTONE_LINK_UNCONFIGURED, CARGO_STORAGE_MISSING, CARGO_CONDITION_TIMEOUT, MOVEMENT_FAILURE -> RouteStatus.FAILED;
+            case START_TOO_FAR_FROM_ROUTE, DOCK_LOCK_FAILED, REDSTONE_LINK_UNCONFIGURED, LIFT_CONTROL_REQUIRED, HORIZONTAL_CONTROL_REQUIRED, TURN_CONTROL_REQUIRED, CARGO_STORAGE_MISSING, CARGO_CONDITION_TIMEOUT, MOVEMENT_FAILURE -> RouteStatus.FAILED;
         };
         return List.of(
                 Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status." + status.name().toLowerCase(Locale.ROOT))
@@ -1341,6 +1344,9 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         }
         RouteStatus runtimeStatus = transponder.runtimeStatus();
         if (transponder.scheduleActive()) {
+            if (runtimeStatus == RouteStatus.RESTORING) {
+                return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.restoring");
+            }
             if (runtimeStatus == RouteStatus.HELD) {
                 return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.paused");
             }
@@ -1379,6 +1385,9 @@ public class AirshipStationMenu extends AbstractContainerMenu {
             return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_recording");
         }
         if (state.scheduleActive()) {
+            if (state.runtimeStatus() == RouteStatus.RESTORING) {
+                return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.restoring");
+            }
             if (state.runtimeStatus() == RouteStatus.HELD) {
                 return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.paused");
             }
@@ -1436,6 +1445,12 @@ public class AirshipStationMenu extends AbstractContainerMenu {
         }
         RouteStatus runtimeStatus = transponder.runtimeStatus();
         if (transponder.scheduleActive()) {
+            if (runtimeStatus == RouteStatus.RESTORING) {
+                return List.of(
+                        Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.restoring.1").withStyle(ChatFormatting.YELLOW),
+                        Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.restoring.2").withStyle(ChatFormatting.GRAY)
+                );
+            }
             if (runtimeStatus == RouteStatus.HELD) {
                 return List.of(
                         Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status_hover.held.1").withStyle(ChatFormatting.YELLOW),
@@ -1615,7 +1630,7 @@ public class AirshipStationMenu extends AbstractContainerMenu {
             case WRONG_START_STATION -> Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.wrong_station_status");
             case COLLISION_OR_OBSTRUCTION, STUCK -> Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.blocked_status");
             case MISSING_DOCK, AMBIGUOUS_DOCK, DOCK_LOCK_FAILED -> Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.dock_problem_status");
-            case REDSTONE_LINK_UNCONFIGURED, CARGO_STORAGE_MISSING, CARGO_CONDITION_TIMEOUT, MOVEMENT_FAILURE, ALREADY_RUNNING, MAX_ACTIVE_VEHICLES_REACHED -> Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.needs_attention_status");
+            case REDSTONE_LINK_UNCONFIGURED, LIFT_CONTROL_REQUIRED, HORIZONTAL_CONTROL_REQUIRED, TURN_CONTROL_REQUIRED, CARGO_STORAGE_MISSING, CARGO_CONDITION_TIMEOUT, MOVEMENT_FAILURE, ALREADY_RUNNING, MAX_ACTIVE_VEHICLES_REACHED -> Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.needs_attention_status");
         };
     }
 
@@ -2805,6 +2820,12 @@ public class AirshipStationMenu extends AbstractContainerMenu {
             );
         }
         if (state.scheduleActive()) {
+            if (state.runtimeStatus() == RouteStatus.RESTORING) {
+                return List.of(
+                        Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.restoring.1").withStyle(ChatFormatting.YELLOW),
+                        Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.restoring.2").withStyle(ChatFormatting.GRAY)
+                );
+            }
             if (state.runtimeStatus() == RouteStatus.HELD) {
                 return List.of(
                         Component.translatable("gui.create_aeronautics_automated_logistics.airship_station.status_hover.held.1").withStyle(ChatFormatting.YELLOW),

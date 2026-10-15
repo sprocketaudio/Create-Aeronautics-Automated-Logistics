@@ -134,7 +134,9 @@ public final class AirshipScheduleNbtSerializer {
                     0,
                     ItemStack.EMPTY,
                     readCargoTarget(tag, WAIT_CARGO_TARGET),
-                    tag.contains(WAIT_CARGO_STABLE_TICKS, Tag.TAG_ANY_NUMERIC) ? tag.getInt(WAIT_CARGO_STABLE_TICKS) : 0,
+                    tag.contains(WAIT_CARGO_STABLE_TICKS, Tag.TAG_ANY_NUMERIC)
+                            ? tag.getInt(WAIT_CARGO_STABLE_TICKS)
+                            : WaitCondition.defaultCargoStabilityTicks(waitType),
                     readOptionalItem(tag, WAIT_REDSTONE_FIRST),
                     readOptionalItem(tag, WAIT_REDSTONE_SECOND),
                     !tag.contains(WAIT_REDSTONE_POWERED, Tag.TAG_BYTE) || tag.getBoolean(WAIT_REDSTONE_POWERED),
@@ -230,7 +232,9 @@ public final class AirshipScheduleNbtSerializer {
                     measure,
                     filter,
                     readCargoTarget(tag, CONDITION_CARGO_TARGET),
-                    tag.contains(CONDITION_CARGO_STABLE_TICKS, Tag.TAG_ANY_NUMERIC) ? tag.getInt(CONDITION_CARGO_STABLE_TICKS) : 0,
+                    tag.contains(CONDITION_CARGO_STABLE_TICKS, Tag.TAG_ANY_NUMERIC)
+                            ? tag.getInt(CONDITION_CARGO_STABLE_TICKS)
+                            : WaitCondition.defaultCargoStabilityTicks(waitType),
                     readOptionalItem(tag, CONDITION_REDSTONE_FIRST),
                     readOptionalItem(tag, CONDITION_REDSTONE_SECOND),
                     !tag.contains(CONDITION_REDSTONE_POWERED, Tag.TAG_BYTE) || tag.getBoolean(CONDITION_REDSTONE_POWERED),

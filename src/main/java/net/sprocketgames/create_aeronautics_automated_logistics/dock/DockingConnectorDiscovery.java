@@ -73,6 +73,19 @@ public final class DockingConnectorDiscovery {
                 && secondDock.isFeetExtended();
     }
 
+    /**
+     * A connector can retain a previous partner while it is still extending or
+     * locking. That is recoverable: unlike a locked connector, it has not yet
+     * transferred or constrained either vehicle.
+     */
+    public static boolean hasUnexpectedUnlockedPartner(ServerLevel level, BlockPos dockPos, BlockPos expectedOther) {
+        return dockingConnector(level, dockPos)
+                .filter(connector -> !connector.isLocked())
+                .map(connector -> connector.otherConnectorPosition)
+                .filter(otherPos -> otherPos != null && !otherPos.equals(expectedOther))
+                .isPresent();
+    }
+
     public static String lockDiagnostic(ServerLevel level, BlockPos first, BlockPos second) {
         Optional<DockingConnectorBlockEntity> firstConnector = dockingConnector(level, first);
         Optional<DockingConnectorBlockEntity> secondConnector = dockingConnector(level, second);

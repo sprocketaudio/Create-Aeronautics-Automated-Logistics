@@ -1,5 +1,6 @@
 package net.sprocketgames.create_aeronautics_automated_logistics.dock;
 
+import dev.simulated_team.simulated.content.blocks.docking_connector.DockingConnectorBlockEntity;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -16,6 +17,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronautic
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.dock.session.DockRequestId;
+import net.sprocketgames.create_aeronautics_automated_logistics.route.CargoWaitTarget;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.Route;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteId;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.PlaybackFailure;
@@ -68,6 +70,37 @@ public final class DockHandshakeService {
         return DockingConnectorDiscovery.dockingConnector(level, stationDock)
                 .flatMap(stationConnector -> DockingConnectorDiscovery.dockingConnector(level, shipDock)
                         .map(shipConnector -> DockTransferSnapshot.capture(stationConnector, shipConnector)));
+    }
+
+    public int handoffBufferedItem(
+            ServerLevel level,
+            AirshipStationBlockEntity station,
+            Route route,
+            CargoWaitTarget sourceTarget
+    ) {
+        DockEndpointResolver.PhysicalResult endpoint = endpoints.resolvePhysical(level, station, route);
+        if (!endpoint.ready()) {
+            return 0;
+        }
+        BlockPos stationDock = endpoint.stationDockPos().orElseThrow();
+        BlockPos shipDock = endpoint.shipDockPos().orElseThrow();
+        if (!DockingConnectorDiscovery.isLockedPair(level, stationDock, shipDock)) {
+            return 0;
+        }
+        Optional<DockingConnectorBlockEntity> stationConnector =
+                DockingConnectorDiscovery.dockingConnector(level, stationDock);
+        Optional<DockingConnectorBlockEntity> shipConnector =
+                DockingConnectorDiscovery.dockingConnector(level, shipDock);
+        if (stationConnector.isEmpty() || shipConnector.isEmpty()) {
+            return 0;
+        }
+        DockingConnectorBlockEntity source = sourceTarget == CargoWaitTarget.STATION_CARGO
+                ? stationConnector.get()
+                : shipConnector.get();
+        DockingConnectorBlockEntity destination = sourceTarget == CargoWaitTarget.STATION_CARGO
+                ? shipConnector.get()
+                : stationConnector.get();
+        return DockTransferSnapshot.handoffLocalItem(source, destination);
     }
 
     public ClearResult clearOwnedOutputs(
@@ -252,10 +285,19 @@ public final class DockHandshakeService {
         RouteId routeId = request.route().id();
         AirshipStationBlockEntity station = endpoint.station().orElseThrow();
         ShipTransponderBlockEntity transponder = endpoint.transponder().orElseThrow();
-        boolean outputsAlreadyOwned = station.dockOutputActive()
-                && station.dockOutputOwner().filter(routeId::equals).isPresent()
-                && transponder.dockOutputActive()
+        boolean stationOutputOwned = station.dockOutputActive()
+                && station.dockOutputOwner().filter(routeId::equals).isPresent();
+        boolean shipOutputOwned = transponder.dockOutputActive()
                 && transponder.dockOutputOwner().filter(routeId::equals).isPresent();
+        boolean outputsAlreadyOwned = stationOutputOwned && shipOutputOwned;
+        boolean staleOwnedOutputs = requiresOutputPowerCycle(
+                expectedPairLocked,
+                station.dockOutputActive(),
+                stationOutputOwned,
+                transponder.dockOutputActive(),
+                shipOutputOwned,
+                lockClocks.containsKey(request.requestId().value())
+        );
         if (isLockedToDifferentConnector(request.level(), stationDock, shipDock)
                 || isLockedToDifferentConnector(request.level(), shipDock, stationDock)) {
             return HandshakeResult.failed(
@@ -263,6 +305,75 @@ public final class DockHandshakeService {
                     PlaybackFailure.DOCK_LOCK_FAILED,
                     request.lockTimeoutTicksRemaining(),
                     "unexpected_connector_pair"
+            );
+        }
+
+        if (DockingConnectorDiscovery.hasUnexpectedUnlockedPartner(request.level(), stationDock, shipDock)
+                || DockingConnectorDiscovery.hasUnexpectedUnlockedPartner(request.level(), shipDock, stationDock)) {
+            clearIfOwned(endpoint, routeId);
+            ResetResult reset = resetExpectedPair(
+                    request.level(),
+                    request.station(),
+                    request.route(),
+                    "unexpected_unlocked_partner"
+            );
+            pauseLockClock(request.requestId());
+            if (!reset.applied()) {
+                return HandshakeResult.failed(
+                        HandshakeStatus.WRONG_CONNECTOR_LOCKED,
+                        reset.failure().orElse(PlaybackFailure.DOCK_LOCK_FAILED),
+                        request.lockTimeoutTicksRemaining(),
+                        "unexpected_unlocked_partner_reset_failed"
+                );
+            }
+            CreateAeronauticsAutomatedLogistics.debugDocking(
+                    "Dock handshake cleared stale unlocked connector partner before retry: request={} route={} stationDock={} shipDock={} diagnostic={}",
+                    request.requestId().value(),
+                    routeId.value(),
+                    stationDock.toShortString(),
+                    shipDock.toShortString(),
+                    DockingConnectorDiscovery.lockDiagnostic(request.level(), stationDock, shipDock)
+            );
+            return HandshakeResult.pending(
+                    HandshakeStatus.LOCK_PENDING,
+                    request.lockTimeoutTicksRemaining(),
+                    false,
+                    "unexpected_unlocked_partner_reset"
+            );
+        }
+
+        if (staleOwnedOutputs) {
+            clearIfOwned(endpoint, routeId);
+            ResetResult reset = resetExpectedPair(
+                    request.level(),
+                    request.station(),
+                    request.route(),
+                    "restored_outputs_need_power_cycle"
+            );
+            pauseLockClock(request.requestId());
+            if (!reset.applied()) {
+                return HandshakeResult.failed(
+                        HandshakeStatus.ENDPOINT_UNAVAILABLE,
+                        reset.failure().orElse(PlaybackFailure.DOCK_LOCK_FAILED),
+                        request.lockTimeoutTicksRemaining(),
+                        "restored_pair_reset_failed"
+                );
+            }
+            CreateAeronauticsAutomatedLogistics.debugDocking(
+                    "Dock handshake power-cycled restored connector pair before reacquiring: request={} route={} stationOwned={} shipOwned={} stationDock={} shipDock={} diagnostic={}",
+                    request.requestId().value(),
+                    routeId.value(),
+                    stationOutputOwned,
+                    shipOutputOwned,
+                    stationDock.toShortString(),
+                    shipDock.toShortString(),
+                    DockingConnectorDiscovery.lockDiagnostic(request.level(), stationDock, shipDock)
+            );
+            return HandshakeResult.pending(
+                    HandshakeStatus.LOCK_PENDING,
+                    request.lockTimeoutTicksRemaining(),
+                    false,
+                    "restored_pair_power_cycled"
             );
         }
 
@@ -389,6 +500,16 @@ public final class DockHandshakeService {
                     );
                 }
             }
+            CreateAeronauticsAutomatedLogistics.LOGGER.warn(
+                    "Dock handshake timed out: request={} route={} station={} transponder={} stationOutputActive={} shipOutputActive={} diagnostic={}",
+                    request.requestId().value(),
+                    request.route().id().value(),
+                    station.stationId(),
+                    transponder.transponderId(),
+                    station.dockOutputActive(),
+                    transponder.dockOutputActive(),
+                    DockingConnectorDiscovery.lockDiagnostic(request.level(), stationDock, shipDock)
+            );
             pauseLockClock(request.requestId());
             return HandshakeResult.failed(
                     HandshakeStatus.TIMED_OUT,
@@ -406,6 +527,29 @@ public final class DockHandshakeService {
         pendingDiagnosticTicks.remove(requestId.value());
         lockTimeoutDeferrals.remove(requestId.value());
         expectedPairResetAttempts.remove(requestId.value());
+    }
+
+    static boolean requiresOutputPowerCycle(
+            boolean expectedPairLocked,
+            boolean stationOutputActive,
+            boolean stationOutputOwned,
+            boolean shipOutputActive,
+            boolean shipOutputOwned,
+            boolean lockClockPresent
+    ) {
+        if (lockClockPresent) {
+            return false;
+        }
+        boolean stationOutputAvailable = !stationOutputActive || stationOutputOwned;
+        boolean shipOutputAvailable = !shipOutputActive || shipOutputOwned;
+        if (!stationOutputAvailable || !shipOutputAvailable) {
+            return false;
+        }
+        boolean asymmetricRestoredOutput = stationOutputOwned != shipOutputOwned;
+        boolean poweredWithoutPhysicalLock = !expectedPairLocked
+                && stationOutputOwned
+                && shipOutputOwned;
+        return asymmetricRestoredOutput || poweredWithoutPhysicalLock;
     }
 
     private Optional<PlaybackFailure> claimOutputs(

@@ -5,6 +5,7 @@
   "client": [
     "BasePropellerBlockEntityMixin",
     "HotAirBurnerBlockEntityMixin",
+    "MechanicalBearingBlockEntityMixin",
     "PropellerBearingBlockEntityMixin",
     "SmartPropellerBlockEntityMixin",
     "SteamVentBlockEntityMixin"

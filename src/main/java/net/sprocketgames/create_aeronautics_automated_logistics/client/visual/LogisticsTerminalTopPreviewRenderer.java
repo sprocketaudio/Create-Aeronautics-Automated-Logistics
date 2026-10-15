@@ -1,7 +1,13 @@
 package net.sprocketgames.create_aeronautics_automated_logistics.client.visual;
 
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.BufferBuilder;
+import com.mojang.blaze3d.vertex.BufferUploader;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.mojang.blaze3d.vertex.MeshData;
+import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.blaze3d.vertex.VertexFormat;
 import com.mojang.math.Axis;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -11,8 +17,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -37,8 +45,8 @@ public final class LogisticsTerminalTopPreviewRenderer {
     private static final ResourceLocation TRAIN_ICON =
             ResourceLocation.fromNamespaceAndPath(CreateAeronauticsAutomatedLogistics.MOD_ID, "textures/gui/train.png");
     private static final int[] ROUTE_COLORS = {
-            0xFF7CC9FF, 0xFFF7BE6A, 0xFF89E0A8, 0xFFFF8F8F,
-            0xFFC6A0FF, 0xFFFFD36E, 0xFF7DE1D8, 0xFFFFA5D8
+            0xFF7CC9FF, 0xFFF29B45, 0xFF89E0A8, 0xFFFF8F8F,
+            0xFFC6A0FF, 0xFFFFE06A, 0xFF7DE1D8, 0xFFFFA5D8
     };
     // The world-space lines use Minecraft's fixed pixel-width line renderer, so distant detail becomes visual noise.
     private static final double MAX_RENDER_DISTANCE = 24.0D;
@@ -51,8 +59,10 @@ public final class LogisticsTerminalTopPreviewRenderer {
     private static final float STATION_INNER_SIZE = 0.017F;
     private static final float ICON_SIZE = 0.07F;
     private static final float ROUTE_Y = TOP_Y + 0.0015F;
+    private static final float ROUTE_HALF_WIDTH = 0.0035F;
+    private static final float DISPLAY_BRIGHTNESS = 0.78F;
     private static final float STATION_Y = TOP_Y + 0.0035F;
-    private static final float ICON_Y = TOP_Y + 0.009F;
+    private static final float ICON_Y = TOP_Y + 0.025F;
 
     private LogisticsTerminalTopPreviewRenderer() {
     }
@@ -78,6 +88,7 @@ public final class LogisticsTerminalTopPreviewRenderer {
         Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
         PoseStack poseStack = event.getPoseStack();
         MultiBufferSource.BufferSource buffer = minecraft.renderBuffers().bufferSource();
+        BufferBuilder routeBuffer = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
         for (var pos : LogisticsTerminalPreviewClientState.terminals()) {
             if (!(minecraft.level.getBlockEntity(pos) instanceof LogisticsTerminalBlockEntity terminal)) {
                 continue;
@@ -88,9 +99,14 @@ public final class LogisticsTerminalTopPreviewRenderer {
             if (camera.distanceToSqr(Vec3.atCenterOf(pos)) > MAX_RENDER_DISTANCE * MAX_RENDER_DISTANCE) {
                 continue;
             }
-            renderTerminal(poseStack, buffer, camera, minecraft.player.getYRot(), pos.getX(), pos.getY(), pos.getZ(), dataSet);
+            renderTerminal(poseStack, buffer, routeBuffer, camera, minecraft.player.getYRot(), pos.getX(), pos.getY(), pos.getZ(), dataSet);
         }
         buffer.endBatch(RenderType.lines());
+        MeshData routeMesh = routeBuffer.build();
+        if (routeMesh != null) {
+            RenderSystem.setShader(GameRenderer::getPositionColorShader);
+            BufferUploader.drawWithShader(routeMesh);
+        }
         buffer.endBatch(RenderType.entityCutoutNoCull(AIRSHIP_ICON));
         buffer.endBatch(RenderType.entityCutoutNoCull(TRAIN_ICON));
     }
@@ -124,6 +140,7 @@ public final class LogisticsTerminalTopPreviewRenderer {
     private static void renderTerminal(
             PoseStack poseStack,
             MultiBufferSource.BufferSource buffer,
+            BufferBuilder routeBuffer,
             Vec3 camera,
             float playerYawDegrees,
             int blockX,
@@ -136,11 +153,11 @@ public final class LogisticsTerminalTopPreviewRenderer {
 
         VertexConsumer lineBuffer = buffer.getBuffer(RenderType.lines());
         for (RouteSegment route : dataSet.routes()) {
-            int color = dataSet.routeColors().getOrDefault(route.transponderId(), fallbackRouteColor(route.transponderId()));
+            int color = dimDisplayColor(dataSet.routeColors().getOrDefault(route.transponderId(), fallbackRouteColor(route.transponderId())));
             for (int i = 1; i < route.points().size(); i++) {
                 Point2 from = project(route.points().get(i - 1).position(), dataSet.bounds());
                 Point2 to = project(route.points().get(i).position(), dataSet.bounds());
-                addLine(poseStack, lineBuffer, from.x(), ROUTE_Y, from.z(), to.x(), ROUTE_Y, to.z(), color);
+                addRouteRibbon(poseStack, routeBuffer, from.x(), ROUTE_Y, from.z(), to.x(), ROUTE_Y, to.z(), color);
             }
         }
 
@@ -165,8 +182,8 @@ public final class LogisticsTerminalTopPreviewRenderer {
     }
 
     private static void addStationNode(PoseStack poseStack, VertexConsumer buffer, float x, float z) {
-        addSquareOutline(poseStack, buffer, x, z, STATION_OUTER_SIZE, 0xFF4F4036);
-        addSquareOutline(poseStack, buffer, x, z, STATION_INNER_SIZE, 0xFFE7D6B4);
+        addSquareOutline(poseStack, buffer, x, z, STATION_OUTER_SIZE, dimDisplayColor(0xFF4F4036));
+        addSquareOutline(poseStack, buffer, x, z, STATION_INNER_SIZE, dimDisplayColor(0xFFE7D6B4));
     }
 
     private static void addSquareOutline(PoseStack poseStack, VertexConsumer buffer, float x, float z, float halfSize, int color) {
@@ -192,7 +209,7 @@ public final class LogisticsTerminalTopPreviewRenderer {
 
     private static void addTexturedVertex(VertexConsumer buffer, Matrix4f matrix, float x, float y, float z, float u, float v) {
         buffer.addVertex(matrix, x, y, z)
-                .setColor(255, 255, 255, 255)
+                .setColor(199, 199, 199, 255)
                 .setUv(u, v)
                 .setOverlay(OverlayTexture.NO_OVERLAY)
                 .setLight(0x00F000F0)
@@ -216,6 +233,29 @@ public final class LogisticsTerminalTopPreviewRenderer {
         Matrix4f matrix = poseStack.last().pose();
         buffer.addVertex(matrix, x0, y0, z0).setColor(red, green, blue, 1.0F).setNormal(normalX, normalY, normalZ);
         buffer.addVertex(matrix, x1, y1, z1).setColor(red, green, blue, 1.0F).setNormal(normalX, normalY, normalZ);
+    }
+
+    private static void addRouteRibbon(PoseStack poseStack, BufferBuilder buffer, float x0, float y0, float z0, float x1, float y1, float z1, int color) {
+        float dx = x1 - x0;
+        float dz = z1 - z0;
+        float length = Mth.sqrt(dx * dx + dz * dz);
+        if (length <= 0.0001F) {
+            return;
+        }
+        float offsetX = -dz / length * ROUTE_HALF_WIDTH;
+        float offsetZ = dx / length * ROUTE_HALF_WIDTH;
+        Matrix4f matrix = poseStack.last().pose();
+        buffer.addVertex(matrix, x0 - offsetX, y0, z0 - offsetZ).setColor(color);
+        buffer.addVertex(matrix, x0 + offsetX, y0, z0 + offsetZ).setColor(color);
+        buffer.addVertex(matrix, x1 + offsetX, y1, z1 + offsetZ).setColor(color);
+        buffer.addVertex(matrix, x1 - offsetX, y1, z1 - offsetZ).setColor(color);
+    }
+
+    private static int dimDisplayColor(int color) {
+        int red = Math.round(((color >> 16) & 0xFF) * DISPLAY_BRIGHTNESS);
+        int green = Math.round(((color >> 8) & 0xFF) * DISPLAY_BRIGHTNESS);
+        int blue = Math.round((color & 0xFF) * DISPLAY_BRIGHTNESS);
+        return (color & 0xFF000000) | (red << 16) | (green << 8) | blue;
     }
 
     private static Point2 project(Vec3 position, Bounds bounds) {

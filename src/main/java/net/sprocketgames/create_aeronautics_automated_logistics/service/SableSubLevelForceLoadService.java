@@ -18,6 +18,7 @@ import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronautic
 import net.sprocketgames.create_aeronautics_automated_logistics.route.Route;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.RouteId;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 
 public final class SableSubLevelForceLoadService {
     private static final SubLevelLoadingTicketType<String> RUNTIME_DOCK_STOP =
@@ -25,7 +26,13 @@ public final class SableSubLevelForceLoadService {
                     ResourceLocation.fromNamespaceAndPath(CreateAeronauticsAutomatedLogistics.MOD_ID, "runtime_dock_stop"),
                     Codec.STRING
             );
+    private static final SubLevelLoadingTicketType<String> RUNTIME_TRAIN_PLAYBACK =
+            SubLevelLoadingTicketType.create(
+                    ResourceLocation.fromNamespaceAndPath(CreateAeronauticsAutomatedLogistics.MOD_ID, "runtime_train_playback"),
+                    Codec.STRING
+            );
     private static final Map<MinecraftServer, Map<RouteId, Lease>> ACTIVE_LEASES = new WeakHashMap<>();
+    private static final Map<MinecraftServer, Map<RouteId, Lease>> ACTIVE_TRAIN_LEASES = new WeakHashMap<>();
     private static Field activeTicketsField;
 
     private SableSubLevelForceLoadService() {
@@ -37,16 +44,47 @@ public final class SableSubLevelForceLoadService {
         // ship-body ownership, so AAL must not use them for dock runtime liveness.
     }
 
+    public static synchronized void onServerStopping(ServerStoppingEvent event) {
+        releaseAll(event.getServer(), "server_stopping");
+    }
+
     public static synchronized void onServerStopped(ServerStoppedEvent event) {
-        Map<RouteId, Lease> leases = ACTIVE_LEASES.remove(event.getServer());
-        if (leases == null || leases.isEmpty()) {
-            return;
-        }
-        for (Lease lease : leases.values()) {
-            ServerLevel level = event.getServer().getLevel(lease.dimension());
-            if (level != null) {
-                removeRuntimeTicket(level, lease.shipId(), lease.routeId(), "server_stopped");
+        // Normally emptied during ServerStopping, while Sable's levels are still available.
+        // Keep this fallback so aborted startup/shutdown paths cannot retain server keys.
+        releaseAll(event.getServer(), "server_stopped_fallback");
+    }
+
+    private static void releaseAll(MinecraftServer server, String reason) {
+        int removedDockTickets = 0;
+        Map<RouteId, Lease> leases = ACTIVE_LEASES.remove(server);
+        if (leases != null) {
+            for (Lease lease : leases.values()) {
+                ServerLevel level = server.getLevel(lease.dimension());
+                if (level != null) {
+                    if (removeRuntimeTicket(level, lease.shipId(), lease.routeId(), reason)) {
+                        removedDockTickets++;
+                    }
+                }
             }
+        }
+
+        int removedTrainTickets = 0;
+        Map<RouteId, Lease> trainLeases = ACTIVE_TRAIN_LEASES.remove(server);
+        if (trainLeases != null) {
+            for (Lease lease : trainLeases.values()) {
+                ServerLevel level = server.getLevel(lease.dimension());
+                if (level != null && removeTrainRuntimeTicket(level, lease.shipId(), lease.routeId())) {
+                    removedTrainTickets++;
+                }
+            }
+        }
+        if (removedDockTickets > 0 || removedTrainTickets > 0) {
+            CreateAeronauticsAutomatedLogistics.debugVehicle(
+                    "Released Sable runtime tickets before shutdown: dock={} playback={} reason={}",
+                    removedDockTickets,
+                    removedTrainTickets,
+                    reason
+            );
         }
     }
 
@@ -100,6 +138,56 @@ public final class SableSubLevelForceLoadService {
                     added ? "runtime_active_ticket_added" : "runtime_lease_tracked"
             );
             logLeaseDiagnostic(level, shipId, routeId, reason + "_after_acquire");
+        }
+        return true;
+    }
+
+    /**
+     * Keeps a live Simurail sub-level loaded for the route lifetime. This must be called before
+     * the vehicle leaves normal loading range because Sable cannot attach a ticket to a held body.
+     */
+    public static boolean holdForTrainPlayback(ServerLevel level, Route route, String reason) {
+        UUID shipId = route.linkedController().vehicleId().orElse(null);
+        return holdForTrainPlayback(level, shipId, route.id(), reason);
+    }
+
+    public static synchronized boolean holdForTrainPlayback(ServerLevel level, UUID shipId, RouteId routeId, String reason) {
+        if (shipId == null) {
+            CreateAeronauticsAutomatedLogistics.debugVehicleWarn(
+                    "Sable train playback lease refused: route={} ship=missing reason={} action=refused_no_ship_id",
+                    routeId.value(), reason
+            );
+            return false;
+        }
+        ServerSubLevelContainer container = ServerSubLevelContainer.getContainer(level);
+        if (container == null) {
+            CreateAeronauticsAutomatedLogistics.debugVehicleWarn(
+                    "Sable train playback lease refused: route={} ship={} reason={} action=refused_no_sable_container",
+                    routeId.value(), shipId, reason
+            );
+            return false;
+        }
+        if (!(container.getSubLevel(shipId) instanceof ServerSubLevel subLevel) || subLevel.isRemoved()) {
+            CreateAeronauticsAutomatedLogistics.debugVehicle(
+                    "Sable train playback lease waiting: route={} ship={} reason={} action=refused_body_not_live",
+                    routeId.value(), shipId, reason
+            );
+            return false;
+        }
+
+        Boolean added = addTrainRuntimeTicket(level, subLevel, shipId, routeId);
+        if (added == null) {
+            return false;
+        }
+        Lease previous = ACTIVE_TRAIN_LEASES
+                .computeIfAbsent(level.getServer(), ignored -> new java.util.LinkedHashMap<>())
+                .put(routeId, new Lease(level.dimension(), shipId, routeId));
+        if (added || previous == null || !previous.shipId().equals(shipId)) {
+            CreateAeronauticsAutomatedLogistics.debugVehicle(
+                    "Sable train playback lease acquired: route={} ship={} reason={} action={}",
+                    routeId.value(), shipId, reason,
+                    added ? "runtime_active_ticket_added" : "runtime_lease_tracked"
+            );
         }
         return true;
     }
@@ -178,6 +266,29 @@ public final class SableSubLevelForceLoadService {
         );
     }
 
+    public static void releaseTrainPlayback(ServerLevel level, Route route, String reason) {
+        UUID shipId = route.linkedController().vehicleId().orElse(null);
+        releaseTrainPlayback(level, shipId, route.id(), reason);
+    }
+
+    public static synchronized void releaseTrainPlayback(ServerLevel level, UUID shipId, RouteId routeId, String reason) {
+        Map<RouteId, Lease> serverLeases = ACTIVE_TRAIN_LEASES.get(level.getServer());
+        Lease lease = serverLeases == null ? null : serverLeases.remove(routeId);
+        UUID effectiveShipId = shipId != null ? shipId : lease == null ? null : lease.shipId();
+        if (serverLeases != null && serverLeases.isEmpty()) {
+            ACTIVE_TRAIN_LEASES.remove(level.getServer());
+        }
+        if (effectiveShipId == null) {
+            return;
+        }
+        boolean removed = removeTrainRuntimeTicket(level, effectiveShipId, routeId);
+        CreateAeronauticsAutomatedLogistics.debugVehicle(
+                "Sable train playback lease release {}: route={} ship={} reason={} action={}",
+                removed ? "applied" : "skipped", routeId.value(), effectiveShipId, reason,
+                removed ? "runtime_active_ticket_removed" : "runtime_active_ticket_missing"
+        );
+    }
+
     private static Boolean addRuntimeTicket(
             ServerLevel level,
             ServerSubLevel subLevel,
@@ -224,6 +335,45 @@ public final class SableSubLevelForceLoadService {
         return removed;
     }
 
+    private static Boolean addTrainRuntimeTicket(
+            ServerLevel level,
+            ServerSubLevel subLevel,
+            UUID shipId,
+            RouteId routeId
+    ) {
+        Map<ServerSubLevel, ObjectSet<SubLevelLoadingTicket<?>>> activeTickets = activeTickets(level);
+        if (activeTickets == null) {
+            CreateAeronauticsAutomatedLogistics.debugVehicleWarn(
+                    "Sable train playback lease refused: route={} ship={} action=active_ticket_map_unavailable",
+                    routeId.value(), shipId
+            );
+            return null;
+        }
+        ObjectSet<SubLevelLoadingTicket<?>> tickets =
+                activeTickets.computeIfAbsent(subLevel, ignored -> new ObjectArraySet<>());
+        return tickets.add(trainTicket(shipId, routeId));
+    }
+
+    private static boolean removeTrainRuntimeTicket(ServerLevel level, UUID shipId, RouteId routeId) {
+        ServerSubLevelContainer container = ServerSubLevelContainer.getContainer(level);
+        if (container == null) {
+            return false;
+        }
+        Map<ServerSubLevel, ObjectSet<SubLevelLoadingTicket<?>>> activeTickets = activeTickets(level);
+        if (activeTickets == null || !(container.getSubLevel(shipId) instanceof ServerSubLevel subLevel)) {
+            return false;
+        }
+        ObjectSet<SubLevelLoadingTicket<?>> tickets = activeTickets.get(subLevel);
+        if (tickets == null) {
+            return false;
+        }
+        boolean removed = tickets.remove(trainTicket(shipId, routeId));
+        if (tickets.isEmpty()) {
+            activeTickets.remove(subLevel);
+        }
+        return removed;
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<ServerSubLevel, ObjectSet<SubLevelLoadingTicket<?>>> activeTickets(ServerLevel level) {
         ServerSubLevelContainer container = ServerSubLevelContainer.getContainer(level);
@@ -247,6 +397,10 @@ public final class SableSubLevelForceLoadService {
 
     private static SubLevelLoadingTicket<String> ticket(UUID shipId, RouteId routeId) {
         return new SubLevelLoadingTicket<>(RUNTIME_DOCK_STOP, shipId, routeId.value().toString());
+    }
+
+    private static SubLevelLoadingTicket<String> trainTicket(UUID shipId, RouteId routeId) {
+        return new SubLevelLoadingTicket<>(RUNTIME_TRAIN_PLAYBACK, shipId, routeId.value().toString());
     }
 
     private record Lease(net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimension, UUID shipId, RouteId routeId) {

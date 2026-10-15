@@ -40,6 +40,11 @@ public final class ModNetworking {
                 ShipTransponderMenuActionPayload::handle
         );
         registrar.playToServer(
+                DriveModuleMenuActionPayload.TYPE,
+                DriveModuleMenuActionPayload.STREAM_CODEC,
+                DriveModuleMenuActionPayload::handle
+        );
+        registrar.playToServer(
                 AirshipStationMenuActionPayload.TYPE,
                 AirshipStationMenuActionPayload.STREAM_CODEC,
                 AirshipStationMenuActionPayload::handle
@@ -83,6 +88,11 @@ public final class ModNetworking {
                 SetFlightPathPreviewPayload.TYPE,
                 SetFlightPathPreviewPayload.STREAM_CODEC,
                 SetFlightPathPreviewPayload::handle
+        );
+        registrar.playToClient(
+                SyncDriveTargetDebugPayload.TYPE,
+                SyncDriveTargetDebugPayload.STREAM_CODEC,
+                SyncDriveTargetDebugPayload::handle
         );
         registrar.playToClient(
                 SyncIdentityDirectoryPayload.TYPE,

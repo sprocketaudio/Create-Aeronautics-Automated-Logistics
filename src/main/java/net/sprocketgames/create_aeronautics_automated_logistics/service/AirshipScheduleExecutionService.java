@@ -752,6 +752,14 @@ public class AirshipScheduleExecutionService {
         return Optional.ofNullable(activeSchedules.get(transponderId)).map(ActiveAirshipSchedule::currentStationId);
     }
 
+    public Optional<UUID> targetStationId(UUID transponderId) {
+        ActiveAirshipSchedule active = activeSchedules.get(transponderId);
+        if (active == null || active.isFinished()) {
+            return Optional.empty();
+        }
+        return active.currentEntry().targetStationId();
+    }
+
     public Optional<Integer> currentEntryIndex(UUID transponderId) {
         return Optional.ofNullable(activeSchedules.get(transponderId)).map(ActiveAirshipSchedule::entryIndex);
     }
@@ -1388,6 +1396,9 @@ public class AirshipScheduleExecutionService {
     private RouteStatus resolveActiveRuntimeStatus(ServerLevel level, ActiveAirshipSchedule active) {
         if (active == null) {
             return RouteStatus.IDLE;
+        }
+        if (active.activeRouteId().isPresent() && AutomatedLogisticsServices.PLAYBACK.isRestoring(active.activeRouteId().get())) {
+            return RouteStatus.RESTORING;
         }
         if (active.activeRouteId().isPresent() && AutomatedLogisticsServices.PLAYBACK.isHeld(active.activeRouteId().get())) {
             return AutomatedLogisticsServices.PLAYBACK.heldFailure(active.activeRouteId().get()).isPresent()

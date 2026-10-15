@@ -2,98 +2,119 @@ package net.sprocketgames.create_aeronautics_automated_logistics.dock;
 
 import com.simibubi.create.content.logistics.filter.FilterItemStack;
 import dev.simulated_team.simulated.content.blocks.docking_connector.DockingConnectorBlockEntity;
+import dev.simulated_team.simulated.multiloader.tanks.CFluidType;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.capability.IFluidHandler;
-import net.neoforged.neoforge.items.IItemHandler;
 
-public record DockTransferSnapshot(
-        List<String> items,
-        List<String> fluids,
-        List<ItemStack> itemStacks,
-        List<FluidStack> fluidStacks,
-        int itemCount,
-        long fluidAmount
-) {
+public record DockTransferSnapshot(ConnectorContents station, ConnectorContents ship) {
     public static DockTransferSnapshot capture(
             DockingConnectorBlockEntity stationDock,
             DockingConnectorBlockEntity shipDock
     ) {
+        return new DockTransferSnapshot(captureConnector(stationDock), captureConnector(shipDock));
+    }
+
+    private static ConnectorContents captureConnector(DockingConnectorBlockEntity connector) {
         List<String> itemState = new ArrayList<>();
         List<String> fluidState = new ArrayList<>();
         List<ItemStack> itemStacks = new ArrayList<>();
         List<FluidStack> fluidStacks = new ArrayList<>();
-        ConnectorTotals stationTotals = captureConnector(stationDock, itemState, fluidState, itemStacks, fluidStacks);
-        ConnectorTotals shipTotals = captureConnector(shipDock, itemState, fluidState, itemStacks, fluidStacks);
-        return new DockTransferSnapshot(
-                List.copyOf(itemState),
-                List.copyOf(fluidState),
-                itemStacks.stream().map(ItemStack::copy).toList(),
-                fluidStacks.stream().map(FluidStack::copy).toList(),
-                stationTotals.itemCount() + shipTotals.itemCount(),
-                stationTotals.fluidAmount() + shipTotals.fluidAmount()
-        );
+        // Do not request the connector's exposed capability here. Simulated's paired
+        // capability rebuilds the active dock inventory; this snapshot must only observe
+        // the local buffers while cargo waits are running.
+        ItemStack stack = connector.inventory.getItem(0).copy();
+        itemStacks.add(stack.copy());
+        itemState.add("0|" + itemKey(stack));
+        int itemCount = stack.getCount();
+
+        CFluidType type = connector.tank.type;
+        long storedAmount = Math.max(0L, connector.tank.amount);
+        FluidStack fluidStack = storedAmount == 0L || type == null || type.isBlank()
+                ? FluidStack.EMPTY
+                : new FluidStack(type.fluid, (int) Math.min(Integer.MAX_VALUE, storedAmount));
+        fluidStacks.add(fluidStack.copy());
+        fluidState.add("0|" + fluidKey(fluidStack));
+        long fluidAmount = storedAmount;
+        return new ConnectorContents(itemState, fluidState, itemStacks, fluidStacks, itemCount, fluidAmount);
     }
 
-    private static ConnectorTotals captureConnector(
-            DockingConnectorBlockEntity connector,
-            List<String> itemState,
-            List<String> fluidState,
-            List<ItemStack> itemStacks,
-            List<FluidStack> fluidStacks
+    /**
+     * Moves cargo that entered a connector's local slot before the pair locked into
+     * the receiving connector's local slot. Simulated's paired inventory normally
+     * routes new inserts to that receiving slot, but Create belts can leave one
+     * pre-lock stack behind where automation on the other connector cannot extract it.
+     */
+    static int handoffLocalItem(
+            DockingConnectorBlockEntity source,
+            DockingConnectorBlockEntity destination
     ) {
-        Level level = connector.getLevel();
-        if (level == null) {
-            itemState.add("unavailable");
-            fluidState.add("unavailable");
-            return new ConnectorTotals(0, 0L);
+        ItemStack sourceStack = source.inventory.getItem(0).copy();
+        if (sourceStack.isEmpty()) {
+            return 0;
         }
 
-        int itemCount = 0;
-        IItemHandler itemHandler = level.getCapability(
-                Capabilities.ItemHandler.BLOCK,
-                connector.getBlockPos(),
-                null
-        );
-        if (itemHandler == null) {
-            itemState.add("unavailable");
-        } else {
-            for (int slot = 0; slot < itemHandler.getSlots(); slot++) {
-                ItemStack stack = itemHandler.getStackInSlot(slot).copy();
-                itemStacks.add(stack.copy());
-                itemState.add(slot + "|" + itemKey(stack));
-                itemCount += stack.getCount();
-            }
+        ItemStack destinationStack = destination.inventory.getItem(0).copy();
+        if (!destinationStack.isEmpty() && !ItemStack.isSameItemSameComponents(sourceStack, destinationStack)) {
+            return 0;
         }
 
-        long fluidAmount = 0L;
-        IFluidHandler fluidHandler = level.getCapability(
-                Capabilities.FluidHandler.BLOCK,
-                connector.getBlockPos(),
-                null
+        int destinationLimit = Math.min(
+                destination.inventory.getMaxStackSize(),
+                sourceStack.getMaxStackSize()
         );
-        if (fluidHandler == null) {
-            fluidState.add("unavailable");
-        } else {
-            for (int tank = 0; tank < fluidHandler.getTanks(); tank++) {
-                FluidStack fluidStack = fluidHandler.getFluidInTank(tank).copy();
-                fluidStacks.add(fluidStack.copy());
-                fluidState.add(tank + "|" + fluidKey(fluidStack));
-                fluidAmount += Math.max(0, fluidStack.getAmount());
-            }
+        int available = destinationStack.isEmpty() ? destinationLimit : destinationLimit - destinationStack.getCount();
+        int moved = Math.min(sourceStack.getCount(), Math.max(0, available));
+        if (moved <= 0) {
+            return 0;
         }
-        return new ConnectorTotals(itemCount, fluidAmount);
+
+        if (destinationStack.isEmpty()) {
+            destinationStack = sourceStack.copyWithCount(moved);
+        } else {
+            destinationStack.grow(moved);
+        }
+        sourceStack.shrink(moved);
+        source.inventory.setItem(0, sourceStack);
+        destination.inventory.setItem(0, destinationStack);
+        source.setChanged();
+        destination.setChanged();
+        source.notifyUpdate();
+        destination.notifyUpdate();
+        return moved;
+    }
+
+    public List<String> items() {
+        return combined(station.items(), ship.items());
+    }
+
+    public List<String> fluids() {
+        return combined(station.fluids(), ship.fluids());
+    }
+
+    public List<ItemStack> itemStacks() {
+        return combined(station.itemStacks(), ship.itemStacks());
+    }
+
+    public List<FluidStack> fluidStacks() {
+        return combined(station.fluidStacks(), ship.fluidStacks());
+    }
+
+    public int itemCount() {
+        return station.itemCount() + ship.itemCount();
+    }
+
+    public long fluidAmount() {
+        return station.fluidAmount() + ship.fluidAmount();
     }
 
     public int itemAmount(Level level, ItemStack filter, boolean stacks) {
         FilterItemStack filterStack = FilterItemStack.of(filter);
         int amount = 0;
-        for (ItemStack stack : itemStacks) {
+        for (ItemStack stack : itemStacks()) {
             if (!filterStack.test(level, stack)) {
                 continue;
             }
@@ -107,7 +128,7 @@ public record DockTransferSnapshot(
     public int fluidBuckets(Level level, ItemStack filter) {
         FilterItemStack filterStack = FilterItemStack.of(filter);
         long amount = 0L;
-        for (FluidStack fluidStack : fluidStacks) {
+        for (FluidStack fluidStack : fluidStacks()) {
             if (!filterStack.test(level, fluidStack)) {
                 continue;
             }
@@ -138,6 +159,26 @@ public record DockTransferSnapshot(
                 + stack.getComponents();
     }
 
-    private record ConnectorTotals(int itemCount, long fluidAmount) {
+    private static <T> List<T> combined(List<T> first, List<T> second) {
+        List<T> combined = new ArrayList<>(first.size() + second.size());
+        combined.addAll(first);
+        combined.addAll(second);
+        return List.copyOf(combined);
+    }
+
+    public record ConnectorContents(
+            List<String> items,
+            List<String> fluids,
+            List<ItemStack> itemStacks,
+            List<FluidStack> fluidStacks,
+            int itemCount,
+            long fluidAmount
+    ) {
+        public ConnectorContents {
+            items = List.copyOf(items);
+            fluids = List.copyOf(fluids);
+            itemStacks = itemStacks.stream().map(ItemStack::copy).toList();
+            fluidStacks = fluidStacks.stream().map(FluidStack::copy).toList();
+        }
     }
 }

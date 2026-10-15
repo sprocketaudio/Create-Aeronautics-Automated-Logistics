@@ -36,6 +36,7 @@ public class AutomatedLogisticsConfig {
     public static final ModConfigSpec.DoubleValue DOCK_RESERVATION_CLEARANCE_DISTANCE;
     public static final ModConfigSpec.BooleanValue FORCE_LOAD_STATION_CHUNKS;
     public static final ModConfigSpec.IntValue STATION_INTERACTION_CHUNK_RADIUS;
+    public static final ModConfigSpec.BooleanValue FORCE_LOAD_SIMURAIL_VEHICLES;
 
     public static final ModConfigSpec.IntValue MAX_ACTIVE_VEHICLES_PER_PLAYER;
     public static final ModConfigSpec.EnumValue<ActiveVehicleLimitMode> ACTIVE_VEHICLE_LIMIT_MODE;
@@ -51,6 +52,7 @@ public class AutomatedLogisticsConfig {
     public static final ModConfigSpec.BooleanValue REQUIRE_CROUCH_TO_BREAK_ROUTE_BLOCKS;
     public static final ModConfigSpec.BooleanValue DEBUG_LOGGING;
     public static final ModConfigSpec.BooleanValue DEBUG_PLAYBACK;
+    public static final ModConfigSpec.BooleanValue DEBUG_DRIVE_MODULES;
     public static final ModConfigSpec.BooleanValue DEBUG_VEHICLE;
     public static final ModConfigSpec.BooleanValue DEBUG_DOCKING;
     public static final ModConfigSpec.BooleanValue DEBUG_CARGO;
@@ -124,6 +126,14 @@ public class AutomatedLogisticsConfig {
                 .defineInRange("stationInteractionChunkRadius", 1, 0, 2);
         BUILDER.pop();
 
+        BUILDER.push("simurail");
+        FORCE_LOAD_SIMURAIL_VEHICLES = BUILDER
+                .comment("Keep active automated Sable vehicles, including Drive Mode ships, force-loaded for their full recorded route.")
+                .comment("The Sable loading ticket is acquired when playback starts while the vehicle is live, then released when playback stops, faults, or completes.")
+                .comment("Disable this to use normal unloaded-travel behavior instead.")
+                .define("forceLoadSimurailVehicles", true);
+        BUILDER.pop();
+
         BUILDER.push("limits");
         MAX_ACTIVE_VEHICLES_PER_PLAYER = BUILDER
                 .comment("Maximum number of simultaneously active automated vehicles in each owner or team limit bucket.")
@@ -186,6 +196,11 @@ public class AutomatedLogisticsConfig {
                 .comment("Enable playback/runtime debug logs, including unloaded-transit progress and restore.")
                 .comment("Only used when debugLogging is true.")
                 .define("playback", true);
+        DEBUG_DRIVE_MODULES = BUILDER
+                .comment("Enable Advanced Transponder and Drive Module command diagnostics.")
+                .comment("Logs module links, output changes, vehicle position, route target, and drive error values.")
+                .comment("Only used when debugLogging is true.")
+                .define("driveModules", false);
         DEBUG_VEHICLE = BUILDER
                 .comment("Enable low-level vehicle/Sable controller debug logs.")
                 .comment("Only used when debugLogging is true.")
@@ -213,6 +228,10 @@ public class AutomatedLogisticsConfig {
 
     public static boolean debugPlayback() {
         return debugLogging() && safeBoolean(DEBUG_PLAYBACK, true);
+    }
+
+    public static boolean debugDriveModules() {
+        return debugLogging() && safeBoolean(DEBUG_DRIVE_MODULES, false);
     }
 
     public static boolean debugVehicle() {
@@ -249,6 +268,10 @@ public class AutomatedLogisticsConfig {
 
     public static int stationInteractionChunkRadius() {
         return STATION_INTERACTION_CHUNK_RADIUS.get();
+    }
+
+    public static boolean forceLoadSimurailVehicles() {
+        return safeBoolean(FORCE_LOAD_SIMURAIL_VEHICLES, true);
     }
 
     public static TerminalAudience logisticsTerminalPreviewVisibility() {

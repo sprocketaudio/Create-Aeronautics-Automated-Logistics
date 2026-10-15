@@ -1638,7 +1638,7 @@ public class AirshipStationScreen extends AbstractContainerScreen<AirshipStation
     }
 
     private int statusColor(String status) {
-        if (status.equalsIgnoreCase("Cargo Check") || status.equalsIgnoreCase("Blocked") || status.equalsIgnoreCase("Route Problem")
+        if (status.equalsIgnoreCase("Error") || status.equalsIgnoreCase("Blocked") || status.equalsIgnoreCase("Route Problem")
                 || status.equalsIgnoreCase("No Route") || status.equalsIgnoreCase("Ship Missing")) {
             return 0xFFFFB4B4;
         }

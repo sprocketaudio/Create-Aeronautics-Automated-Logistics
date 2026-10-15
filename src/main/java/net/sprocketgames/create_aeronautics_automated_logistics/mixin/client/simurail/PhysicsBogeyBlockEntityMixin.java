@@ -178,8 +178,7 @@ abstract class PhysicsBogeyBlockEntityMixin {
                 optionsField = accessibleField(bogeyClass, "options");
                 Class<?> optionsClass = Class.forName("com.crystaelix.simurail.content.bogey.PhysicsBogeyOptions");
                 typeField = accessibleField(optionsClass, "type");
-                Class<?> renderedTypeClass = Class.forName("com.crystaelix.simurail.api.bogey.BogeyRenderedType");
-                wheelRadiusMethod = renderedTypeClass.getMethod("wheelRadius");
+                wheelRadiusMethod = bogeyTypeClass().getMethod("wheelRadius");
                 directionMethod = bogeyClass.getMethod("getDirection");
             } catch (ReflectiveOperationException ignored) {
                 visualSpeedField = null;
@@ -205,5 +204,17 @@ abstract class PhysicsBogeyBlockEntityMixin {
         Field field = owner.getDeclaredField(name);
         field.setAccessible(true);
         return field;
+    }
+
+    /**
+     * Simurail renamed BogeyRenderedType to BogeySubtype. Keep the optional
+     * visual bridge usable with both the prior public build and current main.
+     */
+    private static Class<?> bogeyTypeClass() throws ClassNotFoundException {
+        try {
+            return Class.forName("com.crystaelix.simurail.api.bogey.BogeySubtype");
+        } catch (ClassNotFoundException ignored) {
+            return Class.forName("com.crystaelix.simurail.api.bogey.BogeyRenderedType");
+        }
     }
 }

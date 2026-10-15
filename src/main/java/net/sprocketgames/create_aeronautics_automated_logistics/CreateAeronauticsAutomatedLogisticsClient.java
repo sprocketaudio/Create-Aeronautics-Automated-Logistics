@@ -3,6 +3,7 @@ package net.sprocketgames.create_aeronautics_automated_logistics;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
@@ -18,11 +19,10 @@ import net.createmod.ponder.foundation.PonderIndex;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.ponder.AutomatedLogisticsPonderPlugin;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.AirshipScheduleScreen;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.AirshipStationScreen;
+import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.DriveModuleScreen;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.LogisticsTerminalClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.LogisticsTerminalScreen;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.screen.ShipTransponderScreen;
-import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.AdvancedTransponderOverlayRenderer;
-import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.AdvancedTransponderOverlayClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.AutomatedShipVisualClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.DockLinkPromptClientState;
 import net.sprocketgames.create_aeronautics_automated_logistics.client.visual.CargoLinkPromptClientState;
@@ -54,11 +54,11 @@ public class CreateAeronauticsAutomatedLogisticsClient {
         event.register(ModMenus.AIRSHIP_STATION.get(), AirshipStationScreen::new);
         event.register(ModMenus.AIRSHIP_SCHEDULE.get(), AirshipScheduleScreen::new);
         event.register(ModMenus.SHIP_TRANSPONDER.get(), ShipTransponderScreen::new);
+        event.register(ModMenus.DRIVE_MODULE.get(), DriveModuleScreen::new);
         event.register(ModMenus.LOGISTICS_TERMINAL.get(), LogisticsTerminalScreen::new);
     }
 
     public static void onClientTick(ClientTickEvent.Post event) {
-        AdvancedTransponderOverlayClientState.clearIfWorldMissing();
         AutomatedShipVisualClientState.clearIfWorldMissing();
         DockLinkPromptClientState.tick();
         CargoLinkPromptClientState.tick();
@@ -66,6 +66,9 @@ public class CreateAeronauticsAutomatedLogisticsClient {
         MenuActionBarClientState.tick();
         LogisticsClientOverlays.refresh();
         ShipMapClientState.clearIfWorldMissing();
+        invokeOptionalXaeroIntegration("xaerominimap",
+                "net.sprocketgames.create_aeronautics_automated_logistics.client.map.XaeroMinimapShipMapCompat",
+                "registerIfAvailable");
         LogisticsTerminalClientState.clearIfWorldMissing();
         LogisticsTerminalPreviewClientState.clearIfWorldMissing();
     }
@@ -75,13 +78,43 @@ public class CreateAeronauticsAutomatedLogisticsClient {
     }
 
     public static void onRenderLevelStage(RenderLevelStageEvent event) {
-        AdvancedTransponderOverlayRenderer.render(event);
         LogisticsTerminalTopPreviewRenderer.render(event);
     }
 
     public static void onScreenRenderPost(ScreenEvent.Render.Post event) {
         FtbChunksShipMapCompat.renderLargeMapOverlay(event);
+        invokeOptionalXaeroIntegration("xaeroworldmap",
+                "net.sprocketgames.create_aeronautics_automated_logistics.client.map.XaeroWorldMapShipMapCompat",
+                "renderLargeMapOverlay", ScreenEvent.Render.Post.class, event);
         renderOverlayMessages(event.getGuiGraphics(), true);
+    }
+
+    /**
+     * Never directly reference a Xaero compatibility class here: the JVM would resolve its
+     * Xaero types while loading this client entrypoint, even when Xaero is not installed.
+     */
+    private static void invokeOptionalXaeroIntegration(String modId, String className, String methodName,
+                                                        Class<?>... parameterTypes) {
+        invokeOptionalXaeroIntegration(modId, className, methodName, parameterTypes, new Object[0]);
+    }
+
+    private static void invokeOptionalXaeroIntegration(String modId, String className, String methodName,
+                                                        Class<?> parameterType, Object argument) {
+        invokeOptionalXaeroIntegration(modId, className, methodName, new Class<?>[] { parameterType },
+                new Object[] { argument });
+    }
+
+    private static void invokeOptionalXaeroIntegration(String modId, String className, String methodName,
+                                                        Class<?>[] parameterTypes, Object[] arguments) {
+        if (!ModList.get().isLoaded(modId)) {
+            return;
+        }
+        try {
+            Class.forName(className).getMethod(methodName, parameterTypes).invoke(null, arguments);
+        } catch (ReflectiveOperationException exception) {
+            CreateAeronauticsAutomatedLogistics.LOGGER.warn("Could not initialise optional {} integration", modId,
+                    exception);
+        }
     }
 
     private static void renderOverlayMessages(net.minecraft.client.gui.GuiGraphics guiGraphics, boolean screenOpen) {

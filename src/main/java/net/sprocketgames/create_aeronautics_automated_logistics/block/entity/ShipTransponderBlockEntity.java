@@ -143,6 +143,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         if (level.getGameTime() % REFRESH_INTERVAL_TICKS == 0L) {
             transponder.refreshRuntimeShip(serverLevel);
             transponder.refreshShipDockLink(serverLevel);
+            transponder.pruneMissingLinkedCargo(serverLevel);
         }
     }
 
@@ -312,6 +313,7 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
         return runtimeStatus == RouteStatus.RUNNING
                 || runtimeStatus == RouteStatus.WAITING
                 || runtimeStatus == RouteStatus.DOCK_QUEUED
+                || runtimeStatus == RouteStatus.RESTORING
                 || runtimeStatus == RouteStatus.HELD
                 || runtimeStatus == RouteStatus.HELD_FAULTED;
     }
@@ -413,6 +415,28 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     public void claimDockOutput(RouteId routeId) {
         Objects.requireNonNull(routeId, "routeId");
         updateDockOutputState(true, Optional.of(routeId), "claim");
+    }
+
+    public boolean reassertDockOutput(RouteId routeId) {
+        Objects.requireNonNull(routeId, "routeId");
+        if (!dockOutputActive || dockOutputOwner.filter(routeId::equals).isEmpty()) {
+            return false;
+        }
+        syncPoweredBlockState();
+        notifyRedstoneNeighbors();
+        return true;
+    }
+
+    private void pruneMissingLinkedCargo(ServerLevel level) {
+        ensureLinkedCargoLoaded();
+        int removed = CargoLinkSupport.pruneMissingLinks(level, linkedCargo);
+        if (removed <= 0) {
+            return;
+        }
+        linkedCargoRevision++;
+        setChanged();
+        persistLinkedCargo(level);
+        syncClientState();
     }
 
     public boolean releaseDockOutput(RouteId routeId) {
@@ -596,6 +620,12 @@ public class ShipTransponderBlockEntity extends BlockEntity implements MenuProvi
     public DockDiscoveryResult refreshShipDockLink(ServerLevel level) {
         refreshRuntimeShip(level);
         DockDiscoveryResult result = validateShipDockLink(level);
+        if (shipDockPos.filter(level::isLoaded)
+                .filter(dockPos -> !DockingConnectorDiscovery.isDock(level, dockPos))
+                .isPresent()) {
+            clearShipDockLink();
+            return DockDiscoveryResult.missing();
+        }
         DockLinkStatus previousStatus = shipDockStatus;
         Optional<BlockPos> previousDockPos = shipDockPos;
         shipDockStatus = result.status() == DockLinkStatus.LINKED && result.dockPos().isEmpty()

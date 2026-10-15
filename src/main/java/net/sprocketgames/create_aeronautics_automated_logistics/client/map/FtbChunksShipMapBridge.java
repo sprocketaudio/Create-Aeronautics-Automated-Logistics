@@ -10,12 +10,11 @@ import dev.ftb.mods.ftblibrary.ui.input.Key;
 import dev.ftb.mods.ftblibrary.ui.input.MouseButton;
 import dev.ftb.mods.ftblibrary.util.TooltipList;
 import net.minecraft.ChatFormatting;
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.Vec3;
 import net.sprocketgames.create_aeronautics_automated_logistics.map.ShipMapMarker;
+import net.sprocketgames.create_aeronautics_automated_logistics.AutomatedLogisticsClientConfig;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.TransportMode;
 
 final class FtbChunksShipMapBridge {
@@ -42,6 +41,9 @@ final class FtbChunksShipMapBridge {
     }
 
     private static void addMarkers(MapIconEvent event) {
+        if (!AutomatedLogisticsClientConfig.ftbChunksIntegrationEnabled()) {
+            return;
+        }
         ShipMapClientState.markers().stream()
                 .filter(marker -> marker.dimension().equals(event.getDimension()))
                 .map(ShipIcon::new)
@@ -67,7 +69,8 @@ final class FtbChunksShipMapBridge {
 
         @Override
         public double getIconScale(MapType mapType) {
-            return mapType.isMinimap() ? 1.0D : 1.15D;
+            double baseScale = mapType.isMinimap() ? 1.0D : 1.15D;
+            return baseScale * AutomatedLogisticsClientConfig.mapMarkerIconScale();
         }
 
         @Override
@@ -105,20 +108,7 @@ final class FtbChunksShipMapBridge {
             if (label.isBlank()) {
                 return;
             }
-
-            var font = Minecraft.getInstance().font;
-            int labelWidth = font.width(label);
-            int labelX = x + (width - labelWidth) / 2;
-            int labelY = y - font.lineHeight - 2;
-            int backgroundPadding = 2;
-            graphics.fill(
-                    labelX - backgroundPadding,
-                    labelY - 1,
-                    labelX + labelWidth + backgroundPadding,
-                    labelY + font.lineHeight - 1,
-                    0x80000000
-            );
-            graphics.drawString(font, Component.literal(label), labelX, labelY, 0xFFF4D78A, false);
+            MapMarkerRenderUtil.drawLabel(graphics, label, x + width / 2, y);
         }
     }
 }

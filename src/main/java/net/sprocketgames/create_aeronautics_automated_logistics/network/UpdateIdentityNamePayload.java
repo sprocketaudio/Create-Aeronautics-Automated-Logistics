@@ -9,6 +9,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AirshipStationBlockEntity;
+import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.DriveModuleBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.ShipTransponderBlockEntity;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.StationPermissionService;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.TransponderPermissionService;
@@ -55,6 +56,13 @@ public record UpdateIdentityNamePayload(BlockPos pos, String name) implements Cu
             }
             transponder.setShipName(payload.name());
             transponder.refreshRuntimeShip(player.serverLevel());
+            return;
+        }
+        if (player.serverLevel().getBlockEntity(payload.pos()) instanceof DriveModuleBlockEntity module) {
+            if (!TransponderPermissionService.ensureCanControl(player, module.ownerId())) {
+                return;
+            }
+            module.setModuleName(payload.name());
         }
     }
 }

@@ -54,6 +54,9 @@ import java.util.Locale;
 import java.util.ArrayList;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.PlaybackFailure;
 import net.sprocketgames.create_aeronautics_automated_logistics.service.TransponderPermissionService;
+import net.sprocketgames.create_aeronautics_automated_logistics.service.LiftCalibrationService;
+import net.sprocketgames.create_aeronautics_automated_logistics.block.entity.AdvancedTransponderBlockEntity;
+import net.sprocketgames.create_aeronautics_automated_logistics.drive.LiftCalibrationState;
 
 public class ShipTransponderMenu extends AbstractContainerMenu {
     public static final int ACTION_START_INSTALLED_SCHEDULE = 0;
@@ -65,6 +68,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
     public static final int ACTION_LINK_CARGO = 6;
     public static final int ACTION_CLEAR_CARGO = 7;
     public static final int ACTION_SHOW_CARGO = 8;
+    public static final int ACTION_CALIBRATE_LIFT = 9;
     private static final int PLAYER_INVENTORY_START = 0;
     private static final int PLAYER_INVENTORY_END = 28;
     private static final int HOTBAR_START = 28;
@@ -722,6 +726,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         return initialRuntimeStatus == RouteStatus.RUNNING
                 || initialRuntimeStatus == RouteStatus.WAITING
                 || initialRuntimeStatus == RouteStatus.DOCK_QUEUED
+                || initialRuntimeStatus == RouteStatus.RESTORING
                 || initialRuntimeStatus == RouteStatus.HELD
                 || initialRuntimeStatus == RouteStatus.HELD_FAULTED;
     }
@@ -816,6 +821,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
             case ACTION_LINK_CARGO -> linkCargo(serverPlayer, transponder);
             case ACTION_CLEAR_CARGO -> clearCargo(serverPlayer, transponder);
             case ACTION_SHOW_CARGO -> true;
+            case ACTION_CALIBRATE_LIFT -> calibrateLift(serverPlayer, transponder);
             default -> false;
         };
     }
@@ -1091,6 +1097,9 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         }
         RouteStatus runtimeStatus = fallbackRuntimeStatus(player);
         if (fallbackScheduleActive(player)) {
+            if (runtimeStatus == RouteStatus.RESTORING) {
+                return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.restoring");
+            }
             if (runtimeStatus == RouteStatus.HELD) {
                 return Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.paused");
             }
@@ -1127,6 +1136,9 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         }
         RouteStatus runtimeStatus = fallbackRuntimeStatus(player);
         if (fallbackScheduleActive(player)) {
+            if (runtimeStatus == RouteStatus.RESTORING) {
+                return 0xFFE7C46E;
+            }
             if (runtimeStatus == RouteStatus.HELD) {
                 return 0xFFE7C46E;
             }
@@ -1236,6 +1248,12 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         }
         RouteStatus runtimeStatus = fallbackRuntimeStatus(player);
         if (fallbackScheduleActive(player)) {
+            if (runtimeStatus == RouteStatus.RESTORING) {
+                return List.of(
+                        Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.restoring.1").withStyle(ChatFormatting.YELLOW),
+                        Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.restoring.2").withStyle(ChatFormatting.GRAY)
+                );
+            }
             if (runtimeStatus == RouteStatus.HELD) {
                 return List.of(
                         Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.status_hover.paused.1").withStyle(ChatFormatting.YELLOW),
@@ -1479,7 +1497,7 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
             case WRONG_START_STATION -> Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.wrong_station_status");
             case COLLISION_OR_OBSTRUCTION, STUCK -> Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.blocked_status");
             case MISSING_DOCK, AMBIGUOUS_DOCK, DOCK_LOCK_FAILED -> Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.dock_problem_status");
-            case REDSTONE_LINK_UNCONFIGURED, CARGO_STORAGE_MISSING, CARGO_CONDITION_TIMEOUT, MOVEMENT_FAILURE, ALREADY_RUNNING, MAX_ACTIVE_VEHICLES_REACHED -> Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.needs_attention_status");
+            case REDSTONE_LINK_UNCONFIGURED, LIFT_CONTROL_REQUIRED, HORIZONTAL_CONTROL_REQUIRED, TURN_CONTROL_REQUIRED, CARGO_STORAGE_MISSING, CARGO_CONDITION_TIMEOUT, MOVEMENT_FAILURE, ALREADY_RUNNING, MAX_ACTIVE_VEHICLES_REACHED -> Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.needs_attention_status");
         };
     }
 
@@ -1641,6 +1659,127 @@ public class ShipTransponderMenu extends AbstractContainerMenu {
         actionBar(player, Component.translatable("message.create_aeronautics_automated_logistics.cargo_link.cleared"));
         AllSoundEvents.CONFIRM.playOnServer(player.level(), transponder.getBlockPos(), 0.6f, 1.0f);
         return true;
+    }
+
+    private boolean calibrateLift(ServerPlayer player, ShipTransponderBlockEntity transponder) {
+        if (!(transponder instanceof AdvancedTransponderBlockEntity advanced)) {
+            return false;
+        }
+        if (LiftCalibrationService.isActive(advanced.transponderId())) {
+            LiftCalibrationService.cancel(player.serverLevel(), advanced);
+            actionBar(player, Component.translatable(
+                    "message.create_aeronautics_automated_logistics.lift_calibration.cancelled"
+            ));
+            return true;
+        }
+        LiftCalibrationService.StartResult result = LiftCalibrationService.start(player.serverLevel(), advanced);
+        actionBar(player, result.message());
+        return result.started();
+    }
+
+    public boolean isAdvancedTransponder(Player player) {
+        return player.level().getBlockEntity(lookupTransponderPos(player)) instanceof AdvancedTransponderBlockEntity;
+    }
+
+    public boolean isLiftCalibrationActive(Player player) {
+        return advancedTransponder(player)
+                .map(AdvancedTransponderBlockEntity::liftCalibrationState)
+                .filter(state -> state == LiftCalibrationState.CALIBRATING)
+                .isPresent();
+    }
+
+    public boolean hasLiftCalibration(Player player) {
+        return advancedTransponder(player)
+                .flatMap(AdvancedTransponderBlockEntity::liftCalibration)
+                .isPresent();
+    }
+
+    public List<Component> liftCalibrationTooltip(Player player) {
+        Optional<AdvancedTransponderBlockEntity> advanced = advancedTransponder(player);
+        if (advanced.isEmpty()) {
+            return List.of();
+        }
+        AdvancedTransponderBlockEntity transponder = advanced.get();
+        if (transponder.liftCalibrationState() == LiftCalibrationState.CALIBRATING) {
+            String detail = transponder.liftCalibrationDetail();
+            Component phase = switch (detail) {
+                case "returning" -> Component.translatable(
+                        "gui.create_aeronautics_automated_logistics.lift_calibration.returning"
+                ).withStyle(ChatFormatting.GRAY);
+                case "relative_increase" -> Component.translatable(
+                        "gui.create_aeronautics_automated_logistics.lift_calibration.testing_increase"
+                ).withStyle(ChatFormatting.GRAY);
+                case "relative_decrease" -> Component.translatable(
+                        "gui.create_aeronautics_automated_logistics.lift_calibration.testing_decrease"
+                ).withStyle(ChatFormatting.GRAY);
+                case "relative_settling" -> Component.translatable(
+                        "gui.create_aeronautics_automated_logistics.lift_calibration.testing_settling"
+                ).withStyle(ChatFormatting.GRAY);
+                case "stopping_rotors" -> Component.translatable(
+                        "gui.create_aeronautics_automated_logistics.lift_calibration.stopping_rotors"
+                ).withStyle(ChatFormatting.GRAY);
+                default -> Component.translatable(
+                        "gui.create_aeronautics_automated_logistics.lift_calibration.testing",
+                        calibrationStrengthDetail(detail)
+                ).withStyle(ChatFormatting.GRAY);
+            };
+            return List.of(
+                    Component.translatable(
+                            "gui.create_aeronautics_automated_logistics.lift_calibration.calibrating",
+                            transponder.liftCalibrationProgress()
+                    ).withStyle(ChatFormatting.YELLOW),
+                    phase,
+                    Component.translatable(
+                            "gui.create_aeronautics_automated_logistics.lift_calibration.cancel_hint"
+                    ).withStyle(ChatFormatting.DARK_GRAY)
+            );
+        }
+        if (transponder.liftCalibrationState() == LiftCalibrationState.FAILED) {
+            return List.of(
+                    Component.translatable(
+                            "gui.create_aeronautics_automated_logistics.lift_calibration.failed"
+                    ).withStyle(ChatFormatting.RED),
+                    Component.translatable(
+                            "gui.create_aeronautics_automated_logistics.lift_calibration.failure."
+                                    + transponder.liftCalibrationDetail()
+                    ).withStyle(ChatFormatting.GRAY)
+            );
+        }
+        return transponder.liftCalibration()
+                .<List<Component>>map(profile -> List.of(
+                        Component.translatable(
+                                "gui.create_aeronautics_automated_logistics.lift_calibration.calibrated"
+                        ).withStyle(ChatFormatting.GREEN),
+                        Component.translatable(
+                                "gui.create_aeronautics_automated_logistics.lift_calibration.recalibrate_hint"
+                        ).withStyle(ChatFormatting.DARK_GRAY)
+                ))
+                .orElseGet(() -> List.of(
+                        Component.translatable(
+                                "gui.create_aeronautics_automated_logistics.lift_calibration.not_calibrated"
+                        ).withStyle(ChatFormatting.RED),
+                        Component.translatable(
+                                "gui.create_aeronautics_automated_logistics.lift_calibration.warning"
+                        ).withStyle(ChatFormatting.YELLOW),
+                        Component.translatable("gui.create_aeronautics_automated_logistics.lift_calibration.start")
+                ));
+    }
+
+    private Optional<AdvancedTransponderBlockEntity> advancedTransponder(Player player) {
+        return Optional.ofNullable(player.level().getBlockEntity(lookupTransponderPos(player)))
+                .filter(AdvancedTransponderBlockEntity.class::isInstance)
+                .map(AdvancedTransponderBlockEntity.class::cast);
+    }
+
+    private static int calibrationStrengthDetail(String detail) {
+        if (detail != null && detail.startsWith("testing_")) {
+            try {
+                return Integer.parseInt(detail.substring("testing_".length()));
+            } catch (NumberFormatException ignored) {
+                return 0;
+            }
+        }
+        return 0;
     }
 
     private void addPlayerInventorySlots(Inventory inventory, int leftX, int topY) {

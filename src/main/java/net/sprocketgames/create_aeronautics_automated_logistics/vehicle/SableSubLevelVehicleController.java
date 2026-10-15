@@ -1,5 +1,7 @@
 package net.sprocketgames.create_aeronautics_automated_logistics.vehicle;
 
+import dev.ryanhcode.sable.api.block.propeller.BlockEntityPropeller;
+import dev.ryanhcode.sable.api.block.propeller.BlockEntitySubLevelPropellerActor;
 import dev.ryanhcode.sable.api.physics.handle.RigidBodyHandle;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
@@ -10,6 +12,8 @@ import dev.ryanhcode.sable.sublevel.storage.holding.GlobalSavedSubLevelPointer;
 import dev.ryanhcode.sable.sublevel.tracking_points.SubLevelTrackingPointSavedData;
 import dev.ryanhcode.sable.sublevel.tracking_points.TrackingPoint;
 import dev.simulated_team.simulated.content.blocks.docking_connector.DockingConnectorBlockEntity;
+import java.lang.ref.WeakReference;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -27,6 +31,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
+import net.sprocketgames.create_aeronautics_automated_logistics.AutomatedLogisticsConfig;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
 import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBlocks;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.FailureReason;
@@ -50,7 +55,12 @@ public class SableSubLevelVehicleController implements VehicleController {
     private static final double TICKS_PER_SECOND = 20.0D;
     private static final int MOVEMENT_LOG_INTERVAL_TICKS = 20;
     private static final long RESOLVE_MISS_LOG_HEARTBEAT_TICKS = 1200L;
+    private static final long RESOLVE_SUCCESS_LOG_HEARTBEAT_TICKS = 1200L;
+    private static final long ROTOR_ACTOR_DISCOVERY_INTERVAL_TICKS = 20L;
     private static final Map<ServerLevel, Map<ResolveMissLogKey, Long>> RESOLVE_MISS_LOGS = new WeakHashMap<>();
+    private static final Map<ServerLevel, Map<ResolveSuccessLogKey, Long>> RESOLVE_SUCCESS_LOGS = new WeakHashMap<>();
+    private static final Map<ServerLevel, Map<UUID, Long>> MOVEMENT_LOGS = new WeakHashMap<>();
+    private static final Map<ServerSubLevel, RotorActorCache> ROTOR_ACTOR_CACHES = new WeakHashMap<>();
 
     public static final ResourceLocation TYPE = ResourceLocation.fromNamespaceAndPath(
             CreateAeronauticsAutomatedLogistics.MOD_ID,
@@ -60,7 +70,6 @@ public class SableSubLevelVehicleController implements VehicleController {
     private final ServerSubLevel subLevel;
     private final BlockPos localControllerPos;
     private final Vec3 localAnchor;
-    private int movementLogCooldown;
 
     private SableSubLevelVehicleController(ServerSubLevel subLevel, BlockPos localControllerPos, Vec3 localAnchor) {
         this.subLevel = subLevel;
@@ -71,14 +80,23 @@ public class SableSubLevelVehicleController implements VehicleController {
     public static Optional<SableSubLevelVehicleController> resolve(ServerLevel level, VehicleControllerRef controllerRef) {
         Optional<ServerSubLevel> byId = controllerRef.vehicleId().flatMap(vehicleId -> findSubLevel(level, vehicleId));
         if (byId.isPresent()) {
-            BlockPos localPos = resolveControllerLocalPos(byId.get(), controllerRef.controllerPos())
-                    .orElseGet(() -> BlockPos.containing(0, 0, 0));
-            CreateAeronauticsAutomatedLogistics.debugVehicle(
-                    "Resolved Sable controller by id {} at storedLocal={} worldAnchor={}",
-                    byId.get().getUniqueId(),
-                    localPos,
-                    byId.get().logicalPose().transformPosition(Vec3.atCenterOf(localPos))
-            );
+            Optional<BlockPos> resolvedLocalPos = resolveControllerLocalPos(byId.get(), controllerRef.controllerPos());
+            if (resolvedLocalPos.isEmpty()) {
+                // Sable can briefly expose the restored sublevel before its controller blocks are
+                // readable. Treat that as unresolved: using local origin fabricates a world
+                // position and can falsely report that a stopped ship has cleared its dock.
+                return Optional.empty();
+            }
+            BlockPos localPos = resolvedLocalPos.get();
+            if (AutomatedLogisticsConfig.debugVehicle()
+                    && shouldLogResolveSuccess(level, byId.get().getUniqueId(), localPos)) {
+                CreateAeronauticsAutomatedLogistics.debugVehicle(
+                        "Resolved Sable controller heartbeat: ship={} storedLocal={} worldAnchor={}",
+                        byId.get().getUniqueId(),
+                        localPos,
+                        byId.get().logicalPose().transformPosition(Vec3.atCenterOf(localPos))
+                );
+            }
             return Optional.of(new SableSubLevelVehicleController(byId.get(), localPos, Vec3.atCenterOf(localPos)));
         }
 
@@ -110,6 +128,114 @@ public class SableSubLevelVehicleController implements VehicleController {
             }
             levelLogs.put(key, gameTime);
             return true;
+        }
+    }
+
+    private static boolean shouldLogResolveSuccess(ServerLevel level, UUID shipId, BlockPos localControllerPos) {
+        ResolveSuccessLogKey key = new ResolveSuccessLogKey(shipId, localControllerPos.immutable());
+        long gameTime = level.getGameTime();
+        synchronized (RESOLVE_SUCCESS_LOGS) {
+            Map<ResolveSuccessLogKey, Long> levelLogs = RESOLVE_SUCCESS_LOGS.computeIfAbsent(
+                    level,
+                    ignored -> new HashMap<>()
+            );
+            Long previous = levelLogs.get(key);
+            if (previous != null && gameTime - previous < RESOLVE_SUCCESS_LOG_HEARTBEAT_TICKS) {
+                return false;
+            }
+            levelLogs.put(key, gameTime);
+            return true;
+        }
+    }
+
+    private static boolean shouldLogMovement(ServerLevel level, UUID shipId) {
+        long gameTime = level.getGameTime();
+        synchronized (MOVEMENT_LOGS) {
+            Map<UUID, Long> levelLogs = MOVEMENT_LOGS.computeIfAbsent(level, ignored -> new HashMap<>());
+            Long previous = levelLogs.get(shipId);
+            if (previous != null && gameTime - previous < MOVEMENT_LOG_INTERVAL_TICKS) {
+                return false;
+            }
+            levelLogs.put(shipId, gameTime);
+            return true;
+        }
+    }
+
+    @Override
+    public Optional<Vec3> linearVelocity() {
+        RigidBodyHandle handle = RigidBodyHandle.of(subLevel);
+        if (handle == null || !handle.isValid()) {
+            return Optional.empty();
+        }
+        Vector3dc velocity = handle.getLinearVelocity(new Vector3d());
+        return Optional.of(new Vec3(velocity.x(), velocity.y(), velocity.z()));
+    }
+
+    @Override
+    public Optional<Vec3> angularVelocity() {
+        RigidBodyHandle handle = RigidBodyHandle.of(subLevel);
+        if (handle == null || !handle.isValid()) {
+            return Optional.empty();
+        }
+        Vector3dc velocity = handle.getAngularVelocity(new Vector3d());
+        return Optional.of(new Vec3(velocity.x(), velocity.y(), velocity.z()));
+    }
+
+    @Override
+    public Optional<LiftRotorState> liftRotorState() {
+        int rotorCount = 0;
+        int activeRotorCount = 0;
+        double totalAirflow = 0.0D;
+        RotorActorCache cache = liftRotorActorCache();
+        boolean staleActor = false;
+        for (WeakReference<BlockEntitySubLevelPropellerActor> actorRef : cache.actors()) {
+            BlockEntitySubLevelPropellerActor propellerActor = actorRef.get();
+            if (propellerActor == null) {
+                staleActor = true;
+                continue;
+            }
+            BlockEntityPropeller propeller = propellerActor.getPropeller();
+            if (propeller == null) {
+                staleActor = true;
+                continue;
+            }
+            if (propeller.getBlockDirection().getAxis() != net.minecraft.core.Direction.Axis.Y) {
+                continue;
+            }
+            rotorCount++;
+            totalAirflow += Math.abs(propeller.getAirflow());
+            if (propeller.isActive()) {
+                activeRotorCount++;
+            }
+        }
+        if (staleActor) {
+            synchronized (ROTOR_ACTOR_CACHES) {
+                ROTOR_ACTOR_CACHES.remove(subLevel);
+            }
+        }
+        double averageAirflow = rotorCount == 0 ? 0.0D : totalAirflow / rotorCount;
+        return Optional.of(new LiftRotorState(rotorCount, activeRotorCount, averageAirflow));
+    }
+
+    private RotorActorCache liftRotorActorCache() {
+        long gameTime = subLevel.getLevel().getGameTime();
+        synchronized (ROTOR_ACTOR_CACHES) {
+            RotorActorCache cached = ROTOR_ACTOR_CACHES.get(subLevel);
+            if (cached != null
+                    && gameTime >= cached.discoveryTick()
+                    && gameTime - cached.discoveryTick() < ROTOR_ACTOR_DISCOVERY_INTERVAL_TICKS) {
+                return cached;
+            }
+
+            List<WeakReference<BlockEntitySubLevelPropellerActor>> actors = new ArrayList<>();
+            for (var actor : subLevel.getPlot().getBlockEntityActors()) {
+                if (actor instanceof BlockEntitySubLevelPropellerActor propellerActor) {
+                    actors.add(new WeakReference<>(propellerActor));
+                }
+            }
+            RotorActorCache refreshed = new RotorActorCache(gameTime, List.copyOf(actors));
+            ROTOR_ACTOR_CACHES.put(subLevel, refreshed);
+            return refreshed;
         }
     }
 
@@ -320,8 +446,8 @@ public class SableSubLevelVehicleController implements VehicleController {
                 desiredVelocity.z - currentVelocity.z()
         );
         Vector3d angularCorrection = computeAngularCorrection(targetRotation, currentAngularVelocity);
-        if (movementLogCooldown-- <= 0) {
-            movementLogCooldown = MOVEMENT_LOG_INTERVAL_TICKS;
+        if (AutomatedLogisticsConfig.debugVehicle()
+                && shouldLogMovement(level, subLevel.getUniqueId())) {
             CreateAeronauticsAutomatedLogistics.debugVehicle(
                     "Sable playback {} local={} distance={} desiredSpeed={} desiredVelocity={} currentVelocity=({}, {}, {}) angularVelocity=({}, {}, {}) targetRotation={} angularCorrection=({}, {}, {})",
                     subLevel.getUniqueId(),
@@ -696,6 +822,15 @@ public class SableSubLevelVehicleController implements VehicleController {
             Optional<UUID> vehicleId,
             Optional<BlockPos> controllerPos,
             String dimension
+    ) {
+    }
+
+    private record ResolveSuccessLogKey(UUID shipId, BlockPos localControllerPos) {
+    }
+
+    private record RotorActorCache(
+            long discoveryTick,
+            List<WeakReference<BlockEntitySubLevelPropellerActor>> actors
     ) {
     }
 }

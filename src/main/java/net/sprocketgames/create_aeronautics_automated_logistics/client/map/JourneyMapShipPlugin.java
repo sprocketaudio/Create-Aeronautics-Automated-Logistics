@@ -16,6 +16,7 @@ import journeymap.api.v2.common.JourneyMapPlugin;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.sprocketgames.create_aeronautics_automated_logistics.CreateAeronauticsAutomatedLogistics;
+import net.sprocketgames.create_aeronautics_automated_logistics.AutomatedLogisticsClientConfig;
 import net.sprocketgames.create_aeronautics_automated_logistics.map.ShipMapMarker;
 import net.sprocketgames.create_aeronautics_automated_logistics.route.TransportMode;
 
@@ -63,7 +64,10 @@ public final class JourneyMapShipPlugin implements IClientPlugin {
 
     private void refresh() {
         Set<UUID> currentIds = new HashSet<>();
-        for (ShipMapMarker marker : ShipMapClientState.markers()) {
+        Iterable<ShipMapMarker> markers = AutomatedLogisticsClientConfig.journeyMapIntegrationEnabled()
+                ? ShipMapClientState.markers()
+                : java.util.List.of();
+        for (ShipMapMarker marker : markers) {
             currentIds.add(marker.transponderId());
             if (marker.equals(shownMarkers.get(marker.transponderId()))) {
                 continue;
@@ -121,9 +125,10 @@ public final class JourneyMapShipPlugin implements IClientPlugin {
     }
 
     private static MapImage createIcon(TransportMode transportMode) {
+        int size = Math.round(22 * AutomatedLogisticsClientConfig.mapMarkerIconScale());
         return new MapImage(iconFor(transportMode), 56, 56)
-                .setDisplayWidth(22)
-                .setDisplayHeight(22)
+                .setDisplayWidth(size)
+                .setDisplayHeight(size)
                 .centerAnchors();
     }
 }

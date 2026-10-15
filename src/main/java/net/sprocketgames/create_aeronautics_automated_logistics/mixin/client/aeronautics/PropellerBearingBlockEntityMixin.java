@@ -18,15 +18,6 @@ abstract class PropellerBearingBlockEntityMixin {
         }
     }
 
-    @Inject(method = "getInterpolatedAngle", at = @At("HEAD"), cancellable = true)
-    private void aal$useClientVisualAngle(float partialTicks, CallbackInfoReturnable<Float> cir) {
-        BlockEntity blockEntity = (BlockEntity) (Object) this;
-        if (AutomatedShipVisualClientState.isAutomatedShipBlockEntity(blockEntity) && blockEntity.getLevel() != null) {
-            double time = blockEntity.getLevel().getGameTime() + partialTicks;
-            cir.setReturnValue((float) ((time * 24.0D) % 360.0D));
-        }
-    }
-
     @Inject(method = "activeTick", at = @At("HEAD"), cancellable = true)
     private void aal$cancelFakeWindAndPush(CallbackInfo ci) {
         if (AutomatedShipVisualClientState.isAutomatedShipBlockEntity((BlockEntity) (Object) this)) {

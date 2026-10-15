@@ -3,7 +3,6 @@ package net.sprocketgames.create_aeronautics_automated_logistics.block;
 import com.mojang.serialization.MapCodec;
 import javax.annotation.Nullable;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseEntityBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -16,14 +15,6 @@ import net.sprocketgames.create_aeronautics_automated_logistics.registry.ModBloc
 
 public class AdvancedTransponderBlock extends ShipTransponderBlock {
     public static final MapCodec<AdvancedTransponderBlock> CODEC = simpleCodec(AdvancedTransponderBlock::new);
-
-    public enum OutputPort {
-        DOCK,
-        LIFT,
-        NORTH_SOUTH,
-        EAST_WEST,
-        NONE
-    }
 
     public AdvancedTransponderBlock(BlockBehaviour.Properties properties) {
         super(properties);
@@ -56,31 +47,4 @@ public class AdvancedTransponderBlock extends ShipTransponderBlock {
         );
     }
 
-    @Override
-    protected int getSignal(BlockState state, net.minecraft.world.level.BlockGetter level, BlockPos pos, Direction direction) {
-        if (!(level.getBlockEntity(pos) instanceof AdvancedTransponderBlockEntity transponder)) {
-            return 0;
-        }
-        return transponder.outputSignal(portForFace(state, direction));
-    }
-
-    public static OutputPort portForFace(BlockState state, Direction face) {
-        if (face.getAxis().isVertical()) {
-            return OutputPort.NONE;
-        }
-        Direction front = state.getValue(FACING);
-        if (face == front) {
-            return OutputPort.DOCK;
-        }
-        if (face == front.getOpposite()) {
-            return OutputPort.LIFT;
-        }
-        if (face == front.getCounterClockWise()) {
-            return OutputPort.NORTH_SOUTH;
-        }
-        if (face == front.getClockWise()) {
-            return OutputPort.EAST_WEST;
-        }
-        return OutputPort.NONE;
-    }
 }

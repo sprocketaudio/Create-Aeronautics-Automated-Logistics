@@ -9,6 +9,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BarrelBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -43,6 +45,12 @@ public final class CargoLinkSupport {
 
     public static boolean isSupportedLinkTarget(Level level, BlockPos pos) {
         return supportedEntryAt(level, pos).isPresent();
+    }
+
+    public static int pruneMissingLinks(Level level, List<LinkedCargoEntry> entries) {
+        int previousSize = entries.size();
+        entries.removeIf(entry -> level.isLoaded(entry.pos()) && supportedEntryAt(level, entry.pos()).isEmpty());
+        return previousSize - entries.size();
     }
 
     public static List<LinkedCargoEntry> discoverLinkedGroup(Level level, BlockPos ownerOrigin, int radius, BlockPos clickedPos) {
@@ -237,6 +245,9 @@ public final class CargoLinkSupport {
                 "Shulker Boxes",
                 "Create Item Vaults",
                 "Create Fluid Tanks",
+                "Create: Connected Item Silos",
+                "Propulsion: Simulated Platinum Tanks",
+                "Create: Iron Vaults storage",
                 "Storage Drawers blocks and Drawer Controller networks",
                 "Functional Storage drawers and controller-linked storage",
                 "Sophisticated Storage blocks and controller-linked storage",
@@ -261,8 +272,10 @@ public final class CargoLinkSupport {
         }
 
         String className = blockEntity.getClass().getName();
-        if (className.equals("com.simibubi.create.content.logistics.vault.ItemVaultBlockEntity")
-                || className.equals("com.simibubi.create.content.fluids.tank.FluidTankBlockEntity")
+        if (isClassOrSuperclass(blockEntity, "com.simibubi.create.content.logistics.vault.ItemVaultBlockEntity")
+                || isClassOrSuperclass(blockEntity, "com.simibubi.create.content.fluids.tank.FluidTankBlockEntity")
+                || isClassOrSuperclass(blockEntity, "com.hlysine.create_connected.content.itemsilo.ItemSiloBlockEntity")
+                || hasBlockEntityNamespace(blockEntity, "create_iron_vaults")
                 || className.startsWith("com.jaquadro.minecraft.storagedrawers.block.tile.")
                 || className.startsWith("com.buuz135.functionalstorage.block.tile.")
                 || className.startsWith("net.p3pp3rf1y.sophisticatedstorage.block.")
@@ -293,5 +306,10 @@ public final class CargoLinkSupport {
             }
         }
         return false;
+    }
+
+    private static boolean hasBlockEntityNamespace(BlockEntity blockEntity, String namespace) {
+        ResourceLocation id = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(blockEntity.getType());
+        return id != null && namespace.equals(id.getNamespace());
     }
 }

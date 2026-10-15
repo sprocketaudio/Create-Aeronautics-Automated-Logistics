@@ -11,6 +11,8 @@ import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -80,9 +82,16 @@ final class CargoStorageRootResolver {
     }
 
     private static StorageRoot resolveCreate(BlockEntity blockEntity) {
-        String className = blockEntity.getClass().getName();
-        if (!className.equals("com.simibubi.create.content.logistics.vault.ItemVaultBlockEntity")
-                && !className.equals("com.simibubi.create.content.fluids.tank.FluidTankBlockEntity")) {
+        String kind;
+        if (isClassOrSuperclass(blockEntity, "com.hlysine.create_connected.content.itemsilo.ItemSiloBlockEntity")) {
+            kind = "create_connected_item_silo";
+        } else if (isClassOrSuperclass(blockEntity, "com.simibubi.create.content.logistics.vault.ItemVaultBlockEntity")) {
+            kind = "create_item_vault";
+        } else if (isClassOrSuperclass(blockEntity, "com.simibubi.create.content.fluids.tank.FluidTankBlockEntity")) {
+            kind = "create_fluid_tank";
+        } else if (hasBlockEntityNamespace(blockEntity, "create_iron_vaults")) {
+            kind = "create_iron_vaults_storage";
+        } else {
             return null;
         }
 
@@ -90,8 +99,21 @@ final class CargoStorageRootResolver {
         if (controllerPos == null) {
             return null;
         }
-        String kind = className.contains("vault") ? "create_item_vault" : "create_fluid_tank";
         return StorageRoot.of(kind, controllerPos, controllerPos);
+    }
+
+    private static boolean isClassOrSuperclass(BlockEntity blockEntity, String className) {
+        for (Class<?> current = blockEntity.getClass(); current != null; current = current.getSuperclass()) {
+            if (className.equals(current.getName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasBlockEntityNamespace(BlockEntity blockEntity, String namespace) {
+        ResourceLocation id = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(blockEntity.getType());
+        return id != null && namespace.equals(id.getNamespace());
     }
 
     private static StorageRoot resolveFunctionalStorage(BlockEntity blockEntity, BlockPos pos) {

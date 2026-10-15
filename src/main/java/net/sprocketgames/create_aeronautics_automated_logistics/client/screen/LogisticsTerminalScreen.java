@@ -65,8 +65,8 @@ public class LogisticsTerminalScreen extends AbstractContainerScreen<LogisticsTe
     private static final int NODE_RADIUS = 3;
     private static final int HOVER_RADIUS = 12;
     private static final int[] ROUTE_COLORS = {
-            0xFF7CC9FF, 0xFFF7BE6A, 0xFF89E0A8, 0xFFFF8F8F,
-            0xFFC6A0FF, 0xFFFFD36E, 0xFF7DE1D8, 0xFFFFA5D8
+            0xFF7CC9FF, 0xFFF29B45, 0xFF89E0A8, 0xFFFF8F8F,
+            0xFFC6A0FF, 0xFFFFE06A, 0xFF7DE1D8, 0xFFFFA5D8
     };
     private static final int MAP_BACKGROUND = 0x11000000;
     private static final int GRID_COLOR = 0x1AFFFFFF;
@@ -84,6 +84,13 @@ public class LogisticsTerminalScreen extends AbstractContainerScreen<LogisticsTe
     private static final int ROUTE_ARROW_COLOR = 0xFFF7EFE0;
     private static final double ROUTE_ARROW_SPEED_PIXELS_PER_SECOND = 28.0D;
     private static final double ROUTE_HOVER_DISTANCE = 6.0D;
+    private static final int FILTER_WIDTH = 84;
+    private static final int FILTER_HEIGHT = 12;
+    private static final int FILTER_OPTION_HEIGHT = 12;
+    private static final int FILTER_BACKGROUND = 0xD03A302E;
+    private static final int FILTER_OUTLINE = 0xFF8C7964;
+    private static final int FILTER_TEXT = 0xFFE7D6B4;
+    private static final int FILTER_SELECTED = 0xFF5C4B3F;
 
     private double zoom = 1.0D;
     private double panWorldX;
@@ -93,6 +100,8 @@ public class LogisticsTerminalScreen extends AbstractContainerScreen<LogisticsTe
     private int lastDragY;
     private Optional<UUID> pinnedStationId = Optional.empty();
     private Optional<UUID> pinnedTransponderId = Optional.empty();
+    private TerminalFilter filter = TerminalFilter.ALL;
+    private boolean filterMenuOpen;
     private HoveredEntry hoveredEntry;
     private List<Component> hoveredTooltip = List.of();
 
@@ -399,8 +408,16 @@ public class LogisticsTerminalScreen extends AbstractContainerScreen<LogisticsTe
     @Override
     protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
         guiGraphics.drawString(font, title, titleLabelX, titleLabelY, 0xFFE7D6B4, false);
+        drawFilter(guiGraphics);
         String subtitle = Component.translatable("gui.create_aeronautics_automated_logistics.logistics_terminal.zoom", String.format(Locale.ROOT, "%.0f%%", zoom * 100.0D)).getString();
-        guiGraphics.drawString(font, subtitle, imageWidth - BORDER_RIGHT - CONTENT_PADDING - font.width(subtitle), titleLabelY, 0xFF9F8F78, false);
+        guiGraphics.drawString(
+                font,
+                subtitle,
+                BORDER_LEFT + CONTENT_PADDING,
+                imageHeight - BORDER_BOTTOM - FOOTER_HEIGHT,
+                0xFF9F8F78,
+                false
+        );
         String hint = "Right-click to track";
         guiGraphics.drawString(
                 font,
@@ -410,6 +427,25 @@ public class LogisticsTerminalScreen extends AbstractContainerScreen<LogisticsTe
                 0xFF9F8F78,
                 false
         );
+    }
+
+    private void drawFilter(GuiGraphics guiGraphics) {
+        FilterRect button = filterButtonRect();
+        guiGraphics.fill(button.x(), button.y(), button.right(), button.bottom(), FILTER_BACKGROUND);
+        guiGraphics.renderOutline(button.x(), button.y(), button.width(), button.height(), FILTER_OUTLINE);
+        String label = filter.label().getString();
+        guiGraphics.drawString(font, label, button.x() + 4, button.y() + 2, FILTER_TEXT, false);
+        guiGraphics.drawString(font, "v", button.right() - 9, button.y() + 2, FILTER_TEXT, false);
+        if (!filterMenuOpen) {
+            return;
+        }
+        for (TerminalFilter option : TerminalFilter.values()) {
+            FilterRect optionRect = filterOptionRect(option);
+            guiGraphics.fill(optionRect.x(), optionRect.y(), optionRect.right(), optionRect.bottom(),
+                    option == filter ? FILTER_SELECTED : FILTER_BACKGROUND);
+            guiGraphics.renderOutline(optionRect.x(), optionRect.y(), optionRect.width(), optionRect.height(), FILTER_OUTLINE);
+            guiGraphics.drawString(font, option.label(), optionRect.x() + 4, optionRect.y() + 2, FILTER_TEXT, false);
+        }
     }
 
     @Override
@@ -423,6 +459,13 @@ public class LogisticsTerminalScreen extends AbstractContainerScreen<LogisticsTe
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && handleFilterClick(mouseX, mouseY)) {
+            return true;
+        }
+        if (filterMenuOpen) {
+            filterMenuOpen = false;
+            return true;
+        }
         if (!isPointInsideMap(mouseX, mouseY)) {
             return super.mouseClicked(mouseX, mouseY, button);
         }
@@ -488,8 +531,12 @@ public class LogisticsTerminalScreen extends AbstractContainerScreen<LogisticsTe
     }
 
     private List<RouteSegment> visibleRoutes(ResourceKey<Level> dimension) {
+        Set<UUID> visibleVehicleIds = visibleMarkers(dimension).stream()
+                .map(ShipMapMarker::transponderId)
+                .collect(java.util.stream.Collectors.toSet());
         return LogisticsTerminalClientState.routes().stream()
                 .filter(route -> route.dimension().equals(dimension))
+                .filter(route -> visibleVehicleIds.contains(route.transponderId()))
                 .sorted(Comparator.comparingLong(RouteSegment::createdEpochMillis))
                 .toList();
     }
@@ -508,7 +555,42 @@ public class LogisticsTerminalScreen extends AbstractContainerScreen<LogisticsTe
     private List<ShipMapMarker> visibleMarkers(ResourceKey<Level> dimension) {
         return ShipMapClientState.markers().stream()
                 .filter(marker -> marker.dimension().equals(dimension))
+                .filter(marker -> filter.includes(marker.state()))
                 .toList();
+    }
+
+    private boolean handleFilterClick(double mouseX, double mouseY) {
+        FilterRect button = filterButtonRect().offset(leftPos, topPos);
+        if (button.contains(mouseX, mouseY)) {
+            filterMenuOpen = !filterMenuOpen;
+            return true;
+        }
+        if (!filterMenuOpen) {
+            return false;
+        }
+        for (TerminalFilter option : TerminalFilter.values()) {
+            FilterRect optionRect = filterOptionRect(option).offset(leftPos, topPos);
+            if (optionRect.contains(mouseX, mouseY)) {
+                filter = option;
+                filterMenuOpen = false;
+                pinnedTransponderId = Optional.empty();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private FilterRect filterButtonRect() {
+        return new FilterRect(imageWidth - BORDER_RIGHT - CONTENT_PADDING - FILTER_WIDTH, titleLabelY - 2, FILTER_WIDTH, FILTER_HEIGHT);
+    }
+
+    private FilterRect filterOptionRect(TerminalFilter option) {
+        return new FilterRect(
+                filterButtonRect().x(),
+                filterButtonRect().bottom() + option.ordinal() * FILTER_OPTION_HEIGHT,
+                FILTER_WIDTH,
+                FILTER_OPTION_HEIGHT
+        );
     }
 
     private ViewState viewState(WorldBounds bounds, MapRect rect, List<AirshipStationSnapshot> stations, List<ShipMapMarker> markers) {
@@ -709,6 +791,54 @@ public class LogisticsTerminalScreen extends AbstractContainerScreen<LogisticsTe
     private enum HoverKind {
         STATION,
         MARKER
+    }
+
+    private enum TerminalFilter {
+        ALL("gui.create_aeronautics_automated_logistics.logistics_terminal.filter.all"),
+        ACTIVE("gui.create_aeronautics_automated_logistics.logistics_terminal.filter.active"),
+        ATTENTION("gui.create_aeronautics_automated_logistics.logistics_terminal.filter.attention");
+
+        private final String translationKey;
+
+        TerminalFilter(String translationKey) {
+            this.translationKey = translationKey;
+        }
+
+        private Component label() {
+            return Component.translatable(translationKey);
+        }
+
+        private boolean includes(String state) {
+            String normalized = state == null ? "" : state.toUpperCase(Locale.ROOT);
+            return switch (this) {
+                case ALL -> true;
+                case ACTIVE -> normalized.equals("ACTIVE")
+                        || normalized.equals("UNLOADED_TRANSIT")
+                        || normalized.equals("WAITING")
+                        || normalized.equals("DOCK_QUEUED")
+                        || normalized.equals("DOCKED")
+                        || normalized.equals("RESTORING");
+                case ATTENTION -> normalized.contains("PAUSED") || normalized.contains("FAULT");
+            };
+        }
+    }
+
+    private record FilterRect(int x, int y, int width, int height) {
+        private int right() {
+            return x + width;
+        }
+
+        private int bottom() {
+            return y + height;
+        }
+
+        private boolean contains(double mouseX, double mouseY) {
+            return mouseX >= x && mouseX < right() && mouseY >= y && mouseY < bottom();
+        }
+
+        private FilterRect offset(int offsetX, int offsetY) {
+            return new FilterRect(x + offsetX, y + offsetY, width, height);
+        }
     }
 
     private record WorldBounds(double minX, double maxX, double minZ, double maxZ, boolean empty) {

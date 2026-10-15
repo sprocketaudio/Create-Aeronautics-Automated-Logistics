@@ -103,10 +103,12 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     private static final int RECORD_LABEL_X = 36;
     private static final int RECORD_LABEL_Y = 66;
     private static final int RECORD_BUTTON_Y = 56;
-    private static final int FOOTER_ROUTE_BUTTON_X = 17;
-    private static final int FOOTER_DOCK_BUTTON_X = 38;
-    private static final int FOOTER_CARGO_BUTTON_X = 59;
-    private static final int FOOTER_OVERLAY_BUTTON_X = 80;
+    // Keep the footer controls left of the status field rather than letting the
+    // final button cover its left edge.
+    private static final int FOOTER_ROUTE_BUTTON_X = 5;
+    private static final int FOOTER_DOCK_BUTTON_X = 24;
+    private static final int FOOTER_CARGO_BUTTON_X = 43;
+    private static final int FOOTER_LIFT_CALIBRATION_BUTTON_X = 62;
     private static final int ROUTE_SELECTION_WIDTH = 206;
     private static final int ROUTE_SELECTION_HEIGHT = 101;
     private static final int ROUTE_SELECTION_Y = 43;
@@ -129,7 +131,6 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     private static final int DEST_DROPDOWN_Y_OFFSET = -1;
 
     private final List<ButtonTooltip> buttonTooltips = new ArrayList<>();
-    private final AdvancedTransponderUiSupport advancedUi;
     private EditBox nameBox;
     private String pendingSubmittedName;
     private IconButton playButton;
@@ -139,8 +140,8 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
     private IconButton previewButton;
     private IconButton dockPreviewButton;
     private IconButton cargoPreviewButton;
-    private IconButton overlayToggleButton;
     private IconButton scheduleEditButton;
+    private IconButton liftCalibrationButton;
     private MiniIconButton dockLinkButton;
     private MiniIconButton dockClearButton;
     private MiniIconButton cargoLinkButton;
@@ -169,7 +170,6 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
 
     public ShipTransponderScreen(ShipTransponderMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
-        this.advancedUi = new AdvancedTransponderUiSupport(menu);
         this.imageWidth = PANEL_WIDTH;
         this.imageHeight = PANEL_HEIGHT + 108;
         this.inventoryLabelY = 10000;
@@ -253,11 +253,12 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                 this::toggleCargoPreview,
                 cargoPreviewTooltip()
         );
-        overlayToggleButton = addIconButton(
-                this.leftPos + FOOTER_OVERLAY_BUTTON_X,
+        liftCalibrationButton = addIconButton(
+                this.leftPos + FOOTER_LIFT_CALIBRATION_BUTTON_X,
                 this.topPos + 154,
-                AllIcons.I_TARGET,
-                advancedUi::toggleOverlay
+                AllIcons.I_REFRESH,
+                () -> pressAction(ShipTransponderMenu.ACTION_CALIBRATE_LIFT),
+                Component.translatable("gui.create_aeronautics_automated_logistics.lift_calibration.start")
         );
         addIconButton(
                 this.leftPos + 167,
@@ -382,6 +383,7 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         syncRecordingControlState();
         syncRouteSelectionWidgetState();
         syncLinkedPreviewAndLinkState();
+        syncLiftCalibrationState(scheduleRunning);
         if (previewButton != null) {
             if (!previewButton.active) {
                 LogisticsClientOverlays.clearFlightPath();
@@ -680,9 +682,6 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                     && this.minecraft.player != null
                     && menu.hasLinkedCargo(this.minecraft.player);
         }
-        if (overlayToggleButton != null) {
-            advancedUi.syncOverlayButtonState(this.minecraft, overlayToggleButton);
-        }
         if (dockLinkButton != null) {
             dockLinkButton.visible = !recordingMode;
             dockLinkButton.active = !recordingMode;
@@ -705,6 +704,19 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
                     && this.minecraft.player != null
                     && menu.hasLinkedCargo(this.minecraft.player);
         }
+    }
+
+    private void syncLiftCalibrationState(boolean scheduleRunning) {
+        if (liftCalibrationButton == null || this.minecraft == null || this.minecraft.player == null) {
+            return;
+        }
+        boolean advanced = menu.isAdvancedTransponder(this.minecraft.player);
+        liftCalibrationButton.visible = advanced && !recordingMode;
+        liftCalibrationButton.active = advanced
+                && !recordingMode
+                && (!scheduleRunning || menu.isLiftCalibrationActive(this.minecraft.player));
+        liftCalibrationButton.green = menu.isLiftCalibrationActive(this.minecraft.player)
+                || menu.hasLiftCalibration(this.minecraft.player);
     }
 
     private void renderHeaderEditIcon(GuiGraphics guiGraphics) {
@@ -806,6 +818,16 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             );
             return;
         }
+        if (playButton != null && playButton.isHovered()) {
+            guiGraphics.renderTooltip(
+                    this.font,
+                    List.of(Component.translatable("gui.create_aeronautics_automated_logistics.ship_transponder.start_schedule")),
+                    java.util.Optional.empty(),
+                    mouseX,
+                    mouseY
+            );
+            return;
+        }
         if (previewButton != null && previewButton.isHovered()) {
             guiGraphics.renderTooltip(this.font, List.of(routePreviewButtonText()), java.util.Optional.empty(), mouseX, mouseY);
             return;
@@ -832,18 +854,29 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             );
             return;
         }
-        if (advancedUi.shouldRenderOverlayTooltip(this.minecraft, overlayToggleButton)) {
-            guiGraphics.renderTooltip(this.font, advancedUi.overlayTooltip(), java.util.Optional.empty(), mouseX, mouseY);
+        if (liftCalibrationButton != null
+                && liftCalibrationButton.visible
+                && liftCalibrationButton.isHovered()
+                && this.minecraft != null
+                && this.minecraft.player != null) {
+            guiGraphics.renderTooltip(
+                    this.font,
+                    menu.liftCalibrationTooltip(this.minecraft.player),
+                    java.util.Optional.empty(),
+                    mouseX,
+                    mouseY
+            );
             return;
         }
         for (ButtonTooltip tooltip : buttonTooltips) {
             if (tooltip.button() == recordButton
+                    || tooltip.button() == playButton
                     || tooltip.button() == previewButton
                     || tooltip.button() == dockPreviewButton
                     || tooltip.button() == cargoPreviewButton
-                    || tooltip.button() == overlayToggleButton
                     || tooltip.button() == dockClearButton
-                    || tooltip.button() == cargoClearButton) {
+                    || tooltip.button() == cargoClearButton
+                    || tooltip.button() == liftCalibrationButton) {
                 continue;
             }
             if (tooltip.button().isHovered() && !tooltip.lines().isEmpty()) {
@@ -1456,6 +1489,9 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
         }
     }
 
+    private record ButtonTooltip(IconButton button, List<Component> lines) {
+    }
+
     private final class PopupSuggestions {
         private static final int ROW_HEIGHT = 12;
         private static final int MAX_ROWS = 4;
@@ -1700,21 +1736,5 @@ public class ShipTransponderScreen extends AbstractContainerScreen<ShipTranspond
             int maxOffset = Math.max(0, this.visibleSuggestions.size() - Math.min(MAX_ROWS, this.visibleSuggestions.size()));
             this.scrollOffset = Mth.clamp(this.scrollOffset, 0, maxOffset);
         }
-    }
-
-    private static final class ClippedEditBox extends EditBox {
-        private ClippedEditBox(net.minecraft.client.gui.Font font, int x, int y, int width, int height, Component message) {
-            super(font, x, y, width, height, message);
-        }
-
-        @Override
-        public void renderWidget(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-            guiGraphics.enableScissor(getX() - 2, getY(), getX() + width + 2, getY() + height);
-            super.renderWidget(guiGraphics, mouseX, mouseY, partialTick);
-            guiGraphics.disableScissor();
-        }
-    }
-
-    private record ButtonTooltip(IconButton button, List<Component> lines) {
     }
 }
